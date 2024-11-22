@@ -1,0 +1,59 @@
+{
+  "name": "@oligami/rustc-browser-wasi_shim",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "prepare": "npm run build",
+    "fmt": "biome format --write .",
+    "lint": "biome lint src examples import-module-test",
+    "check": "biome check && tsc --noEmit"
+  },
+  "dependencies": {
+    "@bjorn3/browser_wasi_shim": "^0.3.0",
+    "@oligami/browser_wasi_shim-threads": "^0.1.0",
+    "@oligami/rustc-browser-wasi_shim": "file:",
+    "@oligami/shared-object": "0.1.1"
+  },
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "oligami <nziq53@gmail.com> (https://github.com/oligamiq)",
+  "license": "MIT OR Apache-2.0",
+  "description": "Rust compiler on web",
+  "homepage": "https://github.com/oligamiq/rubrc",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oligamiq/rubrc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/oligamiq/rubrc/issues"
+  },
+  "main": "./dist/rustc-browser-wasi_shim.es.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/rustc-browser-wasi_shim.es.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/rustc-browser-wasi_shim.cjs.js"
+      },
+      "node": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/rustc-browser-wasi_shim.cjs.js"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./dist/rustc-browser-wasi_shim.es.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "keywords": []
+}
