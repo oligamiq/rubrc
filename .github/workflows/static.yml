@@ -48,6 +48,8 @@ jobs:
           bun i
           cd page
           bun run build
+          bunx mini-coi -sw dist/mini-coi.js
+          sed -i '/<head>/a \    <script src="./mini-coi.js" scope="./"></script>' dist/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
