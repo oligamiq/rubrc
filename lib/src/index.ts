@@ -1,3 +1,2 @@
-export const hello = () => {
-  console.log("Hello, world!");
-};
+import './sysroot';
+import './get_rustc_wasm';

@@ -9,9 +9,18 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
-    "serve": "vite preview"
+    "serve": "vite preview",
+    "fmt": "biome format --write ."
   },
   "dependencies": {
+    "@bjorn3/browser_wasi_shim": "^0.3.0",
+    "@oligami/browser_wasi_shim-threads": "^0.1.0",
+    "@oligami/shared-object": "0.1.1",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-search": "^0.15.0",
+    "@xterm/xterm": "^5.5.0",
+    "install": "^0.13.0",
+    "nanotar": "^0.1.1",
     "rubrc": "file:",
     "solid-js": "^1.8.11"
   }

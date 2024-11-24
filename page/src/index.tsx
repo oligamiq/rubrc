@@ -3,7 +3,7 @@ import "./index.css";
 import { render } from "solid-js/web";
 
 import App from "./App";
-import { hello } from '../../lib/src/index';
+import { gen_ctx } from "./ctx";
 
 const root = document.getElementById("root");
 
@@ -13,7 +13,27 @@ if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
   );
 }
 
-hello();
+const ctx = gen_ctx();
 
-// biome-ignore lint/style/noNonNullAssertion: <explanation>
-render(() => <App />, root!);
+// create worker
+const worker = new Worker(new URL("./worker.ts", import.meta.url), {
+  type: "module",
+});
+
+// send message to worker
+worker.postMessage({ ctx });
+
+render(
+  () => (
+    <App
+      ctx={ctx}
+      callback={(wasi_ref) =>
+        worker.postMessage({
+          wasi_ref,
+        })
+      }
+    />
+  ),
+  // biome-ignore lint/style/noNonNullAssertion: <explanation>
+  root!,
+);

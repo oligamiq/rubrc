@@ -1,4 +1,7 @@
 {
-    "editor.tabSize": 2,
-    "prettier.enable": false
+  "editor.tabSize": 2,
+  "prettier.enable": false,
+  "cSpell.words": [
+    "rustc"
+  ]
 }
