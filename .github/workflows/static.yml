@@ -37,11 +37,14 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: 20
-      - name: build
+      - name: install bun
         run: |
           curl -fsSL https://bun.sh/install | bash
           source /home/runner/.bashrc
           echo '~/.bun/bin' >> $GITHUB_PATH
+
+      - name: Build
+        run: |
           bun i && cd page && bun run build
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
