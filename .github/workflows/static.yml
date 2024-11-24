@@ -39,8 +39,8 @@ jobs:
           node-version: 20
       - name: build
         run: |
-          npm install --save-dev @microsoft/api-extractor@latest
-          npm i && cd page && npm run build
+          curl -fsSL https://bun.sh/install | bash
+          bun i && cd page && bun run build
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
