@@ -40,6 +40,8 @@ jobs:
       - name: build
         run: |
           curl -fsSL https://bun.sh/install | bash
+          source /home/runner/.bashrc
+          echo '~/.bun/bin' >> $GITHUB_PATH
           bun i && cd page && bun run build
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
