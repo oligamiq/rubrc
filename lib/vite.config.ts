@@ -2,7 +2,7 @@
 
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
-import dts from "vite-plugin-dts";
+// import dts from "vite-plugin-dts";
 import swc from "unplugin-swc";
 
 export default defineConfig({
@@ -24,5 +24,6 @@ export default defineConfig({
     copyPublicDir: false,
   },
   //   plugins: [dts({ rollupTypes: true })],
-  plugins: [swc.vite(), swc.rollup(), dts({ rollupTypes: true })],
+  // plugins: [swc.vite(), swc.rollup(), dts({ rollupTypes: true })],
+  plugins: [swc.vite(), swc.rollup()],
 });
