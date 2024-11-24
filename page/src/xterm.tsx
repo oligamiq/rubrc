@@ -47,7 +47,10 @@ const get_ref = (term, callback) => {
       this.term = term;
     }
     fd_write(data: Uint8Array) /*: {ret: number, nwritten: number}*/ {
-      this.term.write(new TextDecoder().decode(data));
+      const decoded = new TextDecoder().decode(data);
+      // \n to \r\n
+      const fixed = decoded.replace(/\n/g, "\r\n");
+      this.term.write(fixed);
       return { ret: 0, nwritten: data.byteLength };
     }
   }

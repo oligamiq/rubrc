@@ -5,10 +5,11 @@ import type { Ctx } from './ctx';
 let terminal: (string) => void;
 let rustc_worker: Worker;
 let ctx: Ctx;
+import RustcWorker from './rustc?worker';
 
 globalThis.addEventListener('message', async (event) => {
   if (event.data.ctx) {
-    rustc_worker = new Worker("./rustc.ts", { type: "module" });
+    rustc_worker = new RustcWorker();
     ctx = event.data.ctx;
     rustc_worker.postMessage({ ctx });
 

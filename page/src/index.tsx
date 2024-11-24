@@ -4,6 +4,8 @@ import { render } from "solid-js/web";
 
 import App from "./App";
 import { gen_ctx } from "./ctx";
+import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
+import MainWorker from "./worker?worker";
 
 const root = document.getElementById("root");
 
@@ -16,9 +18,23 @@ if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
 const ctx = gen_ctx();
 
 // create worker
-const worker = new Worker(new URL("./worker.ts", import.meta.url), {
-  type: "module",
-});
+const worker = new MainWorker();
+
+const waiter = new SharedObject(
+  {
+    rustc: () => {
+      const rustc = new SharedObjectRef(ctx.rustc_id).proxy<
+        (...string) => void
+      >();
+      const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
+        (string) => void
+      >();
+      terminal("rustc -h\r\n");
+      rustc("-h");
+    },
+  },
+  ctx.waiter_id,
+);
 
 // send message to worker
 worker.postMessage({ ctx });

@@ -3,17 +3,25 @@ import { get_rustc_wasm } from "../../lib/src/get_rustc_wasm";
 import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
 
+import thread_spawn_path from './thread_spawn.ts?worker&url'
+
 let terminal: (string) => void;
 let compiler: WebAssembly.Module;
 const wasi_refs = [];
 let ctx: Ctx;
 let rustc_shared: SharedObject;
+let waiter: {
+  rustc: () => void
+};
 
 globalThis.addEventListener('message', async (event) => {
   if (event.data.ctx) {
     ctx = event.data.ctx;
     terminal = new SharedObjectRef(ctx.terminal_id).proxy<(string) => void>();
     terminal("loading rustc\r\n");
+    waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
+      rustc: () => void
+    }>();
     compiler = await get_rustc_wasm();
   } else if (event.data.wasi_ref) {
     const { wasi_ref } = event.data;
@@ -40,9 +48,8 @@ globalThis.addEventListener('message', async (event) => {
       {
         // debug: true,
         can_thread_spawn: true,
-        thread_spawn_worker_url: new URL("./thread_spawn.ts", import.meta.url)
+        thread_spawn_worker_url: new URL(thread_spawn_path, import.meta.url)
           .href,
-        // thread_spawn_worker_url: "./thread_spawn.ts",
         thread_spawn_wasm: compiler,
       },
     );
@@ -56,6 +63,8 @@ globalThis.addEventListener('message', async (event) => {
       wasi.block_start_on_thread();
       console.log("wasi.start done");
     }, ctx.rustc_id);
+
+    waiter.rustc();
   } else if (event.data.wasi_ref_ui) {
     wasi_refs.push(event.data.wasi_ref_ui);
   }
