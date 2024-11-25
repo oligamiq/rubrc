@@ -8,6 +8,7 @@ export type Ctx = {
   exec_file_id: string;
   download_id: string;
   download_by_url_id: string;
+  load_additional_sysroot_id: string;
 };
 
 const gen_id = () => Math.random().toString(36).substring(7);
@@ -23,5 +24,6 @@ export const gen_ctx = (): Ctx => {
     exec_file_id: gen_id(),
     download_id: gen_id(),
     download_by_url_id: gen_id(),
+    load_additional_sysroot_id: gen_id(),
   };
 };

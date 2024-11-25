@@ -7,6 +7,7 @@ import { default_value, rust_file } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
 import { Select } from "@thisbeyond/solid-select";
+import { SharedObjectRef } from "@oligami/shared-object";
 
 const App = (props: {
   ctx: Ctx;
@@ -19,6 +20,7 @@ const App = (props: {
     // Handle editor value change
     rust_file.data = new TextEncoder().encode(value);
   };
+  let load_additional_sysroot: (string) => void;
 
   return (
     <>
@@ -35,8 +37,20 @@ const App = (props: {
         <div class="p-4 text-white">
           <RunButton />
         </div>
-        <div class="p-4 text-white">
-          <Select options={triples} class="text-4xl text-green-700" />
+        <div class="p-4 text-white" style={{ width: "60vw" }}>
+          <Select
+            options={triples}
+            class="text-4xl text-green-700"
+            onChange={(value) => {
+              console.log(value);
+              if (load_additional_sysroot === undefined) {
+                load_additional_sysroot = new SharedObjectRef(
+                  props.ctx.load_additional_sysroot_id,
+                ).proxy<(string) => void>();
+              }
+              load_additional_sysroot(value);
+            }}
+          />
         </div>
         <div class="p-4 text-white">
           <DownloadButton />
