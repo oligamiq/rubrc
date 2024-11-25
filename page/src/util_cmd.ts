@@ -18,10 +18,15 @@ globalThis.addEventListener("message", async (event) => {
     ctx: Ctx;
   } = event.data;
 
-  const terminal = new SharedObjectRef(ctx.terminal_id).proxy<(string) => void>();
-  const waiter = new SharedObjectRef(ctx.waiter_id).proxy<{set_end_of_exec: (
-    _end_of_exec: boolean,
-  ) => void}>();
+  const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
+    (string) => void
+  >();
+  const waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
+    set_end_of_exec: (_end_of_exec: boolean) => void;
+  }>();
+  const download_by_url = new SharedObjectRef(ctx.download_by_url_id).proxy<
+    (url: string, name: string) => void
+  >();
 
   const ls_wasm = await WebAssembly.compile(
     await (await fetch(lsr)).arrayBuffer(),
@@ -100,18 +105,40 @@ globalThis.addEventListener("message", async (event) => {
       (async (args: string[]) => {
         const exec_file = args[0];
         const exec_args = args.slice(1);
-        const file = get_data(exec_file, animal);
-        const compiled_wasm = await WebAssembly.compile(file);
-        const inst = (await WebAssembly.instantiate(compiled_wasm, {
-          wasi_snapshot_preview1: animal.wasiImport,
-        })) as unknown as {
-          exports: { memory: WebAssembly.Memory; _start: () => unknown };
-        };
-        animal.args = [exec_file, ...exec_args];
-        // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-        animal.start(inst as any);
+        try {
+          const file = get_data(exec_file, animal);
+          const compiled_wasm = await WebAssembly.compile(file);
+          const inst = (await WebAssembly.instantiate(compiled_wasm, {
+            wasi_snapshot_preview1: animal.wasiImport,
+          })) as unknown as {
+            exports: { memory: WebAssembly.Memory; _start: () => unknown };
+          };
+          animal.args = [exec_file, ...exec_args];
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+          animal.start(inst as any);
+        } catch (e) {
+          terminal(`Error: ${e}\r\n`);
+        }
         waiter.set_end_of_exec(true);
       })(args);
     }, ctx.exec_file_id),
+  );
+
+  shared.push(
+    new SharedObject((file) => {
+      (async (file) => {
+        console.log("exec_file", file);
+        try {
+          const file_data = get_data(file, animal);
+          const blob = new Blob([file_data]);
+          const url = URL.createObjectURL(blob);
+          await download_by_url(url, file.split("/").pop());
+          URL.revokeObjectURL(url);
+        } catch (e) {
+          terminal(`Error: ${e}\r\n`);
+        }
+        waiter.set_end_of_exec(true);
+      })(file);
+    }, ctx.download_id),
   );
 });

@@ -4,11 +4,11 @@ import { render } from "solid-js/web";
 
 import App from "./App";
 import { gen_ctx } from "./ctx";
-import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import MainWorker from "./worker?worker";
 import { parser_setup } from "./cmd_parser";
 import "./monaco_worker";
 import { compile_and_run_setup } from "./compile_and_run";
+import "@thisbeyond/solid-select/style.css";
 
 const root = document.getElementById("root");
 

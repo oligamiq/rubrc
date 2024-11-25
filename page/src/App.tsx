@@ -4,7 +4,9 @@ import type { WASIFarmRef } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
 import { MonacoEditor } from "solid-monaco";
 import { default_value, rust_file } from "./config";
-import { Button } from "./btn";
+import { DownloadButton, RunButton } from "./btn";
+import { triples } from "./sysroot";
+import { Select } from "@thisbeyond/solid-select";
 
 const App = (props: {
   ctx: Ctx;
@@ -27,9 +29,19 @@ const App = (props: {
         onMount={handleMount}
         onChange={handleEditorChange}
       />
-      {/* <p class="text-4xl text-green-700 text-center py-20">Hello tailwind!</p> */}
+      {/* <p class="text-4xl text-green-700 text-center">Hello tailwind!</p> */}
       <SetupMyTerminal ctx={props.ctx} callback={props.callback} />
-      <Button />
+      <div class="flex">
+        <div class="p-4 text-white">
+          <RunButton />
+        </div>
+        <div class="p-4 text-white">
+          <Select options={triples} class="text-4xl text-green-700" />
+        </div>
+        <div class="p-4 text-white">
+          <DownloadButton />
+        </div>
+      </div>
     </>
   );
 };

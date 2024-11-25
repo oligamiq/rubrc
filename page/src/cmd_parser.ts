@@ -26,11 +26,9 @@ export const parser_setup = async (ctx: Ctx) => {
       is_cmd_run_end: () => {
         return is_cmd_run_end;
       },
-      set_end_of_exec: (
-        _end_of_exec: boolean,
-      ) => {
+      set_end_of_exec: (_end_of_exec: boolean) => {
         end_of_exec = _end_of_exec;
-      }
+      },
     },
     ctx.waiter_id,
   );
@@ -51,7 +49,12 @@ const all_done = async (ctx: Ctx) => {
   >();
   const ls = new SharedObjectRef(ctx.ls_id).proxy<(...string) => void>();
   const tree = new SharedObjectRef(ctx.tree_id).proxy<(...string) => void>();
-  const exec_file = new SharedObjectRef(ctx.exec_file_id).proxy<(...string) => void>();
+  const exec_file = new SharedObjectRef(ctx.exec_file_id).proxy<
+    (...string) => void
+  >();
+  const download = new SharedObjectRef(ctx.download_id).proxy<
+    (string) => void
+  >();
 
   cmd_parser = new SharedObject((...args) => {
     is_cmd_run_end = false;
@@ -77,6 +80,18 @@ const all_done = async (ctx: Ctx) => {
         console.log("tree");
         await terminal("executing tree...\r\n");
         await tree(...args.slice(1));
+      } else if (cmd === "download") {
+        console.log("download: ", args[1]);
+        if (args[1].includes("/")) {
+          await terminal("executing download...\r\n");
+          end_of_exec = false;
+          await download(args[1]);
+          while (!end_of_exec) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 100));
+          }
+        } else {
+          await terminal("download require absolute path\r\n");
+        }
       } else if (cmd.includes("/")) {
         console.log("cmd includes /");
         await terminal("executing file...\r\n");
@@ -95,4 +110,5 @@ const all_done = async (ctx: Ctx) => {
 
   await terminal("rustc -h\r\n");
   await rustc("-h");
+  await terminal(">");
 };

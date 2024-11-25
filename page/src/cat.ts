@@ -1,7 +1,10 @@
 import type { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import { wasi } from "@bjorn3/browser_wasi_shim";
 
-export const get_data = (path__: string, _animal: WASIFarmAnimal): Uint8Array => {
+export const get_data = (
+  path__: string,
+  _animal: WASIFarmAnimal,
+): Uint8Array => {
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   const animal = _animal as any;
 
@@ -135,4 +138,4 @@ export const get_data = (path__: string, _animal: WASIFarmAnimal): Uint8Array =>
   animal.wasi_farm_refs[wasi_farm_ref_n].fd_close(opened_fd);
 
   return file_data;
-}
+};
