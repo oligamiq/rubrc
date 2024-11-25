@@ -66,9 +66,14 @@ globalThis.addEventListener("message", async (event) => {
     wasi.get_share_memory().grow(200);
 
     rustc_shared = new SharedObject((...args) => {
-      wasi.args = ["rustc", ...args];
-      wasi.block_start_on_thread();
-      console.log("wasi.start done");
+      try {
+        wasi.args = ["rustc", ...args];
+        console.log("wasi.start");
+        wasi.block_start_on_thread();
+        console.log("wasi.start done");
+      } catch (e) {
+        terminal(e.toString());
+      }
     }, ctx.rustc_id);
 
     waiter.rustc();

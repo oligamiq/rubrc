@@ -1,4 +1,4 @@
-import type { Component } from "solid-js";
+import { createSignal, type Component } from "solid-js";
 import { SetupMyTerminal } from "./xterm";
 import type { WASIFarmRef } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
@@ -22,6 +22,8 @@ const App = (props: {
   };
   let load_additional_sysroot: (string) => void;
 
+  const [triple, setTriple] = createSignal("wasm32-wasip1");
+
   return (
     <>
       <MonacoEditor
@@ -35,7 +37,7 @@ const App = (props: {
       <SetupMyTerminal ctx={props.ctx} callback={props.callback} />
       <div class="flex">
         <div class="p-4 text-white">
-          <RunButton />
+          <RunButton triple={triple()} />
         </div>
         <div class="p-4 text-white" style={{ width: "60vw" }}>
           <Select
@@ -43,6 +45,7 @@ const App = (props: {
             class="text-4xl text-green-700"
             onChange={(value) => {
               console.log(value);
+              setTriple(value);
               if (load_additional_sysroot === undefined) {
                 load_additional_sysroot = new SharedObjectRef(
                   props.ctx.load_additional_sysroot_id,

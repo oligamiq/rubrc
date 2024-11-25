@@ -35,7 +35,9 @@ export const compile_and_run_setup = (_ctx: Ctx) => {
 
 let can_setup = false;
 
-export const compile_and_run = async () => {
+export const compile_and_run = async (
+  triple: string,
+) => {
   if (!can_setup) {
     if (await waiter.is_all_done()) {
       terminal = new SharedObjectRef(ctx.terminal_id).proxy<(string) => void>();
@@ -58,11 +60,33 @@ export const compile_and_run = async () => {
       "--sysroot",
       "/sysroot",
       "--target",
-      "wasm32-wasip1",
+      triple,
       "--out-dir",
       "/tmp",
       "-Ccodegen-units=1",
     ];
+    if (triple === "wasm32-wasip1") {
+      exec.push("-Clinker-flavor=wasm-ld");
+      exec.push("-Clinker=wasm-ld");
+    } else {
+      exec.push("-Zunstable-options");
+      exec.push("-Clinker-flavor=gnu");
+      exec.push("-Clinker=lld");
+    }
+    // const exec = [
+    //   "rustc",
+    //   "/main.rs",
+    //   "--sysroot",
+    //   "/sysroot",
+    //   "--target",
+    //   "x86_64-unknown-linux-musl",
+    //   "--out-dir",
+    //   "/linux",
+    //   "-Zunstable-options",
+    //   "-Clinker-flavor=gnu",
+    //   "-Clinker=lld",
+    //   "-Ccodegen-units=1",
+    // ];
     await terminal(`${exec.join(" ")}\r\n`);
     await cmd_parser(...exec);
     while (!(await waiter.is_cmd_run_end())) {

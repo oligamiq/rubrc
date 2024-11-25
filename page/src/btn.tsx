@@ -1,12 +1,14 @@
 import { compile_and_run, download } from "./compile_and_run";
 
-export const RunButton = () => {
+export const RunButton = (props: {
+  triple: string;
+}) => {
   return (
     <button
       type="button"
       onClick={() => {
         console.log("run button clicked");
-        compile_and_run();
+        compile_and_run(props.triple);
       }}
       class="text-2xl text-green-700"
     >
