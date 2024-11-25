@@ -1,13 +1,13 @@
 import { SharedObjectRef } from "@oligami/shared-object";
 import { get_default_sysroot_wasi_farm } from "../../lib/src/sysroot";
-import type { Ctx } from './ctx';
+import type { Ctx } from "./ctx";
 
 let terminal: (string) => void;
 let rustc_worker: Worker;
 let ctx: Ctx;
-import RustcWorker from './rustc?worker';
+import RustcWorker from "./rustc?worker";
 
-globalThis.addEventListener('message', async (event) => {
+globalThis.addEventListener("message", async (event) => {
   if (event.data.ctx) {
     rustc_worker = new RustcWorker();
     ctx = event.data.ctx;
@@ -15,11 +15,11 @@ globalThis.addEventListener('message', async (event) => {
 
     terminal = new SharedObjectRef(ctx.terminal_id).proxy<(string) => void>();
 
-    terminal("loading sysroot\r\n");
+    await terminal("loading sysroot\r\n");
 
     const farm = await get_default_sysroot_wasi_farm();
 
-    terminal("loaded sysroot\r\n");
+    await terminal("loaded sysroot\r\n");
 
     const wasi_ref = farm.get_ref();
 
@@ -29,4 +29,4 @@ globalThis.addEventListener('message', async (event) => {
 
     rustc_worker.postMessage({ wasi_ref_ui: wasi_ref });
   }
-})
+});

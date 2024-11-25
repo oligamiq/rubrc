@@ -6,6 +6,8 @@ import App from "./App";
 import { gen_ctx } from "./ctx";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import MainWorker from "./worker?worker";
+import { parser_setup } from "./cmd_parser";
+import "./monaco_worker";
 
 const root = document.getElementById("root");
 
@@ -20,21 +22,7 @@ const ctx = gen_ctx();
 // create worker
 const worker = new MainWorker();
 
-const waiter = new SharedObject(
-  {
-    rustc: () => {
-      const rustc = new SharedObjectRef(ctx.rustc_id).proxy<
-        (...string) => void
-      >();
-      const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
-        (string) => void
-      >();
-      terminal("rustc -h\r\n");
-      rustc("-h");
-    },
-  },
-  ctx.waiter_id,
-);
+parser_setup(ctx);
 
 // send message to worker
 worker.postMessage({ ctx });

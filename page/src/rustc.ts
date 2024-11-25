@@ -3,7 +3,8 @@ import { get_rustc_wasm } from "../../lib/src/get_rustc_wasm";
 import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
 
-import thread_spawn_path from './thread_spawn.ts?worker&url'
+import thread_spawn_path from "./thread_spawn.ts?worker&url";
+import util_cmd_worker from "./util_cmd.ts?worker";
 
 let terminal: (string) => void;
 let compiler: WebAssembly.Module;
@@ -11,16 +12,16 @@ const wasi_refs = [];
 let ctx: Ctx;
 let rustc_shared: SharedObject;
 let waiter: {
-  rustc: () => void
+  rustc: () => void;
 };
 
-globalThis.addEventListener('message', async (event) => {
+globalThis.addEventListener("message", async (event) => {
   if (event.data.ctx) {
     ctx = event.data.ctx;
     terminal = new SharedObjectRef(ctx.terminal_id).proxy<(string) => void>();
-    terminal("loading rustc\r\n");
+    await terminal("loading rustc\r\n");
     waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
-      rustc: () => void
+      rustc: () => void;
     }>();
     compiler = await get_rustc_wasm();
   } else if (event.data.wasi_ref) {
@@ -33,13 +34,19 @@ globalThis.addEventListener('message', async (event) => {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
-    terminal("loaded rustc\r\n");
+    await terminal("loaded rustc\r\n");
 
     while (wasi_refs.length === 1) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
-    terminal("loaded wasi\r\n");
+    await terminal("loaded wasi\r\n");
+
+    const util_worker = new util_cmd_worker();
+    util_worker.postMessage({
+      wasi_refs,
+      ctx,
+    });
 
     const wasi = new WASIFarmAnimal(
       wasi_refs,
