@@ -44,15 +44,15 @@ const toMap = (arr: Array<[string, Inode]>) => {
 };
 
 export const load_default_sysroot = async (): Promise<PreopenDirectory> => {
-  const sysroot_part = await load_sysroot_part('wasm32-wasip1-threads');
+  const sysroot_part = await load_sysroot_part('wasm32-wasip1');
   const sysroot = new PreopenDirectory(
     "/sysroot",
     toMap([
       ["lib", new Directory([
         ["rustlib", new Directory([
-          ["wasm32-wasip1-threads", new Directory([
+          ["wasm32-wasip1", new Directory([
             ["lib", sysroot_part]
-          ])]
+          ])],
         ])]
       ])]
     ])

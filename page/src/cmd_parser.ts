@@ -1,8 +1,11 @@
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import type { Ctx } from "./ctx";
+import { get_data } from "./cat";
 
 let waiter: SharedObject;
 let is_all_done = false;
+let is_cmd_run_end = true;
+let end_of_exec = false;
 
 export const parser_setup = async (ctx: Ctx) => {
   const n = 1;
@@ -20,6 +23,14 @@ export const parser_setup = async (ctx: Ctx) => {
       is_all_done: (): boolean => {
         return is_all_done;
       },
+      is_cmd_run_end: () => {
+        return is_cmd_run_end;
+      },
+      set_end_of_exec: (
+        _end_of_exec: boolean,
+      ) => {
+        end_of_exec = _end_of_exec;
+      }
     },
     ctx.waiter_id,
   );
@@ -40,8 +51,10 @@ const all_done = async (ctx: Ctx) => {
   >();
   const ls = new SharedObjectRef(ctx.ls_id).proxy<(...string) => void>();
   const tree = new SharedObjectRef(ctx.tree_id).proxy<(...string) => void>();
+  const exec_file = new SharedObjectRef(ctx.exec_file_id).proxy<(...string) => void>();
 
   cmd_parser = new SharedObject((...args) => {
+    is_cmd_run_end = false;
     (async (args: string[]) => {
       console.log(args);
 
@@ -64,10 +77,19 @@ const all_done = async (ctx: Ctx) => {
         console.log("tree");
         await terminal("executing tree...\r\n");
         await tree(...args.slice(1));
+      } else if (cmd.includes("/")) {
+        console.log("cmd includes /");
+        await terminal("executing file...\r\n");
+        end_of_exec = false;
+        await exec_file(...args);
+        while (!end_of_exec) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        }
       } else {
         await terminal(`command not found: ${cmd}\r\n`);
       }
       await terminal(">");
+      is_cmd_run_end = true;
     })(args);
   }, ctx.cmd_parser_id);
 

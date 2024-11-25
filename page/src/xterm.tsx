@@ -11,11 +11,7 @@ import {
   File,
 } from "@bjorn3/browser_wasi_shim";
 import type { Ctx } from "./ctx";
-import { default_value } from "./config";
-
-export const rust_file: File = new File(
-  new TextEncoder().encode(default_value),
-);
+import { rust_file } from "./config";
 
 let shared_xterm: SharedObject;
 

@@ -1,8 +1,9 @@
-import { SharedObject } from "@oligami/shared-object";
+import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
 import lsr from "./wasm/lsr.wasm?url";
 import tre from "./wasm/tre.wasm?url";
+import { get_data } from "./cat";
 
 const shared: SharedObject[] = [];
 
@@ -16,6 +17,11 @@ globalThis.addEventListener("message", async (event) => {
     wasi_refs: any[];
     ctx: Ctx;
   } = event.data;
+
+  const terminal = new SharedObjectRef(ctx.terminal_id).proxy<(string) => void>();
+  const waiter = new SharedObjectRef(ctx.waiter_id).proxy<{set_end_of_exec: (
+    _end_of_exec: boolean,
+  ) => void}>();
 
   const ls_wasm = await WebAssembly.compile(
     await (await fetch(lsr)).arrayBuffer(),
@@ -82,4 +88,30 @@ globalThis.addEventListener("message", async (event) => {
   console.log("lsr_inst", ls_inst);
 
   console.log("lsr and tre loaded");
+
+  const animal = new WASIFarmAnimal(
+    wasi_refs,
+    [], // args
+    [], // env
+  );
+
+  shared.push(
+    new SharedObject((...args) => {
+      (async (args: string[]) => {
+        const exec_file = args[0];
+        const exec_args = args.slice(1);
+        const file = get_data(exec_file, animal);
+        const compiled_wasm = await WebAssembly.compile(file);
+        const inst = (await WebAssembly.instantiate(compiled_wasm, {
+          wasi_snapshot_preview1: animal.wasiImport,
+        })) as unknown as {
+          exports: { memory: WebAssembly.Memory; _start: () => unknown };
+        };
+        animal.args = [exec_file, ...exec_args];
+        // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        animal.start(inst as any);
+        waiter.set_end_of_exec(true);
+      })(args);
+    }, ctx.exec_file_id),
+  );
 });

@@ -8,6 +8,7 @@ import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import MainWorker from "./worker?worker";
 import { parser_setup } from "./cmd_parser";
 import "./monaco_worker";
+import { compile_and_run_setup } from "./compile_and_run";
 
 const root = document.getElementById("root");
 
@@ -23,6 +24,7 @@ const ctx = gen_ctx();
 const worker = new MainWorker();
 
 parser_setup(ctx);
+compile_and_run_setup(ctx);
 
 // send message to worker
 worker.postMessage({ ctx });
