@@ -5,6 +5,8 @@ It is a port of the rustc compiler to WebAssembly. It is a work in progress and 
 
 This have some bottlenecks, like the lack of thread spawn is very slow.
 
+Demo: [Rubrc](https://oligamiq.github.io/rubrc/)
+
 # Special Thanks
 ## Projects
 - [rubri](https://github.com/LyonSyonII/rubri) by [LyonSyonII](https://github.com/LyonSyonII) - At first, I was using this project to run it on the browser.
