@@ -22,6 +22,7 @@ Demo: [Rubrc](https://oligamiq.github.io/rubrc/)
 
 ## Related Page
 - https://github.com/rust-lang/miri/issues/722#issuecomment-1960849880
+- https://discourse.llvm.org/t/rfc-building-llvm-for-webassembly/79073/27
 
 # Issues
 This has been created in a rather haphazard manner, but as the creator, I will be busy for a while, so it’s been left in this state for now. There are numerous bugs, such as commands throwing errors and subsequently becoming unusable, but feel free to open issues if necessary. Minor pull requests to improve usability are also welcome, so feel free to tweak it as you like.
