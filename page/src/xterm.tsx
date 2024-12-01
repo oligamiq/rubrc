@@ -103,6 +103,15 @@ export const SetupMyTerminal = (props: {
       event.domEvent.code === "Tab"
     ) {
       terminal.write(event.key);
+    } else if (
+      // Ctrl + V
+      event.domEvent.ctrlKey &&
+      event.domEvent.code === "KeyV"
+    ) {
+      navigator.clipboard.readText().then((text) => {
+        keys += text;
+        terminal.write(text);
+      });
     } else {
       keys += event.key;
       terminal.write(event.key);
