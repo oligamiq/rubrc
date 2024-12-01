@@ -124,7 +124,8 @@ const all_done = async (ctx: Ctx) => {
           await new Promise<void>((resolve) => setTimeout(resolve, 100));
         }
       } else {
-        await terminal(`command not found: ${cmd}\r\n`);
+        const cmd_list = ["rustc", "clang", "llvm", "echo", "ls", "tree", "download", ...llvm_tools];
+        await terminal(`command not found: ${cmd}\r\navailable commands: ${cmd_list.join(", ")}\r\n`);
       }
       await terminal(">");
       is_cmd_run_end = true;
