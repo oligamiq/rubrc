@@ -32,6 +32,7 @@ This has been created in a rather haphazard manner, but as the creator, I will b
 # Features
 ! This project require coop coep headers to work, so you need to run it on a server or use a browser extension to allow it.
 - [x] Run rustc on the browser
+- [x] Ctrl+V 
 
 # Funding
 The projects that this project depends on, namely [browser_wasi_shim-threads](https://www.npmjs.com/package/@oligami/browser_wasi_shim-threads), [rust_wasm](https://github.com/oligamiq/rust_wasm), and [shared-object](https://www.npmjs.com/package/@oligami/shared-object), are all my projects. The [toolchain-for-building-rustc](https://github.com/oligamiq/toolchain-for-building-rustc) that rust_wasm depends on is also my project. I was the one who enabled the LLVM backend for rustc, and ultimately, I aim to make rustc executable in browsers that support wasm and allow cargo to run seamlessly on the web.
