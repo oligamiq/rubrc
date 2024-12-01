@@ -5,6 +5,8 @@ It is a port of the rustc compiler to WebAssembly. It is a work in progress and 
 
 This have some bottlenecks, like the lack of thread spawn is very slow.
 
+Currently, the targets for which executable files can be generated are `wasm32-wasip1` and `x86_64-unknown-linux-musl`. Other targets fail during the linking process. If you have any information, we would greatly appreciate it if you could share it in an issue.
+
 Demo: [Rubrc](https://oligamiq.github.io/rubrc/)
 
 # Special Thanks
