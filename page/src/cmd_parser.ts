@@ -43,17 +43,26 @@ export const parser_setup = async (ctx: Ctx) => {
 let cmd_parser: SharedObject;
 
 const all_done = async (ctx: Ctx) => {
-  const rustc = new SharedObjectRef(ctx.rustc_id).proxy<(...string) => void>();
-  const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
-    (string) => void
+  const rustc = new SharedObjectRef(ctx.rustc_id).proxy<
+    (...string) => Promise<void>
   >();
-  const ls = new SharedObjectRef(ctx.ls_id).proxy<(...string) => void>();
-  const tree = new SharedObjectRef(ctx.tree_id).proxy<(...string) => void>();
+  const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
+    (string) => Promise<void>
+  >();
+  const ls = new SharedObjectRef(ctx.ls_id).proxy<
+    (...string) => Promise<void>
+  >();
+  const tree = new SharedObjectRef(ctx.tree_id).proxy<
+    (...string) => Promise<void>
+  >();
   const exec_file = new SharedObjectRef(ctx.exec_file_id).proxy<
-    (...string) => void
+    (...string) => Promise<void>
   >();
   const download = new SharedObjectRef(ctx.download_id).proxy<
-    (string) => void
+    (string) => Promise<void>
+  >();
+  const clang = new SharedObjectRef(ctx.llvm_id).proxy<
+    (...string) => Promise<void>
   >();
 
   cmd_parser = new SharedObject((...args) => {
@@ -65,10 +74,24 @@ const all_done = async (ctx: Ctx) => {
 
       console.log(cmd);
 
+      const llvm_tools = ["symbolizer", "addr2line", "size", "objdump", "otool", "objcopy", "install-name-tool", "bitcode-strip", "strip", "cxxfilt", "c++filt", "ar", "ranlib", "lib", "dlltool", "lld", "lld-link", "ld.lld", "ld64.lld", "wasm-ld", "ld", "clang", "clang", "clang++"];
+
       if (cmd === "rustc") {
         console.log("rustc");
         await terminal("executing rustc...\r\n");
         await rustc(...args.slice(1));
+      } else if (cmd === "clang") {
+        console.log("clang");
+        await terminal("executing clang...\r\n");
+        await clang(...args.slice());
+      } else if (cmd === "llvm") {
+        console.log("llvm");
+        await terminal("executing llvm...\r\n");
+        await clang(...args.slice());
+      } else if (llvm_tools.includes(cmd)) {
+        console.log("llvm");
+        await terminal("executing llvm...\r\n");
+        await clang(...["llvm", ...args.slice()]);
       } else if (cmd === "echo") {
         console.log("echo");
         await terminal(`${args.slice(1).join(" ")}\r\n`);

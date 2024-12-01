@@ -12,16 +12,18 @@ const wasi_refs = [];
 let ctx: Ctx;
 let rustc_shared: SharedObject;
 let waiter: {
-  rustc: () => void;
+  rustc: () => Promise<void>;
 };
 
 globalThis.addEventListener("message", async (event) => {
   if (event.data.ctx) {
     ctx = event.data.ctx;
-    terminal = new SharedObjectRef(ctx.terminal_id).proxy<(string) => void>();
+    terminal = new SharedObjectRef(ctx.terminal_id).proxy<
+      (string) => Promise<void>
+    >();
     await terminal("loading rustc\r\n");
     waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
-      rustc: () => void;
+      rustc: () => Promise<void>;
     }>();
     compiler = await get_rustc_wasm();
   } else if (event.data.wasi_ref) {
@@ -72,7 +74,7 @@ globalThis.addEventListener("message", async (event) => {
         wasi.block_start_on_thread();
         console.log("wasi.start done");
       } catch (e) {
-        terminal(e.toString());
+        terminal(`${e.toString()}\r\n`);
       }
     }, ctx.rustc_id);
 

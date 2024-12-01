@@ -15,6 +15,8 @@ import { rust_file } from "./config";
 
 let shared_xterm: SharedObject;
 
+let error_buff = "";
+
 export const SetupMyTerminal = (props: {
   ctx: Ctx;
   callback: (wasi_ref: WASIFarmRef) => void;
@@ -28,6 +30,13 @@ export const SetupMyTerminal = (props: {
     } else {
       terminal_queue.push(str);
     }
+  };
+  write_terminal.reset_err_buff = () => {
+    error_buff = "";
+  };
+  write_terminal.get_err_buff = () => {
+    console.log("called get_err_buff");
+    return error_buff;
   };
   shared_xterm = new SharedObject(write_terminal, props.ctx.terminal_id);
 
@@ -106,7 +115,44 @@ const get_ref = (term, callback) => {
       // \n to \r\n
       const fixed = decoded.replace(/\n/g, "\r\n");
       this.term.write(fixed);
+
       return { ret: 0, nwritten: data.byteLength };
+    }
+    fd_seek() {
+      // wasi.ERRNO_BADF 8
+      return { ret: 8, offset: 0n };
+    }
+    fd_filestat_get() {
+      // wasi.ERRNO_BADF 8
+      return { ret: 8, filestat: null };
+    }
+  }
+
+  class XtermStderr extends Fd {
+    term: Terminal;
+
+    constructor(term: Terminal) {
+      super();
+      this.term = term;
+    }
+    fd_seek() {
+      // wasi.ERRNO_BADF 8
+      return { ret: 8, offset: 0n };
+    }
+    fd_write(data: Uint8Array) /*: {ret: number, nwritten: number}*/ {
+      const decoded = new TextDecoder().decode(data);
+      // \n to \r\n
+      const fixed = decoded.replace(/\n/g, "\r\n");
+      // ansi colors
+      this.term.write(`\x1b[31m${fixed}\x1b[0m`);
+
+      error_buff += fixed;
+
+      return { ret: 0, nwritten: data.byteLength };
+    }
+    fd_filestat_get() {
+      // wasi.ERRNO_BADF 8
+      return { ret: 8, filestat: null };
     }
   }
 
@@ -129,7 +175,7 @@ const get_ref = (term, callback) => {
   const farm = new WASIFarm(
     new XtermStdio(term),
     new XtermStdio(term),
-    new XtermStdio(term),
+    new XtermStderr(term),
     [root_dir],
   );
 

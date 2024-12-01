@@ -47,6 +47,8 @@ export const get_data = (
     }
   }
 
+  console.log("dir_names", dir_names);
+
   // second: most match path
   let matched_fd = root_fd;
   let matched_dir_len = 1;
@@ -66,6 +68,8 @@ export const get_data = (
       matched_dir_len = dir_len;
     }
   }
+
+  console.log("matched_fd", matched_fd);
 
   if (matched_dir_len === 0) {
     throw new Error("no matched dir");

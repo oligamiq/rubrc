@@ -25,7 +25,10 @@
     "vite-plugin-dts": "^4.3.0",
     "vite-plugin-solid": "^2.10.2"
   },
-  "workspaces": ["./lib", "./page"],
+  "workspaces": [
+    "./lib",
+    "./page"
+  ],
   "dependencies": {
     "rubrc": "^1.0.0"
   }
