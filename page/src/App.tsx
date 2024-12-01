@@ -25,7 +25,7 @@ const App = (props: {
   const [triple, setTriple] = createSignal("wasm32-wasip1");
 
   return (
-    <>
+    <div>
       <MonacoEditor
         language="rust"
         value={default_value}
@@ -34,7 +34,9 @@ const App = (props: {
         onChange={handleEditorChange}
       />
       {/* <p class="text-4xl text-green-700 text-center">Hello tailwind!</p> */}
-      <SetupMyTerminal ctx={props.ctx} callback={props.callback} />
+      <div class="flex" style={{ width: "100vw" }}>
+        <SetupMyTerminal ctx={props.ctx} callback={props.callback} />
+      </div>
       <div class="flex">
         <div class="p-4 text-white">
           <RunButton triple={triple()} />
@@ -59,7 +61,7 @@ const App = (props: {
           <DownloadButton />
         </div>
       </div>
-    </>
+    </div>
   );
 };
 

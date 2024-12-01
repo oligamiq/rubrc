@@ -24,6 +24,8 @@ export const SetupMyTerminal = (props: {
 }) => {
   let xterm: Terminal | undefined = undefined;
 
+  const fit_addon = new FitAddon();
+
   const terminal_queue = [];
   const write_terminal = (str: string) => {
     if (xterm) {
@@ -53,6 +55,7 @@ export const SetupMyTerminal = (props: {
     xterm.write(terminal_queue.join(""));
     terminal_queue.length = 0;
     get_ref(terminal, props.callback);
+    fit_addon.fit();
     return () => {
       console.log("Terminal unmounted.");
     };
@@ -107,7 +110,14 @@ export const SetupMyTerminal = (props: {
   };
 
   // You can pass either an ITerminalAddon constructor or an instance, depending on whether you need to access it later.
-  return <XTerm onMount={handleMount} onKey={keydown} addons={[FitAddon]} />;
+  return (
+    <XTerm
+      onMount={handleMount}
+      onKey={keydown}
+      addons={[fit_addon]}
+      class="w-full"
+    />
+  );
 };
 
 const get_ref = (term, callback) => {
