@@ -16,6 +16,7 @@ import { rust_file } from "./config";
 let shared_xterm: SharedObject;
 
 let error_buff = "";
+let out_buff = "";
 
 export const SetupMyTerminal = (props: {
   ctx: Ctx;
@@ -37,6 +38,13 @@ export const SetupMyTerminal = (props: {
   write_terminal.get_err_buff = () => {
     console.log("called get_err_buff");
     return error_buff;
+  };
+  write_terminal.get_out_buff = () => {
+    console.log("called get_out_buff");
+    return out_buff;
+  };
+  write_terminal.reset_out_buff = () => {
+    out_buff = "";
   };
   shared_xterm = new SharedObject(write_terminal, props.ctx.terminal_id);
 
@@ -115,6 +123,8 @@ const get_ref = (term, callback) => {
       // \n to \r\n
       const fixed = decoded.replace(/\n/g, "\r\n");
       this.term.write(fixed);
+
+      out_buff += fixed;
 
       return { ret: 0, nwritten: data.byteLength };
     }
