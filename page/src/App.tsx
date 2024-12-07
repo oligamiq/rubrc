@@ -1,13 +1,15 @@
-import { createSignal, type Component } from "solid-js";
+import { createSignal, lazy, Suspense, type Component } from "solid-js";
 import { SetupMyTerminal } from "./xterm";
 import type { WASIFarmRef } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
-import { MonacoEditor } from "solid-monaco";
 import { default_value, rust_file } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
 import { Select } from "@thisbeyond/solid-select";
 import { SharedObjectRef } from "@oligami/shared-object";
+const MonacoEditor = lazy(() =>
+  import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor })),
+);
 
 const App = (props: {
   ctx: Ctx;
@@ -26,13 +28,24 @@ const App = (props: {
 
   return (
     <div>
-      <MonacoEditor
-        language="rust"
-        value={default_value}
-        height="30vh"
-        onMount={handleMount}
-        onChange={handleEditorChange}
-      />
+      <Suspense
+        fallback={
+          <div
+            class="p-4 text-white"
+            style={{ width: "100vw", height: "30vh" }}
+          >
+            <p class="text-4xl text-green-700 text-center">Loading editor...</p>
+          </div>
+        }
+      >
+        <MonacoEditor
+          language="rust"
+          value={default_value}
+          height="30vh"
+          onMount={handleMount}
+          onChange={handleEditorChange}
+        />
+      </Suspense>
       {/* <p class="text-4xl text-green-700 text-center">Hello tailwind!</p> */}
       <div class="flex" style={{ width: "100vw" }}>
         <SetupMyTerminal ctx={props.ctx} callback={props.callback} />

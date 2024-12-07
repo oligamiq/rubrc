@@ -1,17 +1,21 @@
-import { type Inode, PreopenDirectory, File, Directory } from '@bjorn3/browser_wasi_shim';
-import { WASIFarm } from '@oligami/browser_wasi_shim-threads';
-import { parseTarGzip } from 'nanotar';
+import {
+  type Inode,
+  PreopenDirectory,
+  File,
+  Directory,
+} from "@bjorn3/browser_wasi_shim";
+import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
 
-export const load_sysroot_part = async (
-  triple: string,
-): Promise<Directory> => {
-  const zipped_sysroot = await fetch(
-    `https://oligamiq.github.io/rust_wasm/v0.1.0/${triple}.tar.gz`,
-  );
-  const files = await parseTarGzip(await zipped_sysroot.arrayBuffer());
+import { fetch_compressed_stream } from "./brotli_stream";
+import { parseTar } from "./parse_tar";
+
+export const load_sysroot_part = async (triple: string): Promise<Directory> => {
+  const decompressed_stream = await fetch_compressed_stream(`https://oligamiq.github.io/rust_wasm/v0.2.0/${triple}.tar.br`);
+
   const dir = new Map<string, Inode>();
   console.group("Loading sysroot");
-  for (const file of files){
+
+  await parseTar(decompressed_stream, (file) => {
     if (!file.data) {
       throw new Error("File data not found");
     }
@@ -21,19 +25,20 @@ export const load_sysroot_part = async (
       if (created_dir instanceof Directory) {
         created_dir.contents.set(parts.slice(1).join("/"), new File(file.data));
       } else {
-        dir.set(parts[0], new Directory([
-          [parts.slice(1).join("/"), new File(file.data)]
-        ]));
+        dir.set(
+          parts[0],
+          new Directory([[parts.slice(1).join("/"), new File(file.data)]]),
+        );
       }
     } else {
       dir.set(file.name, new File(file.data));
     }
 
     console.log(file.name);
-  }
+  });
   console.groupEnd();
   return new Directory(dir);
-}
+};
 
 const toMap = (arr: Array<[string, Inode]>) => {
   const map = new Map<string, Inode>();
@@ -46,21 +51,15 @@ const toMap = (arr: Array<[string, Inode]>) => {
 let rustlib_dir: Directory | undefined;
 
 export const load_default_sysroot = async (): Promise<PreopenDirectory> => {
-  const sysroot_part = await load_sysroot_part('wasm32-wasip1');
+  const sysroot_part = await load_sysroot_part("wasm32-wasip1");
   rustlib_dir = new Directory([
-    ["wasm32-wasip1", new Directory([
-      ["lib", sysroot_part]
-    ])],
+    ["wasm32-wasip1", new Directory([["lib", sysroot_part]])],
   ]);
   const sysroot = new PreopenDirectory(
     "/sysroot",
-    toMap([
-      ["lib", new Directory([
-        ["rustlib", rustlib_dir],
-      ])]
-    ])
+    toMap([["lib", new Directory([["rustlib", rustlib_dir]])]]),
   );
-  loaded_triples.add('wasm32-wasip1');
+  loaded_triples.add("wasm32-wasip1");
   return sysroot;
 };
 
@@ -74,22 +73,14 @@ export const load_additional_sysroot = async (triple: string) => {
   if (!rustlib_dir) {
     throw new Error("Default sysroot not loaded");
   }
-  rustlib_dir.contents.set(triple, new Directory([
-    ["lib", sysroot_part]
-  ]));
+  rustlib_dir.contents.set(triple, new Directory([["lib", sysroot_part]]));
   loaded_triples.add(triple);
-}
+};
 
 export const get_default_sysroot_wasi_farm = async (): Promise<WASIFarm> => {
   const fds = [await load_default_sysroot()];
-  const farm = new WASIFarm(
-    undefined,
-    undefined,
-    undefined,
-    fds,
-    {
-      allocator_size: 1024 * 1024 * 1024,
-    },
-  );
+  const farm = new WASIFarm(undefined, undefined, undefined, fds, {
+    allocator_size: 1024 * 1024 * 1024,
+  });
   return farm;
-}
+};
