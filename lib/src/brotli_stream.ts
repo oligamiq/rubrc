@@ -4,7 +4,8 @@ import brotli_dec_wasm_bg from "brotli-dec-wasm/web/bg.wasm?wasm&url"; // Import
 
 const promise = init(brotli_dec_wasm_bg); // Import is async in browsers due to wasm requirements!
 
-const OUTPUT_SIZE = 10000;
+// 1MB output buffer
+const OUTPUT_SIZE = 1024 * 1024;
 
 export const get_brotli_decompress_stream = async (): Promise<
   TransformStream<Uint8Array, Uint8Array>
