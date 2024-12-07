@@ -1,6 +1,6 @@
 {
   "name": "rubrc",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "rubrc root",
   "private": true,
   "directories": {
@@ -26,8 +26,5 @@
     "vite-plugin-dts": "^4.3.0",
     "vite-plugin-solid": "^2.11.0"
   },
-  "workspaces": ["./lib", "./page"],
-  "dependencies": {
-    "rubrc": "^1.0.0"
-  }
+  "workspaces": ["./lib", "./page"]
 }

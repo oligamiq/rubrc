@@ -4,7 +4,6 @@ import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
 
 import thread_spawn_path from "./thread_spawn.ts?worker&url";
-import util_cmd_worker from "./util_cmd.ts?worker";
 
 let terminal: (string) => void;
 let compiler: WebAssembly.Module;
@@ -13,6 +12,7 @@ let ctx: Ctx;
 let rustc_shared: SharedObject;
 let waiter: {
   rustc: () => Promise<void>;
+  end_rustc_fetch: () => Promise<void>;
 };
 
 globalThis.addEventListener("message", async (event) => {
@@ -24,8 +24,11 @@ globalThis.addEventListener("message", async (event) => {
     await terminal("loading rustc\r\n");
     waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
       rustc: () => Promise<void>;
+      end_rustc_fetch: () => Promise<void>;
     }>();
     compiler = await get_rustc_wasm();
+
+    await waiter.end_rustc_fetch();
   } else if (event.data.wasi_ref) {
     const { wasi_ref } = event.data;
 
@@ -43,12 +46,6 @@ globalThis.addEventListener("message", async (event) => {
     }
 
     await terminal("loaded wasi\r\n");
-
-    const util_worker = new util_cmd_worker();
-    util_worker.postMessage({
-      wasi_refs,
-      ctx,
-    });
 
     const wasi = new WASIFarmAnimal(
       wasi_refs,

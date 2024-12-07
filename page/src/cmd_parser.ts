@@ -6,6 +6,7 @@ let waiter: SharedObject;
 let is_all_done = false;
 let is_cmd_run_end = true;
 let end_of_exec = false;
+let is_rustc_fetch_end = false;
 
 export const parser_setup = async (ctx: Ctx) => {
   const n = 1;
@@ -19,6 +20,12 @@ export const parser_setup = async (ctx: Ctx) => {
     {
       rustc: () => {
         resolvers[0].resolve();
+      },
+      end_rustc_fetch: () => {
+        is_rustc_fetch_end = true;
+      },
+      is_rustc_fetch_end: () => {
+        return is_rustc_fetch_end;
       },
       is_all_done: (): boolean => {
         return is_all_done;
