@@ -2,8 +2,8 @@ import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import {
   get_default_sysroot_wasi_farm,
   load_additional_sysroot,
-} from "../../lib/src/sysroot";
-import type { Ctx } from "./ctx";
+} from "../../../lib/src/sysroot";
+import type { Ctx } from "../ctx";
 
 let terminal: (string) => Promise<void>;
 let rustc_worker: Worker;
@@ -56,8 +56,8 @@ globalThis.addEventListener("message", async (event) => {
   }
 });
 
-import util_cmd_worker from "./util_cmd.ts?worker";
-import run_llvm_worker from "./llvm.ts?worker";
+import util_cmd_worker from "./util_cmd?worker";
+import run_llvm_worker from "./llvm?worker";
 
 const setup_util_worker = (
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>

@@ -5,7 +5,16 @@ import type { Ctx } from "./ctx";
 import { default_value, rust_file } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
-import { Select } from "@thisbeyond/solid-select";
+
+const Select = lazy(async () => {
+  const selector = import("@thisbeyond/solid-select");
+  const css_load = import("@thisbeyond/solid-select/style.css");
+
+  const [mod] = await Promise.all([selector, css_load]);
+
+  return { default: mod.Select };
+});
+
 import { SharedObjectRef } from "@oligami/shared-object";
 const MonacoEditor = lazy(() =>
   import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor })),

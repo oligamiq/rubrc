@@ -1,7 +1,7 @@
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
-import { get_rustc_wasm } from "../../lib/src/get_rustc_wasm";
+import { get_rustc_wasm } from "../../../lib/src/get_rustc_wasm";
 import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
-import type { Ctx } from "./ctx";
+import type { Ctx } from "../ctx";
 
 import thread_spawn_path from "./thread_spawn.ts?worker&url";
 

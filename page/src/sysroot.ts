@@ -18,6 +18,8 @@ export const triples = [
   "riscv64gc-unknown-linux-musl",
   "s390x-unknown-linux-gnu",
   "sparcv9-sun-solaris",
+  "wasm32-unknown-emscripten",
+  "wasm32-unknown-unknown",
   "wasm32-wasip1-threads",
   "wasm32-wasip1",
   "x86_64-pc-windows-gnu",

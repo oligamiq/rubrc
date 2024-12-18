@@ -1,9 +1,9 @@
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
-import type { Ctx } from "./ctx";
-import lsr from "./wasm/lsr.wasm?url";
-import tre from "./wasm/tre.wasm?url";
-import { get_data } from "./cat";
+import type { Ctx } from "../ctx";
+import lsr from "../wasm/lsr.wasm?url";
+import tre from "../wasm/tre.wasm?url";
+import { get_data } from "../cat";
 
 const shared: SharedObject[] = [];
 

@@ -1,4 +1,5 @@
 // solid-xterm's code fork
+// https://github.com/WVAviator/solid-xterm
 
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import {
