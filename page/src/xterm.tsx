@@ -56,6 +56,7 @@ export const SetupMyTerminal = (props: {
     terminal_queue.length = 0;
     get_ref(terminal, props.callback);
     fit_addon.fit();
+
     return () => {
       console.log("Terminal unmounted.");
     };
@@ -70,7 +71,9 @@ export const SetupMyTerminal = (props: {
 
   let before_cmd = "";
   const on_enter = async (terminal) => {
-    before_cmd = keys;
+    if (keys) {
+      before_cmd = keys;
+    }
     terminal.write("\r\n");
     if (await waiter.is_all_done()) {
       cmd_parser = new SharedObjectRef(props.ctx.cmd_parser_id).proxy<
@@ -87,6 +90,8 @@ export const SetupMyTerminal = (props: {
     event: { key: string; domEvent: KeyboardEvent },
     terminal,
   ) => {
+    console.log(event);
+
     if (event.key === "\r") {
       terminal.write("\r\n");
       on_enter(terminal);
@@ -95,14 +100,7 @@ export const SetupMyTerminal = (props: {
       keys = keys.slice(0, -1);
     } else if (event.domEvent.code === "ArrowUp") {
       keys = before_cmd;
-      terminal.write(`\r>${keys} \r`);
-    } else if (
-      event.domEvent.code === "ArrowDown" ||
-      event.domEvent.code === "ArrowLeft" ||
-      event.domEvent.code === "ArrowRight" ||
-      event.domEvent.code === "Tab"
-    ) {
-      terminal.write(event.key);
+      terminal.write(`\r>${keys}`);
     } else if (
       // Ctrl + V
       event.domEvent.ctrlKey &&
@@ -112,10 +110,22 @@ export const SetupMyTerminal = (props: {
         keys += text;
         terminal.write(text);
       });
-    } else {
-      keys += event.key;
-      terminal.write(event.key);
     }
+  };
+  const onData = (data: string) => {
+    // if Backspace, ArrowUp: do nothing
+    if (data === "\b" || data === "\u001b[A" || data === "\r") {
+      return;
+    }
+
+    keys += data;
+
+    if (xterm) {
+      xterm.write(data);
+    } else {
+      terminal_queue.push(data);
+    }
+    console.log(`data received: ${data}`);
   };
 
   // You can pass either an ITerminalAddon constructor or an instance, depending on whether you need to access it later.
@@ -123,6 +133,7 @@ export const SetupMyTerminal = (props: {
     <XTerm
       onMount={handleMount}
       onKey={keydown}
+      onData={onData}
       addons={[fit_addon]}
       class="w-full"
     />

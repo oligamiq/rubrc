@@ -340,8 +340,7 @@ const XTerm = ({
     });
   });
 
-  // biome-ignore lint/style/useSelfClosingElements: <explanation>
-  return <div id="term-wrapper" class={className} ref={handleRef}></div>;
+  return <div id="term-wrapper" class={className} ref={handleRef} />;
 };
 
 export default XTerm;
