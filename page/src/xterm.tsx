@@ -90,7 +90,7 @@ export const SetupMyTerminal = (props: {
     event: { key: string; domEvent: KeyboardEvent },
     terminal,
   ) => {
-    console.log(event);
+    // console.log(event);
 
     if (event.key === "\r") {
       terminal.write("\r\n");
@@ -114,7 +114,7 @@ export const SetupMyTerminal = (props: {
   };
   const onData = (data: string) => {
     // if Backspace, ArrowUp: do nothing
-    if (data === "\b" || data === "\u001b[A" || data === "\r") {
+    if (data === "\x7F" || data === "\u001b[A" || data === "\r") {
       return;
     }
 
@@ -125,7 +125,7 @@ export const SetupMyTerminal = (props: {
     } else {
       terminal_queue.push(data);
     }
-    console.log(`data received: ${data}`);
+    // console.log(`data received: ${data}`);
   };
 
   // You can pass either an ITerminalAddon constructor or an instance, depending on whether you need to access it later.
