@@ -1,3 +1,5 @@
+import { v4 as uuidv4 } from 'uuid';
+
 export type Ctx = {
   terminal_id: string;
   rustc_id: string;
@@ -12,20 +14,18 @@ export type Ctx = {
   llvm_id: string;
 };
 
-const gen_id = () => Math.random().toString(36).substring(7);
-
 export const gen_ctx = (): Ctx => {
   return {
-    terminal_id: gen_id(),
-    rustc_id: gen_id(),
-    waiter_id: gen_id(),
-    cmd_parser_id: gen_id(),
-    tree_id: gen_id(),
-    ls_id: gen_id(),
-    exec_file_id: gen_id(),
-    download_id: gen_id(),
-    download_by_url_id: gen_id(),
-    load_additional_sysroot_id: gen_id(),
-    llvm_id: gen_id(),
+    terminal_id: uuidv4(),
+    rustc_id: uuidv4(),
+    waiter_id: uuidv4(),
+    cmd_parser_id: uuidv4(),
+    tree_id: uuidv4(),
+    ls_id: uuidv4(),
+    exec_file_id: uuidv4(),
+    download_id: uuidv4(),
+    download_by_url_id: uuidv4(),
+    load_additional_sysroot_id: uuidv4(),
+    llvm_id: uuidv4(),
   };
 };

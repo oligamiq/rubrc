@@ -24,6 +24,7 @@
     "nanotar": "^0.1.1",
     "rubrc": "file:",
     "solid-js": "^1.9.3",
-    "solid-monaco": "^0.3.0"
+    "solid-monaco": "^0.3.0",
+    "uuid": "^11.0.3"
   }
 }
