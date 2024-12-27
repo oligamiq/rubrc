@@ -14,5 +14,5 @@ Change wasm compile method from compile to compileStreaming.
 - change default code.
 - moved the file with the code that runs on the worker to another directory.
 
-## v1.1.2 (2024-12-18)
-
+## v1.1.2 (2024-12-27)
+- enable pasting
