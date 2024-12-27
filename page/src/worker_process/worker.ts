@@ -76,4 +76,4 @@ const setup_util_worker = (
     wasi_refs,
     ctx,
   });
-}
+};

@@ -97,7 +97,10 @@ export const compile_and_run = async (triple: string) => {
       }
 
       // split by space
-      const lld_args_str = lld_args_and_etc.split(' "')?.slice(1).map((arg) => arg.slice(0, -1));
+      const lld_args_str = lld_args_and_etc
+        .split(' "')
+        ?.slice(1)
+        .map((arg) => arg.slice(0, -1));
 
       // first args to lld-link
       const clang_args = lld_args_str;
@@ -108,7 +111,6 @@ export const compile_and_run = async (triple: string) => {
 
       await terminal(`${clang_args.join(" ")}\r\n`);
       await cmd_parser(...clang_args);
-
     } else {
       await terminal("download /tmp/main\r\n");
       await cmd_parser("download", "/tmp/main");

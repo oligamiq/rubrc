@@ -1,4 +1,7 @@
-import init, { BrotliDecStream, BrotliStreamResultCode } from "brotli-dec-wasm/web"; // Import the default export
+import init, {
+  BrotliDecStream,
+  BrotliStreamResultCode,
+} from "brotli-dec-wasm/web"; // Import the default export
 // @ts-ignore
 import brotli_dec_wasm_bg from "brotli-dec-wasm/web/bg.wasm?wasm&url"; // Import the wasm file
 
@@ -45,9 +48,7 @@ export const get_brotli_decompress_stream = async (): Promise<
 export const fetch_compressed_stream = async (
   url: string | URL | globalThis.Request,
 ): Promise<ReadableStream<Uint8Array>> => {
-  const compressed_stream = await fetch(
-    url,
-  );
+  const compressed_stream = await fetch(url);
   if (!compressed_stream.ok) {
     throw new Error("Failed to fetch wasm");
   }
@@ -55,5 +56,7 @@ export const fetch_compressed_stream = async (
     throw new Error("No body in response");
   }
 
-  return compressed_stream.body.pipeThrough(await get_brotli_decompress_stream());
-}
+  return compressed_stream.body.pipeThrough(
+    await get_brotli_decompress_stream(),
+  );
+};

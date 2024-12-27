@@ -1,6 +1,6 @@
 {
   "name": "@oligami/rustc-browser-wasi_shim",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -51,6 +51,9 @@
       "default": "./dist/rustc-browser-wasi_shim.es.js"
     }
   },
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "keywords": []
 }

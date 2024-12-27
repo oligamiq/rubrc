@@ -10,7 +10,9 @@ import { fetch_compressed_stream } from "./brotli_stream";
 import { parseTar } from "./parse_tar";
 
 export const load_sysroot_part = async (triple: string): Promise<Directory> => {
-  const decompressed_stream = await fetch_compressed_stream(`https://oligamiq.github.io/rust_wasm/v0.2.0/${triple}.tar.br`);
+  const decompressed_stream = await fetch_compressed_stream(
+    `https://oligamiq.github.io/rust_wasm/v0.2.0/${triple}.tar.br`,
+  );
 
   const dir = new Map<string, Inode>();
   console.group("Loading sysroot");

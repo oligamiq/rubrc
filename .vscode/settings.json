@@ -1,11 +1,5 @@
 {
   "editor.tabSize": 2,
   "prettier.enable": false,
-  "cSpell.words": [
-    "nanotar",
-    "Preopen",
-    "rustc",
-    "rustlib",
-    "wasip"
-  ]
+  "cSpell.words": ["nanotar", "Preopen", "rustc", "rustlib", "wasip"]
 }

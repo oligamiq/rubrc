@@ -45,7 +45,7 @@ export async function parseTar(
     }
 
     done = _done;
-  }
+  };
 
   while (true) {
     while (buffer.length < 512 && !done) {
@@ -75,7 +75,7 @@ export async function parseTar(
 
     // File type (offset: 156 - length: 1)
     const _type = _readNumber(buffer, 156, 1);
-    const type = _type === 0 ? "file" : (_type === 5 ? "directory" : _type); // prettier-ignore
+    const type = _type === 0 ? "file" : _type === 5 ? "directory" : _type; // prettier-ignore
 
     // Ustar indicator (offset: 257 - length: 6)
     // Ignore
