@@ -11,7 +11,7 @@
     "check": "biome check && tsc --noEmit"
   },
   "dependencies": {
-    "@bjorn3/browser_wasi_shim": "^0.3.0",
+    "@bjorn3/browser_wasi_shim": "^0.4.1",
     "@oligami/browser_wasi_shim-threads": "^0.1.1",
     "@oligami/rustc-browser-wasi_shim": "file:",
     "brotli-dec-wasm": "^2.3.0"
