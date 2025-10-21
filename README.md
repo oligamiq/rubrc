@@ -9,6 +9,10 @@ Currently, the targets for which executable files can be generated are `wasm32-w
 
 Demo: [Rubrc](https://oligamiq.github.io/rubrc/)
 
+# Development
+I am currently developing tools for rubrc acceleration. Please check here for the development status. The estimated completion date is April 2026.
+[wasi_virt_layer](https://github.com/oligamiq/wasi_virt_layer)
+
 # Special Thanks
 ## Projects
 - [rubri](https://github.com/LyonSyonII/rubri) by [LyonSyonII](https://github.com/LyonSyonII) - At first, I was using this project to run it on the browser.
