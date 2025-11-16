@@ -1,6 +1,6 @@
 {
   "name": "rubrc",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "rubrc example page",
   "private": true,
   "author": "oligami <nziq53@gmail.com> (https://github.com/oligamiq)",
@@ -14,17 +14,18 @@
     "fmt": "biome format --write ."
   },
   "dependencies": {
-    "@bjorn3/browser_wasi_shim": "^0.3.0",
-    "@oligami/browser_wasi_shim-threads": "^0.1.1",
+    "@bjorn3/browser_wasi_shim": "^0.4.2",
+    "@oligami/browser_wasi_shim-threads": "^0.2.3",
     "@oligami/shared-object": "0.1.1",
+    "@tailwindcss/vite": "^4.1.17",
     "@thisbeyond/solid-select": "^0.15.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-search": "^0.15.0",
     "@xterm/xterm": "^5.5.0",
-    "nanotar": "^0.1.1",
-    "rubrc": "file:",
-    "solid-js": "^1.9.3",
+    "nanotar": "^0.2.0",
+    "solid-js": "^1.9.10",
     "solid-monaco": "^0.3.0",
-    "uuid": "^11.0.3"
+    "tailwindcss": "^4.1.17",
+    "uuid": "^13.0.0"
   }
 }

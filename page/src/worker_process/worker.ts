@@ -5,6 +5,10 @@ import {
 } from "../../../lib/src/sysroot";
 import type { Ctx } from "../ctx";
 
+import { wait_async_polyfill } from "@oligami/browser_wasi_shim-threads";
+
+wait_async_polyfill();
+
 let terminal: (string) => Promise<void>;
 let rustc_worker: Worker;
 let ctx: Ctx;

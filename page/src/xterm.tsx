@@ -13,6 +13,10 @@ import {
 import type { Ctx } from "./ctx";
 import { rust_file } from "./config";
 
+import { wait_async_polyfill } from "@oligami/browser_wasi_shim-threads";
+
+wait_async_polyfill();
+
 let shared_xterm: SharedObject;
 
 let error_buff = "";

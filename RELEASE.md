@@ -16,3 +16,8 @@ Change wasm compile method from compile to compileStreaming.
 
 ## v1.1.2 (2024-12-27)
 - enable pasting
+
+## v1.2.0 (2025-11-16)
+- update browser_wasi_shim-threads dependency
+- fix Firefox compatibility issue
+- fix occasional freeze/hang bug

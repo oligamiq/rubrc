@@ -4,6 +4,7 @@ import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "../ctx";
 
 import thread_spawn_path from "./thread_spawn.ts?worker&url";
+import worker_background_worker_url from "./worker_background_worker.ts?worker&url"
 
 let terminal: (string) => void;
 let compiler: WebAssembly.Module;
@@ -57,12 +58,14 @@ globalThis.addEventListener("message", async (event) => {
         thread_spawn_worker_url: new URL(thread_spawn_path, import.meta.url)
           .href,
         thread_spawn_wasm: compiler,
+        share_memory: {
+          "memory": new WebAssembly.Memory({ initial: 399, maximum: 16384, shared: true }),
+        },
+  			worker_background_worker_url,
       },
     );
 
     await wasi.wait_worker_background_worker();
-
-    wasi.get_share_memory().grow(200);
 
     rustc_shared = new SharedObject((...args) => {
       try {

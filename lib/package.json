@@ -1,6 +1,6 @@
 {
   "name": "@oligami/rustc-browser-wasi_shim",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,9 +11,8 @@
     "check": "biome check && tsc --noEmit"
   },
   "dependencies": {
-    "@bjorn3/browser_wasi_shim": "^0.3.0",
-    "@oligami/browser_wasi_shim-threads": "^0.1.1",
-    "@oligami/rustc-browser-wasi_shim": "file:",
+    "@bjorn3/browser_wasi_shim": "^0.4.2",
+    "@oligami/browser_wasi_shim-threads": "^0.2.3",
     "brotli-dec-wasm": "^2.3.0"
   },
   "private": false,
@@ -51,9 +50,6 @@
       "default": "./dist/rustc-browser-wasi_shim.es.js"
     }
   },
-  "files": [
-    "dist",
-    "src"
-  ],
+  "files": ["dist", "src"],
   "keywords": []
 }
