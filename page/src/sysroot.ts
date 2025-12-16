@@ -22,6 +22,7 @@ export const triples = [
   "wasm32-unknown-unknown",
   "wasm32-wasip1-threads",
   "wasm32-wasip1",
+  "wasm32-wasip2",
   "x86_64-pc-windows-gnu",
   "x86_64-unknown-freebsd",
   "x86_64-unknown-illumos",
