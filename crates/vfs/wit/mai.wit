@@ -1,0 +1,7 @@
+// wit is only kebab-case
+package hello:host;
+
+world init {
+  export init: func();
+  export main: func();
+}

@@ -1,0 +1,16 @@
+[package]
+name = "vfs"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+const_struct = "0.6.6"
+parking_lot = { version = "0.12.5", features = ["nightly"] }
+wasi_virt_layer = { version = "0.2.3", features = [
+  "dynamic-fs",
+  "embedded-fs",
+] }
+wit-bindgen = { version = "0.57.1", default-features = false, features = ["macros", "std"] }
