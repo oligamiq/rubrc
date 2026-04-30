@@ -1,7 +1,9 @@
 use const_struct::*;
 use parking_lot::Mutex;
 use std::sync::OnceLock;
-use wasi_virt_layer::{file::*, prelude::*, wrap_unreachable};
+use wasi_virt_layer::{
+    file::*, prelude::*, wasi::wrap_unreachable::WrapUnreachable, wrap_unreachable,
+};
 
 wit_bindgen::generate!({
     // the name of the world in the `*.wit` input file
@@ -73,9 +75,9 @@ pub struct CustomProcess;
 impl wasi_virt_layer::process::ProcessExit for CustomProcess {
     fn proc_exit<Wasm: WasmAccess>(code: i32) {
         if code == 0 {
-            println!("Process exited successfully with code 0.");
+            WrapUnreachableTre::set_flag(999);
         } else {
-            eprintln!("Process exited with error code {}.", code);
+            eprintln!("Process exited with error code {code}.");
         }
     }
 }
@@ -126,11 +128,11 @@ struct UnreachableHandler;
 
 impl wasi_virt_layer::wasi::wrap_unreachable::WrapUnreachable for UnreachableHandler {
     fn fix_main_raw_exit_code<Wasm: WasmAccess>(code: i32) -> i32 {
-        if code == 0 {
+        if code == 0 || code == 999 {
             0
         } else {
-            eprintln!("lsr exited with code {code}, treating it as 0");
-            0
+            eprintln!("Unexpected exit code from main: {code}. Treating as error.");
+            code
         }
     }
 }
