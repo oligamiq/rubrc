@@ -1,0 +1,54 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Deno",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/dist/test_run.ts",
+      "args": [],
+      "runtimeExecutable": "deno",
+      "runtimeArgs": [
+        "run",
+        // "--inspect-brk", // default additional args
+        // "--allow-read",
+        // "--allow-env",
+        "-A",
+      ],
+      "cwd": "${workspaceFolder}/dist",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "name": "Deno (Dev)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/test_run.ts",
+      "args": [],
+      "runtimeExecutable": "deno",
+      "runtimeArgs": [
+        "run",
+        // "--inspect-brk", // default additional args
+        // "--allow-read",
+        // "--allow-env",
+        "-A",
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "name": "Launch",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceRoot}/<your program>",
+      "args": [],
+      "cwd": "${workspaceRoot}"
+    }
+  ]
+}

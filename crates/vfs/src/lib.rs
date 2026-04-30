@@ -1,7 +1,7 @@
 use const_struct::*;
 use parking_lot::Mutex;
 use std::sync::OnceLock;
-use wasi_virt_layer::{file::*, prelude::*, process::StandardProcess};
+use wasi_virt_layer::{file::*, prelude::*, wrap_unreachable};
 
 wit_bindgen::generate!({
     // the name of the world in the `*.wit` input file
@@ -71,22 +71,18 @@ plug_env!(@embedded, VirtualEnvTy, lsr, tre);
 pub struct CustomProcess;
 
 impl wasi_virt_layer::process::ProcessExit for CustomProcess {
-    fn proc_exit<Wasm: WasmAccess>(code: i32) -> ! {
+    fn proc_exit<Wasm: WasmAccess>(code: i32) {
         if code == 0 {
             println!("Process exited successfully with code 0.");
         } else {
             eprintln!("Process exited with error code {}.", code);
         }
-
-        // std::process::exit(code as i32);
-        panic!("WASI_VIRT_EXIT:{}", code);
     }
 }
 
 plug_process!(CustomProcess, lsr, tre);
 
 use std::sync::LazyLock;
-use wasi_virt_layer::prelude::*;
 
 struct VirtualArgsState {
     args: Vec<String>,
@@ -125,3 +121,18 @@ static VIRTUAL_ARGS: LazyLock<Mutex<VirtualArgsState>> = LazyLock::new(|| {
 plug_args!(@dynamic, &mut VIRTUAL_ARGS.lock(), lsr, tre);
 
 plug_random!(tre);
+
+struct UnreachableHandler;
+
+impl wasi_virt_layer::wasi::wrap_unreachable::WrapUnreachable for UnreachableHandler {
+    fn fix_main_raw_exit_code<Wasm: WasmAccess>(code: i32) -> i32 {
+        if code == 0 {
+            0
+        } else {
+            eprintln!("lsr exited with code {code}, treating it as 0");
+            0
+        }
+    }
+}
+
+wrap_unreachable!(UnreachableHandler, tre);
