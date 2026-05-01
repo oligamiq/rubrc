@@ -72,10 +72,19 @@ plug_env!(@embedded, VirtualEnvTy, lsr, tre);
 
 pub struct CustomProcess;
 
+const SUCCESS_FLAG: i32 = 999;
 impl wasi_virt_layer::process::ProcessExit for CustomProcess {
     fn proc_exit<Wasm: WasmAccess>(code: i32) {
         if code == 0 {
-            WrapUnreachableTre::set_flag(999);
+          match core::any::type_name::<Wasm>() {
+              v if v == core::any::type_name::<lsr>() => {
+                WrapUnreachableLsr::set_flag(SUCCESS_FLAG);
+              },
+              v if v == core::any::type_name::<tre>() => {
+                WrapUnreachableTre::set_flag(SUCCESS_FLAG);
+              },
+              _ => unreachable!(),
+            }
         } else {
             eprintln!("Process exited with error code {code}.");
         }
@@ -128,13 +137,14 @@ struct UnreachableHandler;
 
 impl wasi_virt_layer::wasi::wrap_unreachable::WrapUnreachable for UnreachableHandler {
     fn fix_main_raw_exit_code<Wasm: WasmAccess>(code: i32) -> i32 {
-        if code == 0 || code == 999 {
+        if code == 0 || code == SUCCESS_FLAG {
             0
         } else {
             eprintln!("Unexpected exit code from main: {code}. Treating as error.");
+            println!("wasm access: {}", core::any::type_name::<Wasm>());
             code
         }
     }
 }
 
-wrap_unreachable!(UnreachableHandler, tre);
+wrap_unreachable!(UnreachableHandler, tre, lsr);
