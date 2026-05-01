@@ -81,6 +81,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
 
 [[package]]
+name = "crossbeam-utils"
+version = "0.8.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+
+[[package]]
+name = "dashmap"
+version = "7.0.0-rc2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4a1e35a65fe0538a60167f0ada6e195ad5d477f6ddae273943596d4a1a5730b"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "equivalent",
+ "hashbrown 0.15.5",
+ "lock_api",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -112,6 +132,12 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
+
+[[package]]
+name = "hashbrown"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
@@ -138,7 +164,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
- "hashbrown",
+ "hashbrown 0.17.0",
  "serde",
  "serde_core",
 ]
@@ -373,14 +399,16 @@ dependencies = [
 
 [[package]]
 name = "wasi_virt_layer"
-version = "0.2.7"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "decadbb7679f92b2f9322c08d23c87980b5683b0d5837db299a80b8b1063e2fe"
+checksum = "1b71f0763ecdbaa1edbf4d71f2a420e861361c6fc1cc2d8c251d7be2962e2935"
 dependencies = [
  "const_for",
  "const_struct",
+ "dashmap",
  "flume",
  "fxhash",
+ "parking_lot",
  "paste",
  "smallbox",
  "smallstr",
@@ -424,7 +452,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e6fb4c2bee46c5ea4d40f8cdb5c131725cd976718ec56f1c8e82fbde5fa2a80"
 dependencies = [
  "bitflags",
- "hashbrown",
+ "hashbrown 0.17.0",
  "indexmap",
  "semver",
 ]
@@ -518,7 +546,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ffe4064318cdf3c08cb99343b44c039fcefe61ccdf58aa9975285f13d74d1fc"
 dependencies = [
  "anyhow",
- "hashbrown",
+ "hashbrown 0.17.0",
  "id-arena",
  "indexmap",
  "log",

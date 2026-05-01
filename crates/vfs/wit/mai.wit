@@ -2,6 +2,24 @@
 package hello:host;
 
 world init {
+  record file-entry {
+    path: string,
+    content: list<u8>,
+  }
+
+  variant command-request {
+    handled,
+    download(string),
+    exec-file(tuple<string, list<string>>),
+    not-found(string),
+  }
+
+  export flush-to-vfs: func(files: list<file-entry>);
+  
+  export flush-from-vfs: func() -> list<file-entry>;
+  
+  export run-command: func(args: list<string>) -> command-request;
+
   export init: func();
   export main: func();
 }

@@ -1,86 +1,126 @@
+// wasi_virt_layer build -p vfs page/src/wasm/lsr.wasm page/src/wasm/tre.wasm crates/vfs/llvm_opt.wasm crates/vfs/rustc_opt.wasm
+
 use const_struct::*;
 use parking_lot::Mutex;
-use std::sync::OnceLock;
-use wasi_virt_layer::{file::*, prelude::*, wrap_unreachable};
+use std::sync::LazyLock;
+use wasi_virt_layer::{file::*, memory::WasmAccessName, prelude::*, wrap_unreachable};
 
 wit_bindgen::generate!({
-    // the name of the world in the `*.wit` input file
     world: "init",
 });
 
 struct Wit;
 
 impl Guest for Wit {
-    fn init() {
-        fn print_loop() {
-            for i in 0..1000 {
-                println!("Hello from a thread spawned in the `init` function! {i}");
+    fn init() {}
+    fn main() {}
+
+    fn flush_to_vfs(files: Vec<FileEntry>) {
+        let root = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
+        for f in files {
+            // Replace / with _ for now to keep it flat (can implement proper tree if needed later)
+            let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(root, &f.path.replace("/", "_"), f.content);
+        }
+    }
+
+    fn flush_from_vfs() -> Vec<FileEntry> {
+        // Returning empty for now to check compile
+        vec![]
+    }
+
+    fn run_command(args: Vec<String>) -> CommandRequest {
+        if args.is_empty() { return CommandRequest::Handled; }
+        let cmd = args[0].as_str();
+        match cmd {
+            "ls" | "lsr" => {
+                set_lsr_args(&args);
+                lsr::_reset();
+                lsr::_start();
+                lsr::_main();
+                CommandRequest::Handled
+            }
+            "tree" | "tre" => {
+                set_tre_args(&args);
+                tre::_reset();
+                tre::_start();
+                tre::_main();
+                CommandRequest::Handled
+            }
+            "rustc" => {
+                set_rustc_opt_args(&args);
+                rustc_opt::_reset();
+                rustc_opt::_start();
+                rustc_opt::_main();
+                CommandRequest::Handled
+            }
+            "clang" | "llvm" => {
+                set_llvm_opt_args(&args);
+                llvm_opt::_reset();
+                llvm_opt::_start();
+                llvm_opt::_main();
+                CommandRequest::Handled
+            }
+            "echo" => {
+                println!("{}", args[1..].join(" "));
+                CommandRequest::Handled
+            }
+            "download" => {
+                CommandRequest::Download(args.get(1).cloned().unwrap_unwrap_or_default())
+            }
+            _ => {
+                if cmd.contains('/') {
+                    CommandRequest::ExecFile((cmd.to_string(), args[1..].to_vec()))
+                } else {
+                    CommandRequest::NotFound(cmd.to_string())
+                }
             }
         }
-
-        let handle = std::thread::spawn(|| {
-            print_loop();
-        });
-
-        print_loop();
-
-        handle.join().unwrap();
-
-        println!("`init` function done.");
-    }
-
-    fn main() {
-        tre::_reset();
-        tre::_start();
-        set_tre_args(&["--help"]);
-        tre::_main();
-
-        lsr::_reset();
-        lsr::_start();
-        set_lsr_args(&["--help"]);
-        lsr::_main();
     }
 }
+
+trait UnwrapOrDefault { fn unwrap_unwrap_or_default(self) -> String; }
+impl UnwrapOrDefault for Option<String> { fn unwrap_unwrap_or_default(self) -> String { self.unwrap_or_default() } }
 
 export!(Wit);
 
-static VFS: OnceLock<StandardDynamicFileSystem<StandardDynamicLFS<DefaultStdIO>>> = OnceLock::new();
+type LFS = StandardDynamicLFS<DefaultStdIO>;
 
-fn get_vfs() -> &'static StandardDynamicFileSystem<StandardDynamicLFS<DefaultStdIO>> {
-    VFS.get_or_init(|| {
-        let lfs = StandardDynamicLFS::new();
-        let root = lfs.add_preopen("/");
-        let etc = lfs.add_dir(root, "etc").expect("Failed to create etc dir");
-        lfs.add_file(etc, "config.json", b"{\"key\": \"value\"}".to_vec())
-            .expect("Failed to create config.json");
-        StandardDynamicFileSystem::new(lfs)
-    })
-}
+static LFS_ROOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub static VIRTUAL_FILE_SYSTEM: LazyLock<StandardDynamicFileSystem<LFS>> =
+    LazyLock::new(|| {
+        let lfs = StandardDynamicLFS::new(); // Inode 0 is root "."
+        let root_inode = lfs.add_preopen(".");
+        LFS_ROOT.store(root_inode, std::sync::atomic::Ordering::SeqCst);
+        let vfs = StandardDynamicFileSystem::new(lfs);
+        vfs.add_fd(root_inode, !0, !0);
+        vfs
+    });
 
 import_wasm!(lsr);
 import_wasm!(tre);
+import_wasm!(rustc_opt);
+import_wasm!(llvm_opt);
 
-plug_fs!(get_vfs(), lsr, tre);
+plug_fs!(&*VIRTUAL_FILE_SYSTEM, lsr, tre, rustc_opt, llvm_opt);
 
 #[const_struct]
 const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
     environ: &["RUST_MIN_STACK=16777216", "HOME=~/"],
 };
-plug_env!(@embedded, VirtualEnvTy, lsr, tre);
+plug_env!(@embedded, VirtualEnvTy, lsr, tre, rustc_opt, llvm_opt);
 
 pub struct CustomProcess;
 
 const SUCCESS_FLAG: i32 = 999;
 impl wasi_virt_layer::process::ProcessExit for CustomProcess {
-    fn proc_exit<Wasm: WasmAccess>(code: i32) {
+    fn proc_exit<Wasm: WasmAccess + WasmAccessName + 'static>(code: i32) {
         if code == 0 {
-            match core::any::type_name::<Wasm>() {
-                v if v == core::any::type_name::<lsr>() => {
-                    WrapUnreachableLsr::set_flag(SUCCESS_FLAG);
-                }
-                v if v == core::any::type_name::<tre>() => {
-                    WrapUnreachableTre::set_flag(SUCCESS_FLAG);
-                }
+            match Wasm::NAME {
+                lsr::NAME => WrapUnreachableLsr::set_flag(SUCCESS_FLAG),
+                tre::NAME => WrapUnreachableTre::set_flag(SUCCESS_FLAG),
+                rustc_opt::NAME => WrapUnreachableRustcOpt::set_flag(SUCCESS_FLAG),
+                llvm_opt::NAME => WrapUnreachableLlvmOpt::set_flag(SUCCESS_FLAG),
                 _ => unreachable!(),
             }
         } else {
@@ -89,60 +129,35 @@ impl wasi_virt_layer::process::ProcessExit for CustomProcess {
     }
 }
 
-plug_process!(CustomProcess, lsr, tre);
-
-use std::sync::LazyLock;
+plug_process!(CustomProcess, lsr, tre, rustc_opt, llvm_opt);
 
 struct VirtualArgsState {
     args: Vec<String>,
 }
 impl<'a> VirtualArgs<'a> for VirtualArgsState {
     type Str = String;
-
     fn get_args(&mut self) -> &[Self::Str] {
         &self.args
     }
 }
 
-fn set_lsr_args(args: &[impl AsRef<str>]) {
-    let mut state = VIRTUAL_ARGS.lock();
-    state.args = Some("lsr".into())
-        .into_iter()
-        .chain(args.iter().map(|s| s.as_ref().to_string()))
-        .collect();
-}
+fn set_lsr_args(args: &[impl AsRef<str>]) { VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect(); }
+fn set_tre_args(args: &[impl AsRef<str>]) { VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect(); }
+fn set_rustc_opt_args(args: &[impl AsRef<str>]) { VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect(); }
+fn set_llvm_opt_args(args: &[impl AsRef<str>]) { VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect(); }
 
-fn set_tre_args(args: &[impl AsRef<str>]) {
-    let mut state = VIRTUAL_ARGS.lock();
-    state.args = Some("tre".into())
-        .into_iter()
-        .chain(args.iter().map(|s| s.as_ref().to_string()))
-        .collect();
-}
-
-static VIRTUAL_ARGS: LazyLock<Mutex<VirtualArgsState>> = LazyLock::new(|| {
-    let mut args = Vec::<String>::new();
-    args.push("command".into());
-    args.push("arg1".into());
-    Mutex::new(VirtualArgsState { args })
+static VIRTUAL_ARGS: std::sync::LazyLock<Mutex<VirtualArgsState>> = std::sync::LazyLock::new(|| {
+    Mutex::new(VirtualArgsState { args: vec![] })
 });
 
-plug_args!(@dynamic, &mut VIRTUAL_ARGS.lock(), lsr, tre);
+plug_args!(@dynamic, &mut VIRTUAL_ARGS.lock(), lsr, tre, rustc_opt, llvm_opt);
 
-plug_random!(tre);
+plug_random!(StandardRandom, tre, rustc_opt, llvm_opt);
 
 struct UnreachableHandler;
-
 impl wasi_virt_layer::wasi::wrap_unreachable::WrapUnreachable for UnreachableHandler {
-    fn fix_main_raw_exit_code<Wasm: WasmAccess>(code: i32) -> i32 {
-        if code == 0 || code == SUCCESS_FLAG {
-            0
-        } else {
-            eprintln!("Unexpected exit code from main: {code}. Treating as error.");
-            println!("wasm access: {}", core::any::type_name::<Wasm>());
-            code
-        }
+    fn fix_main_raw_exit_code<Wasm: WasmAccess + WasmAccessName + 'static>(code: i32) -> i32 {
+        if code == 0 || code == SUCCESS_FLAG { 0 } else { code }
     }
 }
-
-wrap_unreachable!(UnreachableHandler, tre, lsr);
+wrap_unreachable!(UnreachableHandler, lsr, tre, rustc_opt, llvm_opt);
