@@ -1,9 +1,7 @@
 use const_struct::*;
 use parking_lot::Mutex;
 use std::sync::OnceLock;
-use wasi_virt_layer::{
-    file::*, prelude::*, wasi::wrap_unreachable::WrapUnreachable, wrap_unreachable,
-};
+use wasi_virt_layer::{file::*, prelude::*, wrap_unreachable};
 
 wit_bindgen::generate!({
     // the name of the world in the `*.wit` input file
@@ -76,14 +74,14 @@ const SUCCESS_FLAG: i32 = 999;
 impl wasi_virt_layer::process::ProcessExit for CustomProcess {
     fn proc_exit<Wasm: WasmAccess>(code: i32) {
         if code == 0 {
-          match core::any::type_name::<Wasm>() {
-              v if v == core::any::type_name::<lsr>() => {
-                WrapUnreachableLsr::set_flag(SUCCESS_FLAG);
-              },
-              v if v == core::any::type_name::<tre>() => {
-                WrapUnreachableTre::set_flag(SUCCESS_FLAG);
-              },
-              _ => unreachable!(),
+            match core::any::type_name::<Wasm>() {
+                v if v == core::any::type_name::<lsr>() => {
+                    WrapUnreachableLsr::set_flag(SUCCESS_FLAG);
+                }
+                v if v == core::any::type_name::<tre>() => {
+                    WrapUnreachableTre::set_flag(SUCCESS_FLAG);
+                }
+                _ => unreachable!(),
             }
         } else {
             eprintln!("Process exited with error code {code}.");
