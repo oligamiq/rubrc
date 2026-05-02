@@ -20,6 +20,8 @@ world init {
   
   export run-command: func(args: list<string>) -> command-request;
 
+  export read-from-vfs: func(path: string) -> result<list<u8>, string>;
+  
   export init: func();
   export main: func();
 }

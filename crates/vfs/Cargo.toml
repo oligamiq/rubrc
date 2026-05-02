@@ -6,13 +6,16 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+default = []
+full-tools = []
+
 [dependencies]
 const_struct = "0.6.6"
 parking_lot = { version = "0.12.5", features = ["nightly"] }
 wasi_virt_layer = { version = "0.2.6", features = [
   "dynamic-fs",
   "embedded-fs",
-  "threads",
 ] }
 wit-bindgen = { version = "0.57.1", default-features = false, features = [
   "macros",
