@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WASI on the Web (non-threads, worker-run)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #0b1020; color: #eef2ff; }
+    header { padding: 16px 20px; border-bottom: 1px solid #20263a; background: #0b1020; position: sticky; top: 0; }
+    h1 { margin: 0; font-size: 18px; letter-spacing: .3px; }
+    main { padding: 20px; display: grid; gap: 16px; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    button { padding: 10px 14px; border-radius: 10px; border: 0; background: #4c6fff; color: white; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    .badge { padding: 4px 8px; border-radius: 999px; background: #17203a; color: #9fb2ff; font-size: 12px; }
+    .console { background: #0e1530; border: 1px solid #1b2344; border-radius: 12px; min-height: 220px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; overflow: auto; }
+    .log { white-space: pre-wrap; margin: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WASI on the Web (non-threads, worker-run)</h1>
+  </header>
+  <main>
+    <div class="row">
+      <button id="runBtn">Run WASI</button>
+    </div>
+    <section class="console" id="console"></section>
+  </main>
+
+  <script type="module">
+    const elConsole = document.getElementById('console');
+    const runBtn = document.getElementById('runBtn');
+
+    const append = (text, color) => {
+      const line = document.createElement('div');
+      if (color) line.style.color = color;
+      line.textContent = text;
+      elConsole.appendChild(line);
+      elConsole.scrollTop = elConsole.scrollHeight;
+    };
+    
+    const component_url = new URL('./vfs.js', import.meta.url);
+
+    const workerCode = `
+import { ConsoleStdout, File, OpenFile, PreopenDirectory, WASI } from "https://esm.sh/@bjorn3/browser_wasi_shim";
+import { instantiate } from "${component_url}";
+
+const postLog = (type, msg) => postMessage({ type, msg });
+
+function snakeToCamel(s) {
+  return s.toLowerCase().replace(/_([a-z])/g, (_, l) => l.toUpperCase());
+}
+
+self.onmessage = async (ev) => {
+  const data = ev.data || {};
+  if (data.cmd !== 'run') return;
+
+  try {
+    postLog('status', { running: true });
+
+    const args = data.args || ["bin", "arg1", "arg2"];
+    const env = data.env || ["FOO=bar"];
+    const fds = [
+      new OpenFile(new File([])), // stdin
+      ConsoleStdout.lineBuffered((msg) => postLog('stdout', msg)),
+      ConsoleStdout.lineBuffered((msg) => postLog('stderr', msg)),
+      new PreopenDirectory('.', new Map()),
+    ];
+
+    const wasi = new WASI(args, env, fds);
+
+    let inst;
+    const imports = {};
+    for (const key in wasi.wasiImport) {
+      const innerKey = \`\${snakeToCamel(key)}Import\`;
+      imports[innerKey] = (...a) => wasi.wasiImport[key](...a);
+    }
+
+    postLog('log', 'WASI imports prepared.');
+
+    const root = await instantiate(undefined, {
+      "wasip1-vfs:host/virtual-file-system-wasip1-core": { Wasip1: imports },
+    }, async (module, importsObj) => {
+      inst = await WebAssembly.instantiate(module, importsObj);
+      return inst;
+    });
+
+    if (!inst) throw new Error("inst is not an instance");
+
+    wasi.start({
+      exports: {
+        memory: inst.exports.memory,
+        _start: () => {
+          postLog('log', '[WASI main]');
+          if (root.main) {
+            root.main();
+          } else if (root._start) {
+            root._start();
+          } else if (inst.exports._start) {
+            inst.exports._start();
+          } else if (inst.exports.main) {
+            inst.exports.main();
+          }
+          postLog('log', '[WASI main] done.');
+        },
+      },
+    });
+
+    postLog('done', 'WASI execution finished.');
+  } catch (e) {
+    postLog('error', e && e.message ? e.message : String(e));
+  } finally {
+    postLog('status', { running: false });
+  }
+};
+
+postLog('ready', 'Worker initialized.');
+`;
+
+    // Create the Worker dynamically from a Blob
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    const worker = new Worker(URL.createObjectURL(blob), { type: 'module' });
+
+    let ready = false;
+    let running = false;
+
+    worker.onmessage = (ev) => {
+      const { type, msg } = ev.data || {};
+      switch (type) {
+        case 'ready':
+          ready = true;
+          append('Worker ready.');
+          break;
+        case 'stdout':
+          append('[WASI stdout] ' + msg);
+          break;
+        case 'stderr':
+          append('[WASI stderr] ' + msg, '#ffdb89');
+          break;
+        case 'log':
+          append('[log] ' + msg);
+          break;
+        case 'error':
+          append('[error] ' + msg, '#ff8a8a');
+          break;
+        case 'done':
+          append('[done] ' + msg);
+          break;
+        case 'status':
+          if (msg.running !== undefined) {
+            running = msg.running;
+            runBtn.disabled = running;
+          }
+          break;
+      }
+    };
+
+    runBtn.addEventListener('click', () => {
+      if (!ready) return append('Worker not ready.');
+      if (running) return append('Worker already running.');
+      append('Starting WASI (non-thread build)...');
+      worker.postMessage({ cmd: 'run' });
+    });
+  </script>
+</body>
+</html>
+    
