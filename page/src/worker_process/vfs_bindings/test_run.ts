@@ -1,94 +1,77 @@
-// deno run --allow-read --allow-env dist/test_run.ts
+// npx ts-node test_run.ts
 
-import { ConsoleStdout, File, OpenFile, PreopenDirectory, WASI } from "@bjorn3/browser_wasi_shim";
+import { ConsoleStdout, Fd, File, OpenFile } from "@bjorn3/browser_wasi_shim";
+import { WASIFarm, wait_async_polyfill } from "@oligami/browser_wasi_shim-threads";
 
-// Catch the leaked promise rejection from jco task wrappers on proc_exit
-globalThis.addEventListener("unhandledrejection", (e) => {
-    if (e.reason instanceof Error && e.reason.message.includes("exit with exit code 0")) {
-        e.preventDefault();
-    }
-});
+import { set_fake_worker } from "./common.ts";
 
-    import { instantiate } from "./vfs.js";
-const args = ["bin", "arg1", "arg2"];
-const env = ["FOO=bar"];
-const fds = [
-	new OpenFile(new File([])), // stdin
-	ConsoleStdout.lineBuffered((msg) => console.log(`[WASI stdout] ${msg}`)),
-	ConsoleStdout.lineBuffered((msg) => console.warn(`[WASI stderr] ${msg}`)),
-	new PreopenDirectory(".", new Map()),
-];
-const wasi = new WASI(args, env, fds);
+await set_fake_worker();
 
-let inst: WebAssembly.Instance | undefined = undefined;
+const isNode =
+	(typeof process !== "undefined" && !!process.versions?.node) ||
+	(typeof Deno !== "undefined");
 
-function snakeToCamel(snakeCaseString) {
-    return snakeCaseString.toLowerCase().replace(/_([a-z])/g, (match, letter) => letter.toUpperCase());
-}
+let farm: WASIFarm;
+if (!isNode) {
+    await import("@xterm/xterm/css/xterm.css");
+    const { FitAddon } = await import("xterm-addon-fit");
+    const { Terminal } = await import("@xterm/xterm");
 
-const imports = {};
-for (const key in wasi.wasiImport) {
-    const inner_key = `${snakeToCamel(key)}Import`;
-    imports[inner_key] = (...args) => {
-        // console.log(`[WASI ${inner_key}]`, ...args);
-        const ret = wasi.wasiImport[key](...args);
-        // console.log(`[WASI ${inner_key}] ret`, ret);
-        return ret;
-    }
-}
-console.log(imports);
+    wait_async_polyfill();
 
+	const term = new Terminal({
+		convertEol: true,
+	});
+	const terminalElement = document.getElementById("terminal");
 
-const root = await instantiate(undefined, {
-	"wasip1-vfs:host/virtual-file-system-wasip1-core": {
-        Wasip1: imports,
-    }
-}, async (module, imports) => {
-    inst = await WebAssembly.instantiate(module, imports);
-    return inst;
-});
+	if (!terminalElement) {
+		throw new Error("No terminal element found");
+	}
 
-if (inst === undefined) {
-    throw new Error("inst is not an instance");
-}
-inst = inst as WebAssembly.Instance;
+	term.open(terminalElement);
 
-let p;
-try {
-    wasi.start({
-        exports: {
-            memory: inst.exports.memory as WebAssembly.Memory,
-            _start: () => {
-                // init only
-                console.log("[WASI main]");
-                if (root.main) {
-                    p = root.main();
-                } else if (root._start) {
-                    p = root._start();
-                } else if (inst.exports._start) {
-                    p = (inst.exports._start as Function)();
-                } else if (inst.exports.main) {
-                    p = (inst.exports.main as Function)();
-                }
-                console.log("[WASI main] done.");
-            }
-        },
-    });
-} catch (e) {
-    // Ignore proc_exit errors (exit code 0 is success)
-    if (e instanceof Error && e.message.includes("exit with exit code 0")) {
-        // Expected behavior - normal exit
-    } else {
-        throw e;
-    }
-}
+	const fitAddon = new FitAddon();
+	term.loadAddon(fitAddon);
+	fitAddon.fit();
 
-if (p) {
-    await Promise.resolve(p).catch((e: any) => {
-        if (e instanceof Error && e.message.includes("exit with exit code 0")) {
-            // Expected behavior - normal exit
-        } else {
-            throw e;
-        }
-    });
+	class XtermStdio extends Fd {
+		term: Terminal;
+
+		constructor(term: Terminal) {
+			super();
+			this.term = term;
+		}
+		fd_write(data: Uint8Array) /*: {ret: number, nwritten: number}*/ {
+			const str = new TextDecoder().decode(data);
+			this.term.write(str);
+			console.log(str);
+			return { ret: 0, nwritten: data.byteLength };
+		}
+	}
+
+	farm = new WASIFarm(
+		new XtermStdio(term),
+		new XtermStdio(term),
+		new XtermStdio(term),
+		[],
+	);
+
+	const worker = new Worker("./worker.ts", { type: "module" });
+
+	worker.postMessage({
+		wasi_ref: farm.get_ref(),
+	});
+} else {
+	farm = new WASIFarm(
+		new OpenFile(new File([])), // stdin
+		ConsoleStdout.lineBuffered((msg) => console.log(`[WASI stdout] ${msg}`)),
+		ConsoleStdout.lineBuffered((msg) => console.warn(`[WASI stderr] ${msg}`)),
+		[],
+	);
+
+	const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+
+	worker.postMessage({
+        wasi_ref: farm.get_ref(),
+	});
 }

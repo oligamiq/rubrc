@@ -20,10 +20,15 @@ export interface CommandRequestNotFound {
   val: string,
 }
 import type * as Wasip1VfsHostVirtualFileSystemWasip1Core from './interfaces/wasip1-vfs-host-virtual-file-system-wasip1-core.js'; // wasip1-vfs:host/virtual-file-system-wasip1-core
+import type * as Wasip1VfsHostVirtualFileSystemWasip1ThreadsImport from './interfaces/wasip1-vfs-host-virtual-file-system-wasip1-threads-import.js'; // wasip1-vfs:host/virtual-file-system-wasip1-threads-import
+import type * as Wasip1VfsHostVirtualFileSystemWasip1ThreadsExport from './interfaces/wasip1-vfs-host-virtual-file-system-wasip1-threads-export.js'; // wasip1-vfs:host/virtual-file-system-wasip1-threads-export
 export interface ImportObject {
   'wasip1-vfs:host/virtual-file-system-wasip1-core': typeof Wasip1VfsHostVirtualFileSystemWasip1Core,
+  'wasip1-vfs:host/virtual-file-system-wasip1-threads-import': typeof Wasip1VfsHostVirtualFileSystemWasip1ThreadsImport,
 }
 export interface Root {
+  'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': typeof Wasip1VfsHostVirtualFileSystemWasip1ThreadsExport,
+  virtualFileSystemWasip1ThreadsExport: typeof Wasip1VfsHostVirtualFileSystemWasip1ThreadsExport,
   flushToVfs(files: Array<FileEntry>): void,
   flushFromVfs(): Array<FileEntry>,
   runCommand(args: Array<string>): CommandRequest,
