@@ -11,13 +11,14 @@ default = []
 full-tools = []
 
 [dependencies]
-const_struct = "0.6.6"
-parking_lot = { version = "0.12.5", features = ["nightly"] }
-wasi_virt_layer = { version = "0.2.6", features = [
+wasi_virt_layer = { version = "0.2.17", default-features = false, features = [
   "dynamic-fs",
   # "embedded-fs",
   "threads",
 ] }
+const_struct = "0.6.6"
+parking_lot = { version = "0.12.5", features = ["nightly"] }
+# version = "0.2.6",
 wit-bindgen = { version = "0.57.1", default-features = false, features = [
   "macros",
   "std",

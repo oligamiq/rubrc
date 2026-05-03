@@ -1,7 +1,9 @@
 fn main() {
     std::thread::spawn(|| {
         println!("Hello from a thread!");
-    }).join().unwrap();
+    })
+    .join()
+    .unwrap();
 
     println!("Hello from the main thread!");
 }
