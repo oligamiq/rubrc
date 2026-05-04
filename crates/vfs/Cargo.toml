@@ -11,7 +11,7 @@ default = []
 full-tools = []
 
 [dependencies]
-wasi_virt_layer = { version = "0.2.17", default-features = false, features = [
+wasi_virt_layer = { version = "0.3.3", default-features = false, features = [
   "dynamic-fs",
   # "embedded-fs",
   "threads",
