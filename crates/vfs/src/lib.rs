@@ -82,8 +82,16 @@ import_wasm!(rustc_mock);
 #[cfg(not(feature = "full-tools"))]
 import_wasm!(llvm_mock);
 
+#[cfg(feature = "full-tools")]
+import_wasm!(rustc_opt);
+#[cfg(feature = "full-tools")]
+import_wasm!(llvm_opt);
+
 #[cfg(not(feature = "full-tools"))]
 plug_fs!(&*VIRTUAL_FILE_SYSTEM, self, lsr, tre, rustc_mock, llvm_mock);
+
+#[cfg(feature = "full-tools")]
+plug_fs!(&*VIRTUAL_FILE_SYSTEM, self, lsr, tre, rustc_opt, llvm_opt);
 
 #[const_struct]
 const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
@@ -103,5 +111,8 @@ plug_random!(StandardRandom, tre, rustc_mock, llvm_mock);
 static THREAD_POOL: VirtualThreadPool<ThreadAccessor> =
     unsafe { VirtualThreadPool::new_const(1) };
 
+#[cfg(not(feature = "full-tools"))]
 plug_thread!({ &THREAD_POOL }, self, rustc_mock);
 
+#[cfg(feature = "full-tools")]
+plug_thread!({ &THREAD_POOL }, self, rustc_opt);
