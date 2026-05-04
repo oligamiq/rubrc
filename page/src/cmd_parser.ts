@@ -65,7 +65,13 @@ const all_done = async (ctx: Ctx) => {
       
       // Rust handles everything (parsing + internal execution OR requesting TS action)
       // In the new architecture, we just call the delegated runner in util_cmd.ts
+      end_of_exec = false;
       await delegated_run(...args);
+
+      // wait for end_of_exec
+      while (!end_of_exec) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
 
       await terminal(">");
       is_cmd_run_end = true;
@@ -74,6 +80,10 @@ const all_done = async (ctx: Ctx) => {
 
   // Initial help/test
   await terminal("rustc -h\r\n");
+  end_of_exec = false;
   await delegated_run("rustc", "-h");
+  while (!end_of_exec) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
   await terminal(">");
 };

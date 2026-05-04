@@ -125,10 +125,10 @@ import_wasm!(rustc_opt);
 import_wasm!(llvm_opt);
 
 #[cfg(not(feature = "full-tools"))]
-plug_fs!(&*VIRTUAL_FILE_SYSTEM, self, lsr, tre, rustc_mock, llvm_mock);
+plug_fs!(&*VIRTUAL_FILE_SYSTEM, lsr, tre, rustc_mock, llvm_mock);
 
 #[cfg(feature = "full-tools")]
-plug_fs!(&*VIRTUAL_FILE_SYSTEM, self, lsr, tre, rustc_opt, llvm_opt);
+plug_fs!(&*VIRTUAL_FILE_SYSTEM, lsr, tre, rustc_opt, llvm_opt);
 
 #[const_struct]
 const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
