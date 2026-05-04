@@ -1,5 +1,6 @@
 use const_struct::*;
 use parking_lot::Mutex;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 use wasi_virt_layer::{
     file::*,
@@ -14,6 +15,11 @@ wit_bindgen::generate!({
 });
 
 struct Wit;
+
+/// Shadow storage for TS↔Rust file synchronization.
+/// Tracks all files synced via flush_to_vfs so they can be returned by flush_from_vfs.
+static SYNC_STORAGE: LazyLock<Mutex<HashMap<String, Vec<u8>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 impl Guest for Wit {
     fn init() {}
@@ -35,15 +41,44 @@ impl Guest for Wit {
 
     fn flush_to_vfs(files: Vec<FileEntry>) {
         let root = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
+        let mut storage = SYNC_STORAGE.lock();
+
         for f in files {
-            let _ = VIRTUAL_FILE_SYSTEM
-                .lfs
-                .add_file(root, &f.path.replace("/", "_"), f.content);
+            // Store in shadow storage for later retrieval
+            storage.insert(f.path.clone(), f.content.clone());
+
+            // Create directory hierarchy and add file to VFS
+            let path = f.path.trim_start_matches('/');
+            let parts: Vec<&str> = path.split('/').collect();
+
+            if parts.len() <= 1 {
+                // File at root level
+                let name = if parts.is_empty() { &f.path } else { parts[0] };
+                let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(root, name, f.content);
+            } else {
+                // Create intermediate directories, then add the file
+                let mut current_parent = root;
+                for dir_name in &parts[..parts.len() - 1] {
+                    current_parent = VIRTUAL_FILE_SYSTEM.lfs.add_dir(current_parent, dir_name)
+                        .unwrap_or(current_parent);
+                }
+                let file_name = parts[parts.len() - 1];
+                let _ = VIRTUAL_FILE_SYSTEM
+                    .lfs
+                    .add_file(current_parent, file_name, f.content);
+            }
         }
     }
 
     fn flush_from_vfs() -> Vec<FileEntry> {
-        vec![]
+        let storage = SYNC_STORAGE.lock();
+        storage
+            .iter()
+            .map(|(path, content)| FileEntry {
+                path: path.clone(),
+                content: content.clone(),
+            })
+            .collect()
     }
 
     fn run_command(args: Vec<String>) -> CommandRequest {
@@ -51,9 +86,11 @@ impl Guest for Wit {
     }
 
     fn read_from_vfs(path: String) -> Result<Vec<u8>, String> {
-        let _root = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
-        let path_clean = path.replace("/", "_");
-        Err(format!("File not found: {}", path_clean))
+        let storage = SYNC_STORAGE.lock();
+        storage
+            .get(&path)
+            .cloned()
+            .ok_or_else(|| format!("File not found: {}", path))
     }
 }
 
