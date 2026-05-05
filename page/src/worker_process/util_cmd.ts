@@ -14,86 +14,6 @@ await set_fake_worker();
 
 const shared: SharedObject[] = [];
 
-/**
- * List all files recursively under a given directory fd in the WASI filesystem.
- * Returns an array of { path, content } entries.
- */
-function listFilesRecursive(
-	animal: any,
-	base_fd: number,
-	wasi_farm_ref_n: number,
-	base_path: string,
-): { path: string; content: Uint8Array }[] {
-	const results: { path: string; content: Uint8Array }[] = [];
-
-	// Read directory entries
-	const mapped_fd_info = animal.get_fd_and_wasi_ref_n(base_fd);
-	if (!mapped_fd_info) return results;
-
-	const [mapped_fd] = mapped_fd_info;
-
-	// Try to read directory contents using fd_readdir
-	const buf_size = 4096;
-	const [dir_entries, readdir_ret] = animal.wasi_farm_refs[
-		wasi_farm_ref_n
-	].fd_readdir(mapped_fd, buf_size, 0n);
-
-	if (readdir_ret !== wasi.ERRNO_SUCCESS || !dir_entries) {
-		return results;
-	}
-
-	// Parse directory entries from the buffer
-	let offset = 0;
-	const buf = dir_entries;
-	while (offset + 24 <= buf.length) {
-		// dirent structure: d_next(8) + d_ino(8) + d_namlen(4) + d_type(1) = 25 bytes header
-		// But aligned, the standard WASI dirent is 24 bytes
-		const d_namlen = buf[offset + 16] | (buf[offset + 17] << 8) | (buf[offset + 18] << 16) | (buf[offset + 19] << 24);
-		const d_type = buf[offset + 20];
-
-		if (offset + 24 + d_namlen > buf.length) break;
-
-		const name = new TextDecoder().decode(buf.slice(offset + 24, offset + 24 + d_namlen));
-		offset += 24 + d_namlen;
-
-		// Skip . and ..
-		if (name === "." || name === "..") continue;
-
-		const full_path = base_path ? `${base_path}/${name}` : name;
-
-		if (d_type === 4) {
-			// Directory - recurse
-			// Open the sub-directory
-			const [sub_fd, open_ret] = animal.wasi_farm_refs[wasi_farm_ref_n].path_open(
-				mapped_fd,
-				0,
-				new TextEncoder().encode(name),
-				wasi.OFLAGS_DIRECTORY,
-				0n,
-				0n,
-				0,
-			);
-			if (open_ret === wasi.ERRNO_SUCCESS) {
-				const sub_mapped_fd = animal.map_new_fd_and_notify(sub_fd, wasi_farm_ref_n);
-				const sub_results = listFilesRecursive(animal, sub_mapped_fd, wasi_farm_ref_n, full_path);
-				results.push(...sub_results);
-				animal.wasi_farm_refs[wasi_farm_ref_n].fd_close(sub_fd);
-			}
-		} else {
-			// File - read content
-			try {
-				const abs_path = base_path ? `/${base_path}/${name}` : `/${name}`;
-				const content = get_data(abs_path, animal);
-				results.push({ path: abs_path, content });
-			} catch (e) {
-				console.warn(`Failed to read file for sync: ${full_path}`, e);
-			}
-		}
-	}
-
-	return results;
-}
-
 globalThis.addEventListener("message", async (event) => {
 	const {
 		wasi_refs,
@@ -151,82 +71,18 @@ globalThis.addEventListener("message", async (event) => {
 	// Initialize VFS component (runs its main function which sets up thread pool etc.)
 	animal.start(vfs_root as any);
 
-	// --- Sync functions ---
-
-	/**
-	 * Sync files from TS WASI filesystem → Rust VFS.
-	 * Reads all files from the TS filesystem and sends them to the Rust VFS via flushToVfs.
-	 */
-	const syncToRust = () => {
-		try {
-			const files: { path: string; content: Uint8Array }[] = [];
-
-			// Iterate over all preopen directories and collect files
-			for (let fd = 0; fd < animal.fd_map.length; fd++) {
-				const fd_info = animal.get_fd_and_wasi_ref(fd);
-				if (!fd_info) continue;
-				const [mapped_fd, wasi_farm_ref] = fd_info;
-				if (mapped_fd === undefined || wasi_farm_ref === undefined) continue;
-
-				const [prestat, ret] = wasi_farm_ref.fd_prestat_get(mapped_fd);
-				if (ret !== wasi.ERRNO_SUCCESS || !prestat) continue;
-
-				const [tag, name_len] = prestat;
-				if (tag !== wasi.PREOPENTYPE_DIR) continue;
-
-				const [path_buf, dir_ret] = wasi_farm_ref.fd_prestat_dir_name(mapped_fd, name_len);
-				if (dir_ret !== wasi.ERRNO_SUCCESS || !path_buf) continue;
-
-				const dir_path = new TextDecoder().decode(path_buf);
-				const [, wasi_farm_ref_n] = animal.get_fd_and_wasi_ref_n(fd);
-
-				const dir_files = listFilesRecursive(animal, fd, wasi_farm_ref_n, dir_path === "/" ? "" : dir_path.replace(/^\//, ""));
-				files.push(...dir_files);
-			}
-
-			if (files.length > 0) {
-				console.log(`syncToRust: syncing ${files.length} files`);
-				vfs_root.flushToVfs(files);
-			}
-		} catch (e) {
-			console.error("syncToRust failed:", e);
-		}
-	};
-
-	/**
-	 * Sync files from Rust VFS → TS WASI filesystem.
-	 * Retrieves all files from the Rust VFS and writes them to the TS filesystem.
-	 */
-	const syncFromRust = () => {
-		try {
-			const files = vfs_root.flushFromVfs();
-			if (files.length > 0) {
-				console.log(`syncFromRust: syncing ${files.length} files`);
-			}
-			for (const file of files) {
-				try {
-					write_data(file.path, file.content, animal);
-				} catch (e) {
-					console.warn(`syncFromRust: failed to write ${file.path}:`, e);
-				}
-			}
-		} catch (e) {
-			console.error("syncFromRust failed:", e);
-		}
-	};
-
 	// --- Command delegation ---
 	shared.push(
 		new SharedObject((...args: string[]) => {
 			(async () => {
 				try {
 					// Sync TS → Rust before command processing
-					syncToRust();
+					vfs_root.flushToVfs();
 
 					const request = vfs_root.runCommand(args);
 
 					// Sync Rust → TS after command processing
-					syncFromRust();
+					vfs_root.flushFromVfs();
 
 					if (request.tag === 'handled') {
 						// Done
@@ -242,12 +98,12 @@ globalThis.addEventListener("message", async (event) => {
 						animal.args = [exec_file, ...exec_args];
 
 						// --- Before Wasm execution: TS → Rust ---
-						syncToRust();
+						vfs_root.flushToVfs();
 
 						animal.start(inst);
 
 						// --- After Wasm execution: Rust → TS ---
-						syncFromRust();
+						vfs_root.flushFromVfs();
 
 					} else if (request.tag === 'download') {
 						const file_path = request.val;

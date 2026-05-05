@@ -1,25 +1,16 @@
 use const_struct::*;
-use parking_lot::Mutex;
-use std::collections::HashMap;
-use std::sync::LazyLock;
 use wasi_virt_layer::{
     file::*,
-    memory::WasmAccessName,
     prelude::*,
     thread::VirtualThreadPool,
-    wrap_unreachable,
 };
+use std::path::{Path, PathBuf};
 
 wit_bindgen::generate!({
     world: "init",
 });
 
 struct Wit;
-
-/// Shadow storage for TS↔Rust file synchronization.
-/// Tracks all files synced via flush_to_vfs so they can be returned by flush_from_vfs.
-static SYNC_STORAGE: LazyLock<Mutex<HashMap<String, Vec<u8>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 impl Guest for Wit {
     fn init() {}
@@ -39,58 +30,59 @@ impl Guest for Wit {
         }
     }
 
-    fn flush_to_vfs(files: Vec<FileEntry>) {
+    fn flush_to_vfs() {
         let root = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
-        let mut storage = SYNC_STORAGE.lock();
-
-        for f in files {
-            // Store in shadow storage for later retrieval
-            storage.insert(f.path.clone(), f.content.clone());
-
-            // Create directory hierarchy and add file to VFS
-            let path = f.path.trim_start_matches('/');
-            let parts: Vec<&str> = path.split('/').collect();
-
-            if parts.len() <= 1 {
-                // File at root level
-                let name = if parts.is_empty() { &f.path } else { parts[0] };
-                let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(root, name, f.content);
-            } else {
-                // Create intermediate directories, then add the file
-                let mut current_parent = root;
-                for dir_name in &parts[..parts.len() - 1] {
-                    current_parent = VIRTUAL_FILE_SYSTEM.lfs.add_dir(current_parent, dir_name)
-                        .unwrap_or(current_parent);
+        
+        fn walk_host(dir: &Path, vfs_parent: usize) {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    
+                    if path.is_dir() {
+                        let vfs_child = VIRTUAL_FILE_SYSTEM.lfs.add_dir(vfs_parent, &name)
+                            .unwrap_or(vfs_parent);
+                        walk_host(&path, vfs_child);
+                    } else if path.is_file() {
+                        if let Ok(content) = std::fs::read(&path) {
+                            let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(vfs_parent, &name, content);
+                        }
+                    }
                 }
-                let file_name = parts[parts.len() - 1];
-                let _ = VIRTUAL_FILE_SYSTEM
-                    .lfs
-                    .add_file(current_parent, file_name, f.content);
             }
         }
+        
+        walk_host(Path::new("."), root);
     }
 
-    fn flush_from_vfs() -> Vec<FileEntry> {
-        let storage = SYNC_STORAGE.lock();
-        storage
-            .iter()
-            .map(|(path, content)| FileEntry {
-                path: path.clone(),
-                content: content.clone(),
-            })
-            .collect()
+    fn flush_from_vfs() {
+        let root = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
+        
+        fn walk_vfs(vfs_inode: usize, host_path: PathBuf) {
+            if let Ok(entries) = VIRTUAL_FILE_SYSTEM.lfs.read_dir(vfs_inode) {
+                for (name, child_inode) in entries {
+                    if name == "." || name == ".." { continue; }
+                    let child_path = host_path.join(&name);
+                    
+                    // Try to list as directory to check if it is one
+                    if VIRTUAL_FILE_SYSTEM.lfs.read_dir(child_inode).is_ok() {
+                        let _ = std::fs::create_dir_all(&child_path);
+                        walk_vfs(child_inode, child_path);
+                    } else {
+                        // Treat as file
+                        if let Ok(content) = VIRTUAL_FILE_SYSTEM.lfs.read_file(child_inode) {
+                            let _ = std::fs::write(&child_path, content);
+                        }
+                    }
+                }
+            }
+        }
+        
+        walk_vfs(root, PathBuf::from("."));
     }
 
     fn run_command(args: Vec<String>) -> CommandRequest {
         command::handle_command(args)
-    }
-
-    fn read_from_vfs(path: String) -> Result<Vec<u8>, String> {
-        let storage = SYNC_STORAGE.lock();
-        storage
-            .get(&path)
-            .cloned()
-            .ok_or_else(|| format!("File not found: {}", path))
     }
 }
 
@@ -102,7 +94,7 @@ static LFS_ROOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize
 pub mod process;
 pub mod command;
 
-pub static VIRTUAL_FILE_SYSTEM: LazyLock<StandardDynamicFileSystem<LFS>> = LazyLock::new(|| {
+pub static VIRTUAL_FILE_SYSTEM: std::sync::LazyLock<StandardDynamicFileSystem<LFS>> = std::sync::LazyLock::new(|| {
     let lfs = StandardDynamicLFS::new();
     let root_inode = lfs.add_preopen(".");
     LFS_ROOT.store(root_inode, std::sync::atomic::Ordering::SeqCst);

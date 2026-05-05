@@ -1,8 +1,4 @@
 // world root:component/root
-export interface FileEntry {
-  path: string,
-  content: Uint8Array,
-}
 export type CommandRequest = CommandRequestHandled | CommandRequestDownload | CommandRequestExecFile | CommandRequestNotFound;
 export interface CommandRequestHandled {
   tag: 'handled',
@@ -29,13 +25,11 @@ export interface ImportObject {
 export interface Root {
   'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': typeof Wasip1VfsHostVirtualFileSystemWasip1ThreadsExport,
   virtualFileSystemWasip1ThreadsExport: typeof Wasip1VfsHostVirtualFileSystemWasip1ThreadsExport,
-  flushToVfs(files: Array<FileEntry>): void,
-  flushFromVfs(): Array<FileEntry>,
+  flushToVfs(): void,
+  flushFromVfs(): void,
   runCommand(args: Array<string>): CommandRequest,
-  readFromVfs(path: string): Uint8Array,
   init(): void,
   main(): void,
-  export type Result<T, E> = { tag: 'ok', val: T } | { tag: 'err', val: E };
 }
 
 /**
