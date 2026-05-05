@@ -32,13 +32,13 @@ impl Guest for Wit {
 
     fn flush_to_vfs() {
         let root = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
-        
+
         fn walk_host(dir: &Path, vfs_parent: usize) {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     let name = path.file_name().unwrap().to_string_lossy().to_string();
-                    
+
                     if path.is_dir() {
                         let vfs_child = VIRTUAL_FILE_SYSTEM.lfs.add_dir(vfs_parent, &name)
                             .unwrap_or(vfs_parent);
@@ -51,19 +51,19 @@ impl Guest for Wit {
                 }
             }
         }
-        
+
         walk_host(Path::new("."), root);
     }
 
     fn flush_from_vfs() {
         let root = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
-        
+
         fn walk_vfs(vfs_inode: usize, host_path: PathBuf) {
             if let Ok(entries) = VIRTUAL_FILE_SYSTEM.lfs.read_dir(vfs_inode) {
                 for (name, child_inode) in entries {
                     if name == "." || name == ".." { continue; }
                     let child_path = host_path.join(&name);
-                    
+
                     // Try to list as directory to check if it is one
                     if VIRTUAL_FILE_SYSTEM.lfs.read_dir(child_inode).is_ok() {
                         let _ = std::fs::create_dir_all(&child_path);
@@ -77,7 +77,7 @@ impl Guest for Wit {
                 }
             }
         }
-        
+
         walk_vfs(root, PathBuf::from("."));
     }
 
@@ -93,6 +93,7 @@ static LFS_ROOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize
 
 pub mod process;
 pub mod command;
+pub mod shell;
 
 pub static VIRTUAL_FILE_SYSTEM: std::sync::LazyLock<StandardDynamicFileSystem<LFS>> = std::sync::LazyLock::new(|| {
     let lfs = StandardDynamicLFS::new();
@@ -103,8 +104,7 @@ pub static VIRTUAL_FILE_SYSTEM: std::sync::LazyLock<StandardDynamicFileSystem<LF
     vfs
 });
 
-import_wasm!(lsr);
-import_wasm!(tre);
+import_wasm!(vfs_shell);
 
 #[cfg(not(feature = "full-tools"))]
 import_wasm!(rustc_mock);
@@ -117,10 +117,10 @@ import_wasm!(rustc_opt);
 import_wasm!(llvm_opt);
 
 #[cfg(not(feature = "full-tools"))]
-plug_fs!(&*VIRTUAL_FILE_SYSTEM, lsr, tre, rustc_mock, llvm_mock);
+plug_fs!(&*VIRTUAL_FILE_SYSTEM, rustc_mock, llvm_mock, vfs_shell);
 
 #[cfg(feature = "full-tools")]
-plug_fs!(&*VIRTUAL_FILE_SYSTEM, lsr, tre, rustc_opt, llvm_opt);
+plug_fs!(&*VIRTUAL_FILE_SYSTEM, rustc_opt, llvm_opt, vfs_shell);
 
 #[const_struct]
 const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
@@ -129,19 +129,25 @@ const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
 };
 
 #[cfg(not(feature = "full-tools"))]
-plug_env!(@embedded, VirtualEnvTy, lsr, tre, rustc_mock, llvm_mock);
+plug_env!(@embedded, VirtualEnvTy, rustc_mock, llvm_mock, vfs_shell);
 
-// plug_process!(StandardProcess, lsr, tre, rustc_mock, llvm_mock);
+// plug_process!(StandardProcess, rustc_mock, llvm_mock);
 
 
 #[cfg(not(feature = "full-tools"))]
-plug_random!(StandardRandom, tre, rustc_mock, llvm_mock);
+plug_random!(StandardRandom, rustc_mock, llvm_mock, vfs_shell);
+
+#[cfg(not(feature = "full-tools"))]
+plug_poll!(DefaultPoll, rustc_mock, llvm_mock, vfs_shell);
+
+#[cfg(feature = "full-tools")]
+plug_poll!(DefaultPoll, rustc_opt, llvm_opt, vfs_shell);
 
 static THREAD_POOL: VirtualThreadPool<ThreadAccessor> =
     unsafe { VirtualThreadPool::new_const(1) };
 
 #[cfg(not(feature = "full-tools"))]
-plug_thread!({ &THREAD_POOL }, self, rustc_mock);
+plug_thread!({ &THREAD_POOL }, self, rustc_mock, vfs_shell);
 
 #[cfg(feature = "full-tools")]
-plug_thread!({ &THREAD_POOL }, self, rustc_opt);
+plug_thread!({ &THREAD_POOL }, self, rustc_opt, vfs_shell);

@@ -3,7 +3,7 @@ use wasi_virt_layer::memory::WasmAccessName;
 use wasi_virt_layer::process::ProcessExit;
 use wasi_virt_layer::wasi::wrap_unreachable::WrapUnreachable;
 
-use crate::{lsr, tre};
+use crate::{vfs_shell};
 #[cfg(not(feature = "full-tools"))]
 use crate::{rustc_mock, llvm_mock};
 #[cfg(feature = "full-tools")]
@@ -17,12 +17,6 @@ impl ProcessExit for CustomProcess {
     fn proc_exit<Wasm: WasmAccess + WasmAccessName + 'static>(code: i32) {
         if code == 0 {
             match Wasm::NAME {
-                lsr::NAME => {
-                    WrapUnreachableLsr::set_flag(SUCCESS_FLAG)
-                }
-                tre::NAME => {
-                    WrapUnreachableTre::set_flag(SUCCESS_FLAG)
-                }
                 #[cfg(not(feature = "full-tools"))]
                 rustc_mock::NAME => {
                     WrapUnreachableRustcMock::set_flag(SUCCESS_FLAG)
@@ -39,6 +33,9 @@ impl ProcessExit for CustomProcess {
                 llvm_opt::NAME => {
                     WrapUnreachableLlvmOpt::set_flag(SUCCESS_FLAG)
                 }
+                vfs_shell::NAME => {
+                    WrapUnreachableVfsShell::set_flag(SUCCESS_FLAG)
+                }
                 _ => unreachable!(),
             }
         }
@@ -46,10 +43,10 @@ impl ProcessExit for CustomProcess {
 }
 
 #[cfg(not(feature = "full-tools"))]
-wasi_virt_layer::plug_process!(CustomProcess, lsr, tre, rustc_mock, llvm_mock);
+wasi_virt_layer::plug_process!(CustomProcess, rustc_mock, llvm_mock, vfs_shell);
 
 #[cfg(feature = "full-tools")]
-wasi_virt_layer::plug_process!(CustomProcess, lsr, tre, rustc_opt, llvm_opt);
+wasi_virt_layer::plug_process!(CustomProcess, rustc_opt, llvm_opt, vfs_shell);
 
 pub struct UnreachableHandler;
 
@@ -64,7 +61,7 @@ impl WrapUnreachable for UnreachableHandler {
 }
 
 #[cfg(not(feature = "full-tools"))]
-wasi_virt_layer::wrap_unreachable!(UnreachableHandler, lsr, tre, rustc_mock, llvm_mock);
+wasi_virt_layer::wrap_unreachable!(UnreachableHandler, rustc_mock, llvm_mock, vfs_shell);
 
 #[cfg(feature = "full-tools")]
-wasi_virt_layer::wrap_unreachable!(UnreachableHandler, lsr, tre, rustc_opt, llvm_opt);
+wasi_virt_layer::wrap_unreachable!(UnreachableHandler, rustc_opt, llvm_opt, vfs_shell);

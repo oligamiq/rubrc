@@ -1,0 +1,8 @@
+[package]
+name = "vfs-shell"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wasi-shell = "1.0.5"
+colored = "2"
