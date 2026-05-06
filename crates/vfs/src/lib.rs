@@ -88,7 +88,34 @@ impl Guest for Wit {
 
 export!(Wit);
 
-type LFS = StandardDynamicLFS<DefaultStdIO>;
+#[derive(Debug)]
+pub struct ShellVirtualStdIO;
+
+impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
+    fn write(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        let id = crate::shell::CURRENT_CONTEXT_ID.with(|id| id.get()).unwrap_or(0);
+        if id != 0 {
+            let written = unsafe { crate::shell::vfs_shell_write_stdout(id, buf.as_ptr(), buf.len()) };
+            Ok(written)
+        } else {
+            wasi_virt_layer::wasi::file::stdio::DefaultStdIO::write(buf)
+        }
+    }
+    fn ewrite(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        let id = crate::shell::CURRENT_CONTEXT_ID.with(|id| id.get()).unwrap_or(0);
+        if id != 0 {
+            let written = unsafe { crate::shell::vfs_shell_write_stderr(id, buf.as_ptr(), buf.len()) };
+            Ok(written)
+        } else {
+            wasi_virt_layer::wasi::file::stdio::DefaultStdIO::ewrite(buf)
+        }
+    }
+    fn read(buf: &mut [u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        wasi_virt_layer::wasi::file::stdio::DefaultStdIO::read(buf)
+    }
+}
+
+type LFS = StandardDynamicLFS<ShellVirtualStdIO>;
 static LFS_ROOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub mod process;
@@ -151,3 +178,5 @@ plug_thread!({ &THREAD_POOL }, self, rustc_mock, vfs_shell);
 
 #[cfg(feature = "full-tools")]
 plug_thread!({ &THREAD_POOL }, self, rustc_opt, vfs_shell);
+
+plug_clock!(StandardClock, vfs_shell);

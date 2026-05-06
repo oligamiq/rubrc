@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 wasi-shell = "1.0.5"
 colored = "2"
+dashmap = "6.1.0"

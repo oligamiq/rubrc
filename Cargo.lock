@@ -298,6 +298,20 @@ dependencies = [
 
 [[package]]
 name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
+name = "dashmap"
 version = "7.0.0-rc2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4a1e35a65fe0538a60167f0ada6e195ad5d477f6ddae273943596d4a1a5730b"
@@ -410,6 +424,12 @@ checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
 dependencies = [
  "byteorder",
 ]
+
+[[package]]
+name = "hashbrown"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 
 [[package]]
 name = "hashbrown"
@@ -908,6 +928,7 @@ name = "vfs-shell"
 version = "0.1.0"
 dependencies = [
  "colored 2.2.0",
+ "dashmap 6.1.0",
  "wasi-shell",
 ]
 
@@ -931,13 +952,13 @@ dependencies = [
 
 [[package]]
 name = "wasi_virt_layer"
-version = "0.3.4"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e514832551b25777f4b293ec3aa3bcc0463f2599cc44fe26a9d1c84cc3599b49"
+checksum = "7a79247eac3ceb77fde050813fc41b6d80163db73431450d912fe929878ec8b4"
 dependencies = [
  "const_for",
  "const_struct",
- "dashmap",
+ "dashmap 7.0.0-rc2",
  "flume",
  "fxhash",
  "parking_lot",
