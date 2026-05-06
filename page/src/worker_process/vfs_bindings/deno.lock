@@ -2,7 +2,7 @@
   "version": "5",
   "specifiers": {
     "npm:@bjorn3/browser_wasi_shim@~0.4.2": "0.4.2",
-    "npm:@oligami/browser_wasi_shim-threads@~0.2.2": "0.2.3_@bjorn3+browser_wasi_shim@0.4.2",
+    "npm:@oligami/browser_wasi_shim-threads@~0.2.3": "0.2.3_@bjorn3+browser_wasi_shim@0.4.2",
     "npm:@xterm/xterm@^5.5.0": "5.5.0",
     "npm:ts-node@^10.9.2": "10.9.2_@types+node@25.6.0_typescript@6.0.3",
     "npm:vite@^7.1.7": "7.3.2_@types+node@25.6.0",
@@ -517,7 +517,7 @@
     "packageJson": {
       "dependencies": [
         "npm:@bjorn3/browser_wasi_shim@~0.4.2",
-        "npm:@oligami/browser_wasi_shim-threads@~0.2.2",
+        "npm:@oligami/browser_wasi_shim-threads@~0.2.3",
         "npm:@xterm/xterm@^5.5.0",
         "npm:ts-node@^10.9.2",
         "npm:vite@^7.1.7",
