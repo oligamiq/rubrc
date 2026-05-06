@@ -4,7 +4,7 @@ import { render } from "solid-js/web";
 
 import App from "./App";
 import { gen_ctx } from "./ctx";
-import MainWorker from "./worker_process/worker?worker";
+import MainWorkerPath from "./worker_process/worker?worker&url";
 import { parser_setup } from "./cmd_parser";
 import "./monaco_worker";
 import { compile_and_run_setup } from "./compile_and_run";
@@ -20,7 +20,7 @@ if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
 const ctx = gen_ctx();
 
 // create worker
-const worker = new MainWorker();
+const worker = new Worker(MainWorkerPath, { type: "module" });
 
 parser_setup(ctx);
 compile_and_run_setup(ctx);

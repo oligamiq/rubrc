@@ -100,8 +100,16 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
     fn write(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
         let id = crate::shell::CURRENT_CONTEXT_ID.with(|id| id.get()).unwrap_or(0);
         if id != 0 {
-            let written = unsafe { crate::shell::vfs_shell_write_stdout(id, buf.as_ptr(), buf.len()) };
-            Ok(written)
+            let len = buf.len() as u32;
+            // 1. Allocate buffer in vfs-shell's memory
+            let shell_ptr = unsafe { crate::shell::vfs_shell_alloc_buf(len) };
+            // 2. Copy our data into vfs-shell's memory via cross-Wasm memcpy
+            vfs_shell::memcpy(shell_ptr as *mut u8, buf);
+            // 3. Tell vfs-shell to write from its own memory (scalar-only call)
+            let written = unsafe { crate::shell::vfs_shell_write_stdout(id, shell_ptr, len) };
+            // 4. Free the buffer in vfs-shell's memory
+            unsafe { crate::shell::vfs_shell_free_buf(shell_ptr, len) };
+            Ok(written as usize)
         } else {
             wasi_virt_layer::wasi::file::stdio::DefaultStdIO::write(buf)
         }
@@ -109,8 +117,12 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
     fn ewrite(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
         let id = crate::shell::CURRENT_CONTEXT_ID.with(|id| id.get()).unwrap_or(0);
         if id != 0 {
-            let written = unsafe { crate::shell::vfs_shell_write_stderr(id, buf.as_ptr(), buf.len()) };
-            Ok(written)
+            let len = buf.len() as u32;
+            let shell_ptr = unsafe { crate::shell::vfs_shell_alloc_buf(len) };
+            vfs_shell::memcpy(shell_ptr as *mut u8, buf);
+            let written = unsafe { crate::shell::vfs_shell_write_stderr(id, shell_ptr, len) };
+            unsafe { crate::shell::vfs_shell_free_buf(shell_ptr, len) };
+            Ok(written as usize)
         } else {
             wasi_virt_layer::wasi::file::stdio::DefaultStdIO::ewrite(buf)
         }

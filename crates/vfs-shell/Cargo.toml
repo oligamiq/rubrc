@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-wasi-shell = "1.0.5"
+wasi-shell = "1.0.7"
 colored = "2"
 dashmap = "6.1.0"

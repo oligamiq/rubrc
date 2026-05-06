@@ -35,13 +35,7 @@ pub fn set_vfs_shell_args(args: &[impl AsRef<str>]) {
     VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect();
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn vfs_set_args(ptr: *const u8, len: usize) {
-    let s = unsafe { std::slice::from_raw_parts(ptr, len) };
-    let s = String::from_utf8_lossy(s);
-    let args: Vec<String> = s.split('\0').map(|s| s.to_string()).collect();
-    VIRTUAL_ARGS.lock().args = args;
-}
+
 
 #[cfg(not(feature = "full-tools"))]
 wasi_virt_layer::plug_args!(@dynamic, { &mut VIRTUAL_ARGS.lock() }, rustc_mock, llvm_mock, vfs_shell);
@@ -54,12 +48,8 @@ pub fn handle_command(args: Vec<String>) -> CommandRequest {
     match cmd {
         "download" => CommandRequest::Download(args.get(1).cloned().unwrap_or_default()),
         _ => {
-            let mut shell_args = vec!["vfs-shell".to_string()];
-            shell_args.extend(args);
-            set_vfs_shell_args(&shell_args);
-            vfs_shell::_reset();
-            vfs_shell::_start();
-            vfs_shell::_main_raw();
+            println!("Unknown command: {cmd}");
+
             CommandRequest::Handled
         }
     }

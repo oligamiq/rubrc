@@ -828,9 +828,9 @@ dependencies = [
 
 [[package]]
 name = "sl-rust"
-version = "1.0.6"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19876ae879c0cc3b77e4de04594d5b15a3d31581710aca7c190d84afa6c04bd4"
+checksum = "ddf304eef8b8e9d38123f8ab7203272023cc5b76fca288b5f67cb81bb6024167"
 dependencies = [
  "crossterm",
 ]
@@ -918,7 +918,6 @@ version = "0.1.0"
 dependencies = [
  "const_struct",
  "parking_lot",
- "wasi-shell",
  "wasi_virt_layer",
  "wit-bindgen 0.57.1",
 ]
@@ -940,9 +939,9 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasi-shell"
-version = "1.0.6"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5edb98fc5e45e8b805d5759d4583a52d5ceaf6dbcece068176ff80e4d1662dd0"
+checksum = "3bf73e14768513814633aff468857ec25ad994a226eb345d91dfaab658b58efd"
 dependencies = [
  "colored 3.1.1",
  "shlex",
@@ -972,9 +971,9 @@ dependencies = [
 
 [[package]]
 name = "wasibox-core"
-version = "1.0.6"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "305ef398fd6893d0244b66e42c8ea880dd72b49def1b5c719f704522e7362680"
+checksum = "186930c0fd4d0964e4b3070a638d39b8d2b11aad3f1901342f86be9805c7fe04"
 dependencies = [
  "chrono",
  "clap",
