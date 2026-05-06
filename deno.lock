@@ -2845,7 +2845,11 @@
     "https://deno.land/std@0.224.0/path/windows/to_file_url.ts": "40e560ee4854fe5a3d4d12976cef2f4e8914125c81b11f1108e127934ced502e",
     "https://deno.land/std@0.224.0/path/windows/to_namespaced_path.ts": "4ffa4fb6fae321448d5fe810b3ca741d84df4d7897e61ee29be961a6aac89a4c",
     "https://esm.sh/@bjorn3/browser_wasi_shim@0.3.0": "74e299deaa3f7201e4c6aaf93352d9490715aae748be45eaf14ef8c5b720dd18",
-    "https://esm.sh/@bjorn3/browser_wasi_shim@0.3.0/denonext/browser_wasi_shim.mjs": "78b218a11b6f0b74f63266cb04d2c3ed3e5bf1a130d7fe679409a5bf7778b77c"
+    "https://esm.sh/@bjorn3/browser_wasi_shim@0.3.0/denonext/browser_wasi_shim.mjs": "78b218a11b6f0b74f63266cb04d2c3ed3e5bf1a130d7fe679409a5bf7778b77c",
+    "https://esm.sh/@bjorn3/browser_wasi_shim@0.4.2": "9abf20dc3baed79fc5254fc31b8b8ac51a716dfc30cc4594e6089d240956a9d1",
+    "https://esm.sh/@bjorn3/browser_wasi_shim@0.4.2/denonext/browser_wasi_shim.mjs": "3a029b976fd3012fca516afe40d03f82e932b31ecaa9d39ac68677862c7b35ae",
+    "https://esm.sh/@oligami/browser_wasi_shim-threads@0.2.3": "56677d06a95898e6f3ac57837807eec94e924c4ac521ce24b01b2b7309865efb",
+    "https://esm.sh/@oligami/browser_wasi_shim-threads@0.2.3/denonext/browser_wasi_shim-threads.mjs": "5bab3c0430a5f8e67307127e7b3e141f4cc8412581c278a020fea9e615445e4a"
   },
   "workspace": {
     "packageJson": {

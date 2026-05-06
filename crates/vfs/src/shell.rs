@@ -1,4 +1,4 @@
-#[link(wasm_import_module = "wasip1_vfs_vfs_shell")]
+#[link(wasm_import_module = "wasip1_vfs_vfs-shell")]
 unsafe extern "C" {
     pub fn vfs_shell_write_stdout(id: u32, data: *const u8, len: usize) -> usize;
     pub fn vfs_shell_write_stderr(id: u32, data: *const u8, len: usize) -> usize;

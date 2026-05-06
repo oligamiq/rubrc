@@ -27,7 +27,7 @@
       "name": "Deno (Dev)",
       "type": "node",
       "request": "launch",
-      "program": "${workspaceFolder}/test_run.ts",
+      "program": "${workspaceFolder}/deno_test_parallel.ts",
       "args": [],
       "runtimeExecutable": "deno",
       "runtimeArgs": [

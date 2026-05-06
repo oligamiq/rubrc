@@ -54,7 +54,9 @@ pub fn handle_command(args: Vec<String>) -> CommandRequest {
     match cmd {
         "download" => CommandRequest::Download(args.get(1).cloned().unwrap_or_default()),
         _ => {
-            set_vfs_shell_args(&args);
+            let mut shell_args = vec!["vfs-shell".to_string()];
+            shell_args.extend(args);
+            set_vfs_shell_args(&shell_args);
             vfs_shell::_reset();
             vfs_shell::_start();
             vfs_shell::_main_raw();

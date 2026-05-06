@@ -19,15 +19,20 @@ impl Guest for Wit {
         THREAD_POOL.set_capacity(2);
         THREAD_POOL.flush_capacity().wait();
 
-        // test print all help
-        Self::run_command(vec!["ls".to_string(), "--help".to_string()]);
-        Self::run_command(vec!["tree".to_string(), "--help".to_string()]);
+        vfs_shell::_reset();
+        vfs_shell::_start();
+        vfs_shell::_main();
 
-        #[cfg(not(feature = "full-tools"))]
-        {
-            Self::run_command(vec!["rustc".to_string(), "--help".to_string()]);
-            Self::run_command(vec!["clang".to_string(), "--help".to_string()]);
-        }
+        // test print all help
+        // Self::run_command(vec!["ls".to_string(), "--help".to_string()]);
+        // Self::run_command(vec!["tree".to_string(), "--help".to_string()]);
+        // Self::run_command(vec!["echo LS_HELP && ls --help".to_string()]);
+
+        // #[cfg(not(feature = "full-tools"))]
+        // {
+        //     Self::run_command(vec!["rustc".to_string(), "--help".to_string()]);
+        //     Self::run_command(vec!["clang".to_string(), "--help".to_string()]);
+        // }
     }
 
     fn flush_to_vfs() {

@@ -45,12 +45,6 @@ unsafe extern "C" {
 }
 
 fn main() {
-    let mut input = String::new();
-    let stdin = io::stdin();
-
-    println!("{}", "Welcome to WASI-Shell!".green().bold());
-    println!("Type 'help' for available commands or 'exit' to quit.");
-
     let mut reg = CommandRegistry::new();
     reg.set_fallback(|args: &[String], io: &mut IoContext| {
         let args_str = args.join("\0"); // serialize args
@@ -70,19 +64,34 @@ fn main() {
     });
     let registry = Arc::new(reg);
 
+    let stdin = io::stdin();
+
+    println!("{}", "Welcome to WASI-Shell!".green().bold());
+    println!("Type 'help' for available commands or 'exit' to quit.");
+
+    let mut pre_lines = vec![
+        "echo Hello, World!",
+        "ls -la",
+        "tree",
+    ];
+
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     loop {
-        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         print!("{} $ ", cwd.display().to_string().cyan());
         io::stdout().flush().unwrap();
 
-        input.clear();
-        let n = stdin.read_line(&mut input).unwrap_or(0);
-        if n == 0 || input.trim() == "exit" {
-            if n != 0 { println!("Goodbye!"); }
-            break;
-        }
+        let line = if let Some(pre_line) = pre_lines.pop() {
+            println!("{}", pre_line);
+            pre_line.to_string()
+        } else {
+            let mut line = String::new();
+            if stdin.read_line(&mut line).unwrap_or(0) == 0 {
+                println!("Goodbye!");
+                break;
+            }
+            line
+        };
 
-        let line = input.trim();
         if line.is_empty() {
             continue;
         }
