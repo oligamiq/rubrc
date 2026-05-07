@@ -66,77 +66,20 @@ export const SetupMyTerminal = (props: {
     };
   };
 
-  let keys = "";
+  const input_char = new SharedObjectRef(props.ctx.input_char_id).proxy<
+    (c: number) => Promise<void>
+  >();
 
-  const waiter = new SharedObjectRef(props.ctx.waiter_id).proxy<{
-    is_all_done: () => boolean;
-  }>();
-  let cmd_parser: (...string) => void;
-
-  let before_cmd = "";
-  const on_enter = async (terminal) => {
-    if (keys) {
-      before_cmd = keys;
-    }
-    terminal.write("\r\n");
-    if (await waiter.is_all_done()) {
-      cmd_parser = new SharedObjectRef(props.ctx.cmd_parser_id).proxy<
-        (...string) => void
-      >();
-      const parsed = keys.split(" ");
-      await cmd_parser(...parsed);
-    } else {
-      terminal.write("this is not done yet\r\n");
-    }
-    keys = "";
-  };
-  const keydown = (
-    event: { key: string; domEvent: KeyboardEvent },
-    terminal,
-  ) => {
-    // console.log(event);
-
-    if (event.key === "\r") {
-      terminal.write("\r\n");
-      on_enter(terminal);
-    } else if (event.domEvent.code === "Backspace") {
-      terminal.write("\b \b");
-      keys = keys.slice(0, -1);
-    } else if (event.domEvent.code === "ArrowUp") {
-      keys = before_cmd;
-      terminal.write(`\r>${keys}`);
-    } else if (
-      // Ctrl + V
-      event.domEvent.ctrlKey &&
-      event.domEvent.code === "KeyV"
-    ) {
-      navigator.clipboard.readText().then((text) => {
-        keys += text;
-        terminal.write(text);
-      });
-    }
-  };
   const onData = (data: string) => {
-    // if Backspace, ArrowUp: do nothing
-    if (data === "\x7F" || data === "\u001b[A" || data === "\r") {
-      return;
+    for (let i = 0; i < data.length; i++) {
+      input_char(data.charCodeAt(i)).catch(console.error);
     }
-
-    keys += data;
-
-    if (xterm) {
-      xterm.write(data);
-    } else {
-      terminal_queue.push(data);
-    }
-    // console.log(`data received: ${data}`);
   };
 
   // You can pass either an ITerminalAddon constructor or an instance, depending on whether you need to access it later.
   return (
     <XTerm
       onMount={handleMount}
-      onKey={keydown}
       onData={onData}
       addons={[fit_addon]}
       class="w-full"

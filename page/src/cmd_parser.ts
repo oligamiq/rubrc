@@ -46,44 +46,8 @@ export const parser_setup = async (ctx: Ctx) => {
   await all_done(ctx);
 };
 
-let cmd_parser: SharedObject;
-
 const all_done = async (ctx: Ctx) => {
   const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
     (string: string) => Promise<void>
   >();
-  
-  // Repurpose exec_file_id to be our "delegated command runner" which uses the Rust VFS
-  const delegated_run = new SharedObjectRef(ctx.exec_file_id).proxy<
-    (...args: string[]) => Promise<void>
-  >();
-
-  cmd_parser = new SharedObject((...args) => {
-    is_cmd_run_end = false;
-    (async (args: string[]) => {
-      console.log("Parsing command via Rust:", args);
-      
-      // Rust handles everything (parsing + internal execution OR requesting TS action)
-      // In the new architecture, we just call the delegated runner in util_cmd.ts
-      end_of_exec = false;
-      await delegated_run(...args);
-
-      // wait for end_of_exec
-      while (!end_of_exec) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-
-      await terminal(">");
-      is_cmd_run_end = true;
-    })(args);
-  }, ctx.cmd_parser_id);
-
-  // Initial help/test
-  await terminal("rustc -h\r\n");
-  end_of_exec = false;
-  await delegated_run("rustc", "-h");
-  while (!end_of_exec) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  await terminal(">");
 };

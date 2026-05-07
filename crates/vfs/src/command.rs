@@ -5,8 +5,7 @@ use wasi_virt_layer::memory::WasmAccessRaw;
 use crate::{vfs_shell};
 #[cfg(not(feature = "full-tools"))]
 use crate::{rustc_mock, llvm_mock};
-use crate::CommandRequest;
-
+// removed CommandRequest
 pub struct VirtualArgsState {
     pub args: Vec<String>,
 }
@@ -40,17 +39,17 @@ pub fn set_vfs_shell_args(args: &[impl AsRef<str>]) {
 #[cfg(not(feature = "full-tools"))]
 wasi_virt_layer::plug_args!(@dynamic, { &mut VIRTUAL_ARGS.lock() }, rustc_mock, llvm_mock, vfs_shell);
 
-pub fn handle_command(args: Vec<String>) -> CommandRequest {
+pub fn handle_command(args: Vec<String>) {
     if args.is_empty() {
-        return CommandRequest::Handled;
+        return;
     }
     let cmd = args[0].as_str();
     match cmd {
-        "download" => CommandRequest::Download(args.get(1).cloned().unwrap_or_default()),
+        "download" => {
+            println!("Download requested: {}", args.get(1).unwrap_or(&String::new()));
+        }
         _ => {
             println!("Unknown command: {cmd}");
-
-            CommandRequest::Handled
         }
     }
 }

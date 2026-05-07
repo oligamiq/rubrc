@@ -1155,27 +1155,15 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
     
     const ERR_CTX_TABLES = {};
     
-    let dv = new DataView(new ArrayBuffer());
-    const dataView = mem => dv.buffer === mem.buffer ? dv : dv = new DataView(mem.buffer);
-    
     function toInt32(val) {
       
       return val >> 0;
     }
     
-    const TEXT_DECODER_UTF8 = new TextDecoder();
-    const TEXT_ENCODER_UTF8 = new TextEncoder();
     
-    function _utf8AllocateAndEncode(s, realloc, memory) {
-      if (typeof s !== 'string') {
-        throw new TypeError('expected a string, received [' + typeof s + ']');
-      }
-      if (s.length === 0) { return { ptr: 1, len: 0 }; }
-      let buf = TEXT_ENCODER_UTF8.encode(s);
-      let ptr = realloc(0, 0, 1, buf.length);
-      new Uint8Array(memory.buffer).set(buf, ptr);
-      const res = { ptr, len: buf.length, codepoints: [...s].length };
-      return res;
+    function toUint32(val) {
+      
+      return val >>> 0;
     }
     
     
@@ -2904,8 +2892,6 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       return fetch(url).then(WebAssembly.compileStreaming);
     }
     
-    const isLE = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
-    
     
     if (!getCoreModule) getCoreModule = (name) => fetchCompile(new URL(`./${name}`, import.meta.url));
     const module0 = getCoreModule('vfs.core.wasm');
@@ -4279,11 +4265,6 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       }
       _trampoline17.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.procExitImport';
       let exports0;
-      let memory0;
-      let realloc0;
-      let realloc0Async;
-      let postReturn0;
-      let postReturn0Async;
       let exports0FlushToVfs;
       
       function flushToVfs() {
@@ -4384,27 +4365,14 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
-      let exports0RunCommand;
+      let exports0InputChar;
       
-      function runCommand(arg0) {
-        var vec1 = arg0;
-        var len1 = vec1.length;
-        var result1 = realloc0(0, 0, 4, len1 * 8);
-        for (let i = 0; i < vec1.length; i++) {
-          const e = vec1[i];
-          const base = result1 + i * 8;
-          var encodeRes = _utf8AllocateAndEncode(e, realloc0, memory0);
-          var ptr0= encodeRes.ptr;
-          var len0 = encodeRes.len;
-          
-          dataView(memory0).setUint32(base + 4, len0, true);
-          dataView(memory0).setUint32(base + 0, ptr0, true);
-        }
-        _debugLog('[iface="run-command", function="run-command"][Instruction::CallWasm] enter', {
-          funcName: 'run-command',
-          paramCount: 2,
+      function inputChar(arg0) {
+        _debugLog('[iface="input-char", function="input-char"][Instruction::CallWasm] enter', {
+          funcName: 'input-char',
+          paramCount: 1,
           async: false,
-          postReturn: true,
+          postReturn: false,
         });
         const hostProvided = false;
         
@@ -4412,7 +4380,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           componentIdx: 0,
           isAsync: false,
           isManualAsync: false,
-          entryFnName: 'exports0RunCommand',
+          entryFnName: 'exports0InputChar',
           getCallbackFn: () => null,
           callbackFnName: 'null',
           errHandling: 'none',
@@ -4420,16 +4388,14 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         });
         
         const started = task.enterSync();
-        task.setReturnMemoryIdx(0);
-        task.setReturnMemory(memory0);
         
         let ret;
         
         try {
-          ret =   _withGlobalCurrentTaskMeta({
+          _withGlobalCurrentTaskMeta({
             taskID: task.id(),
             componentIdx: task.componentIdx(),
-            fn: () => exports0RunCommand(result1, len1),
+            fn: () => exports0InputChar(toUint32(arg0)),
           });
         } catch (err) {
           
@@ -4440,74 +4406,14 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
         }
         
-        let variant7;
-        switch (dataView(memory0).getUint8(ret + 0, true)) {
-          case 0: {
-            variant7= {
-              tag: 'handled',
-            };
-            break;
-          }
-          case 1: {
-            var ptr2 = dataView(memory0).getUint32(ret + 4, true);
-            var len2 = dataView(memory0).getUint32(ret + 8, true);
-            var result2 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr2, len2));
-            variant7= {
-              tag: 'download',
-              val: result2
-            };
-            break;
-          }
-          case 2: {
-            var ptr3 = dataView(memory0).getUint32(ret + 4, true);
-            var len3 = dataView(memory0).getUint32(ret + 8, true);
-            var result3 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr3, len3));
-            var len5 = dataView(memory0).getUint32(ret + 16, true);
-            var base5 = dataView(memory0).getUint32(ret + 12, true);
-            var result5 = [];
-            for (let i = 0; i < len5; i++) {
-              const base = base5 + i * 8;
-              var ptr4 = dataView(memory0).getUint32(base + 0, true);
-              var len4 = dataView(memory0).getUint32(base + 4, true);
-              var result4 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr4, len4));
-              result5.push(result4);
-            }
-            variant7= {
-              tag: 'exec-file',
-              val: [result3, result5]
-            };
-            break;
-          }
-          case 3: {
-            var ptr6 = dataView(memory0).getUint32(ret + 4, true);
-            var len6 = dataView(memory0).getUint32(ret + 8, true);
-            var result6 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr6, len6));
-            variant7= {
-              tag: 'not-found',
-              val: result6
-            };
-            break;
-          }
-          default: {
-            throw new TypeError('invalid variant discriminant for CommandRequest');
-          }
-        }
-        _debugLog('[iface="run-command", function="run-command"][Instruction::Return]', {
-          funcName: 'run-command',
-          paramCount: 1,
+        _debugLog('[iface="input-char", function="input-char"][Instruction::Return]', {
+          funcName: 'input-char',
+          paramCount: 0,
           async: false,
-          postReturn: true
+          postReturn: false
         });
-        task.resolve([variant7]);
-        const retCopy = variant7;
-        
-        let cstate = getOrCreateAsyncState(0);
-        cstate.mayLeave = false;
-        postReturn0(ret);
-        cstate.mayLeave = true;
+        task.resolve([ret]);
         task.exit();
-        return retCopy;
-        
       }
       let exports0Init;
       
@@ -5385,26 +5291,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           '[static]wasip1-threads.thread-spawn-import': trampoline1,
         },
       }));
-      memory0 = exports0.memory;
-      realloc0 = exports0.cabi_realloc;
-      
-      try {
-        realloc0Async = WebAssembly.promising(exports0.cabi_realloc);
-      } catch(err) {
-        realloc0Async = exports0.cabi_realloc;
-      }
-      
-      postReturn0 = exports0['cabi_post_run-command'];
-      
-      try {
-        postReturn0Async = WebAssembly.promising(exports0['cabi_post_run-command']);
-      } catch(err) {
-        postReturn0Async = exports0['cabi_post_run-command'];
-      }
-      
       exports0FlushToVfs = exports0['flush-to-vfs'];
       exports0FlushFromVfs = exports0['flush-from-vfs'];
-      exports0RunCommand = exports0['run-command'];
+      exports0InputChar = exports0['input-char'];
       exports0Init = exports0.init;
       exports0Main = exports0.main;
       virtualFileSystemWasip1ThreadsExportWasiThreadStart = exports0['wasip1-vfs:host/virtual-file-system-wasip1-threads-export#wasi-thread-start'];
@@ -5413,7 +5302,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         
       };
       
-      return { virtualFileSystemWasip1ThreadsExport, flushFromVfs, flushToVfs, init, main, runCommand, 'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': virtualFileSystemWasip1ThreadsExport,  };
+      return { virtualFileSystemWasip1ThreadsExport, flushFromVfs, flushToVfs, init, inputChar, main, 'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': virtualFileSystemWasip1ThreadsExport,  };
     })();
     let promise, resolve, reject;
     function runNext (value) {

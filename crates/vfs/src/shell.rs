@@ -22,6 +22,9 @@ unsafe extern "C" {
     pub fn vfs_shell_write_stdout(id: u32, ptr: u32, len: u32) -> u32;
     /// Write stderr: ptr/len refer to vfs-shell's own memory
     pub fn vfs_shell_write_stderr(id: u32, ptr: u32, len: u32) -> u32;
+
+    /// Send a character to vfs-shell
+    pub fn vfs_shell_input_char(c: u32);
 }
 
 thread_local! {

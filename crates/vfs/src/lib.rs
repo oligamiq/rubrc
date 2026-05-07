@@ -86,8 +86,8 @@ impl Guest for Wit {
         walk_vfs(root, PathBuf::from("."));
     }
 
-    fn run_command(args: Vec<String>) -> CommandRequest {
-        command::handle_command(args)
+    fn input_char(c: u32) {
+        unsafe { crate::shell::vfs_shell_input_char(c) };
     }
 }
 

@@ -1,6 +1,6 @@
 import { wait_async_polyfill } from "@oligami/browser_wasi_shim-threads";
 // @ts-ignore
-import run from "./node_modules/@oligami/browser_wasi_shim-threads/dist/worker_background_worker.min.js";
+import run from "@oligami/browser_wasi_shim-threads/worker_background_worker";
 
 import { set_fake_worker } from "./common.ts";
 

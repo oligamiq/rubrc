@@ -12,6 +12,7 @@ export type Ctx = {
   download_by_url_id: string;
   load_additional_sysroot_id: string;
   llvm_id: string;
+  input_char_id: string;
 };
 
 export const gen_ctx = (): Ctx => {
@@ -27,5 +28,6 @@ export const gen_ctx = (): Ctx => {
     download_by_url_id: uuidv4(),
     load_additional_sysroot_id: uuidv4(),
     llvm_id: uuidv4(),
+    input_char_id: uuidv4(),
   };
 };

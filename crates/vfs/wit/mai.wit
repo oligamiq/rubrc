@@ -2,19 +2,11 @@
 package hello:host;
 
 world init {
-  variant command-request {
-    handled,
-    download(string),
-    exec-file(tuple<string, list<string>>),
-    not-found(string),
-  }
 
   export flush-to-vfs: func();
   
   export flush-from-vfs: func();
-  
-  export run-command: func(args: list<string>) -> command-request;
-
+  export input-char: func(c: u32);
   export init: func();
   export main: func();
 }

@@ -113,7 +113,7 @@ unsafe extern "C" {
 // Main shell loop
 // ============================================================
 
-fn main() {
+static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
     let mut reg = CommandRegistry::with_builtins();
     reg.set_fallback(|args: &[String], io: &mut IoContext| {
         println!("Executing command: {:?}", args);
@@ -138,47 +138,38 @@ fn main() {
             Err(format!("Command exited with status: {}", status))
         }
     });
-    let registry = Arc::new(reg);
+    Arc::new(reg)
+});
 
-    let stdin = io::stdin();
+static INPUT_BUFFER: Mutex<String> = Mutex::new(String::new());
 
-    println!("{}", "Welcome to WASI-Shell!".green().bold());
-    println!("Type 'help' for available commands or 'exit' to quit.");
-
-    let mut pre_lines = vec![
-        "help",
-        "echo Hello, World!",
-        "ls -la",
-        "tree",
-    ];
-    pre_lines.reverse();
-
+fn print_prompt() {
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    loop {
-        print!("{} $ ", cwd.display().to_string().cyan());
-        io::stdout().flush().unwrap();
+    print!("{} $ ", cwd.display().to_string().cyan());
+    io::stdout().flush().unwrap();
+}
 
-        let line = if let Some(pre_line) = pre_lines.pop() {
-            println!("{}", pre_line);
-            pre_line.to_string()
-        } else {
-            let mut line = String::new();
-            if stdin.read_line(&mut line).unwrap_or(0) == 0 {
-                println!("Goodbye!");
-                break;
-            }
-            line
-        };
+#[unsafe(no_mangle)]
+pub extern "C" fn vfs_shell_input_char(c: u32) {
+    let c_char = std::char::from_u32(c).unwrap_or('?');
+
+    if c_char == '\n' || c_char == '\r' {
+        let mut buf = INPUT_BUFFER.lock().unwrap();
+        let line = buf.clone();
+        buf.clear();
+
+        println!();
 
         if line.is_empty() {
-            continue;
+            print_prompt();
+            return;
         }
 
         let results = handle_parallel(
-            vec![line.to_string()],
+            vec![line],
             Box::new(io::stdin()),
             Box::new(io::stdout()),
-            Arc::clone(&registry),
+            Arc::clone(&REGISTRY),
         );
 
         for res in results {
@@ -186,5 +177,48 @@ fn main() {
                 eprintln!("{}", e.red());
             }
         }
+
+        print_prompt();
+    } else if c == 8 || c == 127 { // Backspace or DEL
+        let mut buf = INPUT_BUFFER.lock().unwrap();
+        if buf.pop().is_some() {
+            print!("\x08 \x08");
+            io::stdout().flush().unwrap();
+        }
+    } else {
+        INPUT_BUFFER.lock().unwrap().push(c_char);
+        print!("{}", c_char);
+        io::stdout().flush().unwrap();
     }
+}
+
+fn main() {
+    let _ = LazyLock::force(&REGISTRY);
+
+    println!("{}", "Welcome to WASI-Shell!".green().bold());
+    println!("Type 'help' for available commands or 'exit' to quit.");
+
+    let pre_lines = vec![
+        "help",
+        "echo Hello, World!",
+        "ls -la",
+        "tree",
+    ];
+
+    for line in pre_lines {
+        println!("{}", line);
+        let results = handle_parallel(
+            vec![line.to_string()],
+            Box::new(io::stdin()),
+            Box::new(io::stdout()),
+            Arc::clone(&REGISTRY),
+        );
+        for res in results {
+            if let Err(e) = res {
+                eprintln!("{}", e.red());
+            }
+        }
+    }
+
+    print_prompt();
 }

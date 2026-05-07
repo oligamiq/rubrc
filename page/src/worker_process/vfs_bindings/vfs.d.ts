@@ -1,20 +1,4 @@
 // world root:component/root
-export type CommandRequest = CommandRequestHandled | CommandRequestDownload | CommandRequestExecFile | CommandRequestNotFound;
-export interface CommandRequestHandled {
-  tag: 'handled',
-}
-export interface CommandRequestDownload {
-  tag: 'download',
-  val: string,
-}
-export interface CommandRequestExecFile {
-  tag: 'exec-file',
-  val: [string, Array<string>],
-}
-export interface CommandRequestNotFound {
-  tag: 'not-found',
-  val: string,
-}
 import type * as Wasip1VfsHostVirtualFileSystemWasip1Core from './interfaces/wasip1-vfs-host-virtual-file-system-wasip1-core.js'; // wasip1-vfs:host/virtual-file-system-wasip1-core
 import type * as Wasip1VfsHostVirtualFileSystemWasip1ThreadsImport from './interfaces/wasip1-vfs-host-virtual-file-system-wasip1-threads-import.js'; // wasip1-vfs:host/virtual-file-system-wasip1-threads-import
 import type * as Wasip1VfsHostVirtualFileSystemWasip1ThreadsExport from './interfaces/wasip1-vfs-host-virtual-file-system-wasip1-threads-export.js'; // wasip1-vfs:host/virtual-file-system-wasip1-threads-export
@@ -27,7 +11,7 @@ export interface Root {
   virtualFileSystemWasip1ThreadsExport: typeof Wasip1VfsHostVirtualFileSystemWasip1ThreadsExport,
   flushToVfs(): void,
   flushFromVfs(): void,
-  runCommand(args: Array<string>): CommandRequest,
+  inputChar(c: number): void,
   init(): void,
   main(): void,
 }
