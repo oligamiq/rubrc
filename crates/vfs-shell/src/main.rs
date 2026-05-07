@@ -203,6 +203,7 @@ fn main() {
         "echo Hello, World!",
         "ls -la",
         "tree",
+        "seq | grep 2 | head -n5",
     ];
 
     for line in pre_lines {

@@ -5,7 +5,7 @@
     "npm:@oligami/browser_wasi_shim-threads@~0.3.2": "0.3.2_@bjorn3+browser_wasi_shim@0.4.2",
     "npm:@xterm/xterm@^5.5.0": "5.5.0",
     "npm:ts-node@^10.9.2": "10.9.2_@types+node@25.6.0_typescript@6.0.3",
-    "npm:vite@^7.1.7": "7.3.2_@types+node@25.6.0",
+    "npm:vite@^7.1.7": "7.3.3_@types+node@25.6.0",
     "npm:xterm-addon-fit@0.8": "0.8.0_xterm@5.3.0"
   },
   "npm": {
@@ -479,8 +479,8 @@
     "v8-compile-cache-lib@3.0.1": {
       "integrity": "sha512-wa7YjyUGfNZngI/vtK0UHAN+lgDCxBPCylVXGp0zu59Fz5aiGtNXaq3DhIov063MorB+VfufLh3JlF2KdTK3xg=="
     },
-    "vite@7.3.2_@types+node@25.6.0": {
-      "integrity": "sha512-Bby3NOsna2jsjfLVOHKes8sGwgl4TT0E6vvpYgnAYDIF/tie7MRaFthmKuHx1NSXjiTueXH3do80FMQgvEktRg==",
+    "vite@7.3.3_@types+node@25.6.0": {
+      "integrity": "sha512-/4XH147Ui7OGTjg3HbdWe5arnZQSbfuRzdr9Ec7TQi5I7R+ir0Rlc9GIvD4v0XZurELqA035KVXJXpR61xhiTA==",
       "dependencies": [
         "@types/node",
         "esbuild",

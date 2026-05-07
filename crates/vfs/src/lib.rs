@@ -2,6 +2,7 @@ use const_struct::*;
 use wasi_virt_layer::{
     file::*,
     prelude::*,
+    poll::*,
     thread::VirtualThreadPool,
 };
 use std::path::{Path, PathBuf};
@@ -16,7 +17,7 @@ impl Guest for Wit {
     fn init() {}
     fn main() {
         unsafe { THREAD_POOL.init() };
-        THREAD_POOL.set_capacity(2);
+        THREAD_POOL.set_capacity(8);
         THREAD_POOL.flush_capacity().wait();
 
         vfs_shell::_reset();
@@ -182,10 +183,10 @@ plug_env!(@embedded, VirtualEnvTy, rustc_mock, llvm_mock, vfs_shell);
 plug_random!(StandardRandom, rustc_mock, llvm_mock, vfs_shell);
 
 #[cfg(not(feature = "full-tools"))]
-plug_poll!(DefaultPoll, rustc_mock, llvm_mock, vfs_shell);
+plug_poll!(WaitPoll, rustc_mock, llvm_mock, vfs_shell);
 
 #[cfg(feature = "full-tools")]
-plug_poll!(DefaultPoll, rustc_opt, llvm_opt, vfs_shell);
+plug_poll!(WaitPoll, rustc_opt, llvm_opt, vfs_shell);
 
 static THREAD_POOL: VirtualThreadPool<ThreadAccessor> =
     unsafe { VirtualThreadPool::new_const(1) };

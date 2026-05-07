@@ -9,6 +9,7 @@ export class Wasip1 {
   static environGetImport(environPtrPtr: number, environBufPtr: number): number;
   static procExitImport(code: number): void;
   static randomGetImport(bufPtr: number, bufLen: number): number;
+  static schedYieldImport(): number;
   static clockTimeGetImport(id: number, precision: bigint, timestampPtr: number): number;
   static fdFdstatGetImport(fd: number, fdstatPtr: number): number;
   static fdWriteImport(fd: number, iovsPtr: number, iovsLen: number, writtenPtr: number): number;
@@ -21,5 +22,4 @@ export class Wasip1 {
   static pathOpenImport(fd: number, dirflags: number, pathPtr: number, pathLen: number, oflags: number, fsRightsBase: bigint, fsRightsInheriting: bigint, fdflags: number, fdOutPtr: number): number;
   static pathCreateDirectoryImport(fd: number, pathPtr: number, pathLen: number): number;
   static pathFilestatGetImport(fd: number, lookupflags: number, pathPtr: number, pathLen: number, filestatPtr: number): number;
-  static pollOneoffImport(subscriptionPtr: number, resultsPtr: number, nSubscriptions: number, storedPtr: number): number;
 }
