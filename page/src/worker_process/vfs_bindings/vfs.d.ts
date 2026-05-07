@@ -12,6 +12,7 @@ export interface Root {
   flushToVfs(): void,
   flushFromVfs(): void,
   inputChar(c: number): void,
+  interrupt(): void,
   init(): void,
   main(): void,
 }

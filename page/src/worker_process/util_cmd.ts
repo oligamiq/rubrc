@@ -9,6 +9,7 @@ import { set_fake_worker } from "./vfs_bindings/common";
 
 import thread_spawn_path from "./vfs_bindings/thread_spawn.ts?worker&url";
 import worker_background_worker_url from "./vfs_bindings/worker_background_worker.ts?worker&url";
+import InterruptWorker from "./interrupt_worker.ts?worker";
 
 await set_fake_worker();
 
@@ -70,6 +71,14 @@ globalThis.addEventListener("message", async (event) => {
 
   // Initialize VFS component (runs its main function which sets up thread pool etc.)
   animal.start(vfs_root as any);
+
+  const interrupt_worker = new InterruptWorker();
+  interrupt_worker.postMessage({
+    vfs_wasm,
+    memory: animal.get_share_memory(),
+    interrupt_id: ctx.interrupt_id,
+    wasi_refs,
+  });
 
   // Keep other shared objects for backward compatibility if needed
   shared.push(

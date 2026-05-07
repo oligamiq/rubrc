@@ -7,6 +7,7 @@ world init {
   
   export flush-from-vfs: func();
   export input-char: func(c: u32);
+  export interrupt: func();
   export init: func();
   export main: func();
 }

@@ -25,6 +25,9 @@ unsafe extern "C" {
 
     /// Send a character to vfs-shell
     pub fn vfs_shell_input_char(c: u32);
+
+    /// Interrupt the shell
+    pub fn vfs_shell_interrupt();
 }
 
 thread_local! {

@@ -90,6 +90,10 @@ impl Guest for Wit {
     fn input_char(c: u32) {
         unsafe { crate::shell::vfs_shell_input_char(c) };
     }
+
+    fn interrupt() {
+        unsafe { crate::shell::vfs_shell_interrupt() };
+    }
 }
 
 export!(Wit);

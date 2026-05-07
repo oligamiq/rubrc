@@ -70,8 +70,16 @@ export const SetupMyTerminal = (props: {
     (c: number) => Promise<void>
   >();
 
+  const interrupt_fn = new SharedObjectRef(props.ctx.interrupt_id).proxy<
+    () => Promise<void>
+  >();
+
   const onData = (data: string) => {
     for (let i = 0; i < data.length; i++) {
+      if (data.charCodeAt(i) === 3) {
+        interrupt_fn().catch(console.error);
+        continue;
+      }
       input_char(data.charCodeAt(i)).catch(console.error);
     }
   };

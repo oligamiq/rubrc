@@ -150,6 +150,12 @@ fn print_prompt() {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn vfs_shell_interrupt() {
+    // Placeholder for wasi-shell interruption logic.
+    println!("Interrupt signal received");
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn vfs_shell_input_char(c: u32) {
     let c_char = std::char::from_u32(c).unwrap_or('?');
 
