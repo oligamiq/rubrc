@@ -14,6 +14,7 @@ export type Ctx = {
   llvm_id: string;
   input_char_id: string;
   interrupt_id: string;
+  resize_id: string;
 };
 
 export const gen_ctx = (): Ctx => {
@@ -31,5 +32,6 @@ export const gen_ctx = (): Ctx => {
     llvm_id: uuidv4(),
     input_char_id: uuidv4(),
     interrupt_id: uuidv4(),
+    resize_id: uuidv4(),
   };
 };

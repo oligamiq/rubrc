@@ -4465,6 +4465,56 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
+      let exports0Resize;
+      
+      function resize(arg0, arg1) {
+        _debugLog('[iface="resize", function="resize"][Instruction::CallWasm] enter', {
+          funcName: 'resize',
+          paramCount: 2,
+          async: false,
+          postReturn: false,
+        });
+        const hostProvided = false;
+        
+        const [task, _wasm_call_currentTaskID] = createNewCurrentTask({
+          componentIdx: 0,
+          isAsync: false,
+          isManualAsync: false,
+          entryFnName: 'exports0Resize',
+          getCallbackFn: () => null,
+          callbackFnName: 'null',
+          errHandling: 'none',
+          callingWasmExport: true,
+        });
+        
+        const started = task.enterSync();
+        
+        let ret;
+        
+        try {
+          _withGlobalCurrentTaskMeta({
+            taskID: task.id(),
+            componentIdx: task.componentIdx(),
+            fn: () => exports0Resize(toUint32(arg0), toUint32(arg1)),
+          });
+        } catch (err) {
+          
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        
+        _debugLog('[iface="resize", function="resize"][Instruction::Return]', {
+          funcName: 'resize',
+          paramCount: 0,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([ret]);
+        task.exit();
+      }
       let exports0Init;
       
       function init() {
@@ -5345,6 +5395,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       exports0FlushFromVfs = exports0['flush-from-vfs'];
       exports0InputChar = exports0['input-char'];
       exports0Interrupt = exports0.interrupt;
+      exports0Resize = exports0.resize;
       exports0Init = exports0.init;
       exports0Main = exports0.main;
       virtualFileSystemWasip1ThreadsExportWasiThreadStart = exports0['wasip1-vfs:host/virtual-file-system-wasip1-threads-export#wasi-thread-start'];
@@ -5353,7 +5404,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         
       };
       
-      return { virtualFileSystemWasip1ThreadsExport, flushFromVfs, flushToVfs, init, inputChar, interrupt, main, 'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': virtualFileSystemWasip1ThreadsExport,  };
+      return { virtualFileSystemWasip1ThreadsExport, flushFromVfs, flushToVfs, init, inputChar, interrupt, main, resize, 'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': virtualFileSystemWasip1ThreadsExport,  };
     })();
     let promise, resolve, reject;
     function runNext (value) {

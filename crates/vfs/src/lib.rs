@@ -94,9 +94,32 @@ impl Guest for Wit {
     fn interrupt() {
         unsafe { crate::shell::vfs_shell_interrupt() };
     }
+
+    fn resize(columns: u32, lines: u32) {
+        let mut env = VIRTUAL_SHELL_ENV.lock();
+        env.env.retain(|s| !s.starts_with("COLUMNS=") && !s.starts_with("LINES="));
+        env.env.push(format!("COLUMNS={}", columns));
+        env.env.push(format!("LINES={}", lines));
+    }
 }
 
 export!(Wit);
+
+pub struct VirtualEnvState {
+    pub env: Vec<String>,
+}
+
+impl<'a> VirtualEnv<'a> for VirtualEnvState {
+    type Str = String;
+    fn get_environ(&mut self) -> &[Self::Str] {
+        &self.env
+    }
+}
+
+pub static VIRTUAL_SHELL_ENV: std::sync::LazyLock<parking_lot::Mutex<VirtualEnvState>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(VirtualEnvState {
+        env: vec!["HOME=~/".to_string()],
+    }));
 
 #[derive(Debug)]
 pub struct ShellVirtualStdIO;
@@ -178,7 +201,9 @@ const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
 };
 
 #[cfg(not(feature = "full-tools"))]
-plug_env!(@embedded, VirtualEnvTy, rustc_mock, llvm_mock, vfs_shell);
+plug_env!(@embedded, VirtualEnvTy, rustc_mock, llvm_mock);
+
+plug_env!(@dynamic, { &mut VIRTUAL_SHELL_ENV.lock() }, vfs_shell);
 
 // plug_process!(StandardProcess, rustc_mock, llvm_mock);
 

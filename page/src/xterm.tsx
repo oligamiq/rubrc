@@ -74,6 +74,10 @@ export const SetupMyTerminal = (props: {
     () => Promise<void>
   >();
 
+  const resize_fn = new SharedObjectRef(props.ctx.resize_id).proxy<
+    (cols: number, rows: number) => Promise<void>
+  >();
+
   const onData = (data: string) => {
     for (let i = 0; i < data.length; i++) {
       if (data.charCodeAt(i) === 3) {
@@ -84,11 +88,16 @@ export const SetupMyTerminal = (props: {
     }
   };
 
+  const onResize = (size: { cols: number; rows: number }) => {
+    resize_fn(size.cols, size.rows).catch(console.error);
+  };
+
   // You can pass either an ITerminalAddon constructor or an instance, depending on whether you need to access it later.
   return (
     <XTerm
       onMount={handleMount}
       onData={onData}
+      onResize={onResize}
       addons={[fit_addon]}
       class="w-full"
     />

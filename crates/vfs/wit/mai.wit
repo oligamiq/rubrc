@@ -8,6 +8,7 @@ world init {
   export flush-from-vfs: func();
   export input-char: func(c: u32);
   export interrupt: func();
+  export resize: func(columns: u32, lines: u32);
   export init: func();
   export main: func();
 }

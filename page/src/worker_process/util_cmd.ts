@@ -85,12 +85,23 @@ globalThis.addEventListener("message", async (event) => {
     new SharedObject((c: number) => {
       (async () => {
         try {
-          console.log("vfs root", vfs_root);
           vfs_root.inputChar(c);
         } catch (e) {
           await terminal(`Error: ${e}\r\n`);
         }
       })();
     }, ctx.input_char_id),
+  );
+
+  shared.push(
+    new SharedObject((cols: number, rows: number) => {
+      (async () => {
+        try {
+          vfs_root.resize(cols, rows);
+        } catch (e) {
+          await terminal(`Error: ${e}\r\n`);
+        }
+      })();
+    }, ctx.resize_id),
   );
 });
