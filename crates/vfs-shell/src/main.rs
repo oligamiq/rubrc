@@ -150,14 +150,23 @@ fn print_prompt() {
 }
 
 #[unsafe(no_mangle)]
+/// This function works precisely because it does not interact with memory and stack at all.
+/// If it were to modify anything other than shared memory,
+/// it would break functions running on other threads. It would be like running the main function again on the same memory space.
+/// In that case, it would be necessary to create a new thread and implement it
+/// so that the shared memory held statically can be modified while that thread remains in a waiting state.
 pub extern "C" fn vfs_shell_interrupt() {
-    // Placeholder for wasi-shell interruption logic.
-    println!("Interrupt signal received");
+    CANCELLATION_TOKEN.cancel();
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn vfs_shell_input_char(c: u32) {
     let c_char = std::char::from_u32(c).unwrap_or('?');
+
+    if CANCELLATION_TOKEN.is_cancelled() {
+        CANCELLATION_TOKEN.reset();
+        INPUT_BUFFER.lock().unwrap().clear();
+    }
 
     if c_char == '\n' || c_char == '\r' {
         let mut buf = INPUT_BUFFER.lock().unwrap();
@@ -176,6 +185,7 @@ pub extern "C" fn vfs_shell_input_char(c: u32) {
             Box::new(io::stdin()),
             Box::new(io::stdout()),
             Arc::clone(&REGISTRY),
+            CANCELLATION_TOKEN.clone(),
         );
 
         for res in results {
@@ -198,8 +208,11 @@ pub extern "C" fn vfs_shell_input_char(c: u32) {
     }
 }
 
+static CANCELLATION_TOKEN: LazyLock<wasibox_core::CancellationToken> = LazyLock::new(|| wasibox_core::CancellationToken::new());
+
 fn main() {
     let _ = LazyLock::force(&REGISTRY);
+    CANCELLATION_TOKEN.reset();
 
     println!("{}", "Welcome to WASI-Shell!".green().bold());
     println!("Type 'help' for available commands or 'exit' to quit.");
@@ -219,6 +232,7 @@ fn main() {
             Box::new(io::stdin()),
             Box::new(io::stdout()),
             Arc::clone(&REGISTRY),
+            CANCELLATION_TOKEN.clone(),
         );
         for res in results {
             if let Err(e) = res {
