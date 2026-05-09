@@ -100,6 +100,7 @@ impl Guest for Wit {
         env.env.retain(|s| !s.starts_with("COLUMNS=") && !s.starts_with("LINES="));
         env.env.push(format!("COLUMNS={}", columns));
         env.env.push(format!("LINES={}", lines));
+        unsafe { crate::shell::vfs_shell_resize(columns, lines) };
     }
 }
 

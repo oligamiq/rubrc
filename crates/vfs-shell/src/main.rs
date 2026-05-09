@@ -1,12 +1,50 @@
 use std::io::{self, Write};
 use colored::*;
 use dashmap::DashMap;
-use std::sync::{LazyLock, Mutex};
-use std::sync::Arc;
-use wasi_shell::{IoContext, CommandRegistry, handle_parallel};
+use std::sync::{LazyLock, Mutex, Arc};
+use wasi_shell::{IoContext, CommandRegistry, handle_parallel, LineEditor, KeyEventHandler, KeyEvent};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::env;
 use std::path::PathBuf;
+
+// ============================================================
+// Terminal Echo Handler
+// ============================================================
+
+struct TerminalEchoHandler {
+    pub needs_redraw: bool,
+}
+
+impl KeyEventHandler for TerminalEchoHandler {
+    fn on_key_event(&mut self, key: KeyEvent) {
+        match key {
+            KeyEvent::Enter => {
+                print!("\r\n");
+            }
+            KeyEvent::CtrlC => {
+                print!("^C\r\n");
+                self.needs_redraw = true;
+            }
+            KeyEvent::Char(c) if c == '\x0c' => { // Ctrl+L
+                print!("\x1b[2J\x1b[H");
+                self.needs_redraw = true;
+            }
+            KeyEvent::Char(c) => {
+                print!("|{c}");
+            }
+            KeyEvent::Right => {
+              print!("\x1b[1C");
+            }
+            KeyEvent::Left => {
+              print!("\x1b[1D");
+            }
+            _ => {
+                self.needs_redraw = true;
+            }
+        }
+        io::stdout().flush().unwrap();
+    }
+}
 
 // ============================================================
 // Cross-Wasm ABI: scalar-only interface (no raw pointer passing)
@@ -72,6 +110,9 @@ pub unsafe extern "C" fn vfs_shell_free_buf(ptr: u32, len: u32) {
 /// Thread-safe: acquires Mutex before writing.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn vfs_shell_write_stdout(id: u32, ptr: u32, len: u32) -> u32 {
+    if CANCELLATION_TOKEN.is_cancelled() {
+        return 0;
+    }
     if let Some(entry) = IO_REGISTRY.get(&id) {
         if let Ok(guard) = entry.value().lock() {
             let io = unsafe { &mut *(guard.0 as *mut IoContext) };
@@ -88,6 +129,9 @@ pub unsafe extern "C" fn vfs_shell_write_stdout(id: u32, ptr: u32, len: u32) -> 
 /// Thread-safe: acquires Mutex before writing.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn vfs_shell_write_stderr(id: u32, ptr: u32, len: u32) -> u32 {
+    if CANCELLATION_TOKEN.is_cancelled() {
+        return 0;
+    }
     if let Some(entry) = IO_REGISTRY.get(&id) {
         if let Ok(guard) = entry.value().lock() {
             let io = unsafe { &mut *(guard.0 as *mut IoContext) };
@@ -110,7 +154,7 @@ unsafe extern "C" {
 }
 
 // ============================================================
-// Main shell loop
+// Shell configuration
 // ============================================================
 
 static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
@@ -141,7 +185,14 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
     Arc::new(reg)
 });
 
-static INPUT_BUFFER: Mutex<String> = Mutex::new(String::new());
+static CANCELLATION_TOKEN: LazyLock<wasibox_core::CancellationToken> =
+    LazyLock::new(|| wasibox_core::CancellationToken::new());
+
+static LINE_READER: LazyLock<Mutex<LineEditor>> = LazyLock::new(|| Mutex::new(LineEditor::new(20)));
+
+// ============================================================
+// Exported functions for host interaction
+// ============================================================
 
 fn print_prompt() {
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -160,28 +211,56 @@ pub extern "C" fn vfs_shell_interrupt() {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vfs_shell_input_char(c: u32) {
-    let c_char = std::char::from_u32(c).unwrap_or('?');
+pub extern "C" fn vfs_shell_resize(
+  columns: u32,
+  lines: u32,
+) {
+    unsafe { std::env::set_var("COLUMNS", columns.to_string()) };
+    unsafe { std::env::set_var("LINES", lines.to_string()) };
+}
 
+#[unsafe(no_mangle)]
+pub extern "C" fn vfs_shell_input_char(c: u32) {
     if CANCELLATION_TOKEN.is_cancelled() {
         CANCELLATION_TOKEN.reset();
-        INPUT_BUFFER.lock().unwrap().clear();
     }
 
-    if c_char == '\n' || c_char == '\r' {
-        let mut buf = INPUT_BUFFER.lock().unwrap();
-        let line = buf.clone();
-        buf.clear();
+    // Delegate to LineReader — handles echo, history, cursor, etc.
+    let line = {
+        let mut reader = LINE_READER.lock().unwrap();
+        let mut handler = TerminalEchoHandler { needs_redraw: false };
+        let line = reader.input_char_with_handler(c, &mut handler);
 
-        println!();
+        if handler.needs_redraw {
+            // Soft redraw: don't clear the whole line to avoid flicker/prompt disappearance.
+            // Move to start of line, re-print prompt and buffer, then clear to end of line.
+            print!("\r");
+            print_prompt();
+            let buffer = reader.buffer();
+            print!("{}", buffer);
+            print!("\x1b[K"); // Clear from cursor to end of line (in case new line is shorter)
 
-        if line.is_empty() {
+            let pos = reader.cursor_pos();
+            let len = buffer.chars().count();
+            if pos < len {
+                print!("\x1b[{}D", len - pos);
+            }
+            io::stdout().flush().unwrap();
+        }
+        line
+    };
+    // Drop the lock before executing so subsequent input_char calls aren't blocked
+
+    if let Some(line) = line {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
             print_prompt();
             return;
         }
 
+        CANCELLATION_TOKEN.reset();
         let results = handle_parallel(
-            vec![line],
+            vec![trimmed.to_string()],
             Box::new(io::stdin()),
             Box::new(io::stdout()),
             Arc::clone(&REGISTRY),
@@ -195,23 +274,16 @@ pub extern "C" fn vfs_shell_input_char(c: u32) {
         }
 
         print_prompt();
-    } else if c == 8 || c == 127 { // Backspace or DEL
-        let mut buf = INPUT_BUFFER.lock().unwrap();
-        if buf.pop().is_some() {
-            print!("\x08 \x08");
-            io::stdout().flush().unwrap();
-        }
-    } else {
-        INPUT_BUFFER.lock().unwrap().push(c_char);
-        print!("{}", c_char);
-        io::stdout().flush().unwrap();
     }
 }
 
-static CANCELLATION_TOKEN: LazyLock<wasibox_core::CancellationToken> = LazyLock::new(|| wasibox_core::CancellationToken::new());
+// ============================================================
+// Main
+// ============================================================
 
 fn main() {
     let _ = LazyLock::force(&REGISTRY);
+    let _ = LazyLock::force(&LINE_READER);
     CANCELLATION_TOKEN.reset();
 
     println!("{}", "Welcome to WASI-Shell!".green().bold());

@@ -28,6 +28,8 @@ unsafe extern "C" {
 
     /// Interrupt the shell
     pub fn vfs_shell_interrupt();
+
+    pub fn vfs_shell_resize(columns: u32, lines: u32);
 }
 
 thread_local! {

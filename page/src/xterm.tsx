@@ -84,6 +84,7 @@ export const SetupMyTerminal = (props: {
         interrupt_fn().catch(console.error);
         continue;
       }
+      // console.log("sending char code", data.charCodeAt(i));
       input_char(data.charCodeAt(i)).catch(console.error);
     }
   };

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-wasi-shell = "1.0.7"
+wasi-shell = "1.0.15"
 colored = "2"
 dashmap = "6.1.0"
-wasibox-core = "1.0.9"
+wasibox-core = "1.0.15"

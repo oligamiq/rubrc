@@ -34,8 +34,6 @@ pub fn set_vfs_shell_args(args: &[impl AsRef<str>]) {
     VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect();
 }
 
-
-
 #[cfg(not(feature = "full-tools"))]
 wasi_virt_layer::plug_args!(@dynamic, { &mut VIRTUAL_ARGS.lock() }, rustc_mock, llvm_mock, vfs_shell);
 

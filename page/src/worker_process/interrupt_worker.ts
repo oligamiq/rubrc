@@ -52,6 +52,7 @@ globalThis.addEventListener("message", async (event) => {
           console.log("Interrupt worker: Calling interrupt...", vfs_root);
           if (vfs_root.interrupt) {
             vfs_root.interrupt();
+            console.log("Interrupt worker: Interrupt called successfully");
           } else {
             console.error("vfs_root.interrupt is not defined");
           }

@@ -1,3 +1,4 @@
 **/dist
 **/node_modules
 **/target
+/page/src/worker_process/vfs_bindings

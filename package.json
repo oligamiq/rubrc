@@ -27,10 +27,10 @@
     "better-typescript-lib": "^2.12.0",
     "npm-watch": "^0.13.0",
     "solid-devtools": "^0.34.5",
-    "tailwindcss": "^4.2.4",
+    "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3",
     "unplugin-swc": "^1.5.9",
-    "vite": "^7.3.2",
+    "vite": "^7.3.3",
     "vite-plugin-dts": "^4.5.4",
     "vite-plugin-solid": "^2.11.12"
   },

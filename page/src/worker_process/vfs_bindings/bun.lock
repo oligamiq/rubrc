@@ -78,7 +78,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.9", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.0.3", "@jridgewell/sourcemap-codec": "^1.4.10" } }, "sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ=="],
 
-    "@oligami/browser_wasi_shim-threads": ["@oligami/browser_wasi_shim-threads@0.3.2", "", { "dependencies": { "@bjorn3/browser_wasi_shim": "^0.4.2" } }, "sha512-ydhCnyEBm2N3I5zuvor75fDzU4JeoeW/3DZ3N1ySjvy4ZUSwIFDzKKWOaSPjv8LZQOcPaCCeaTNzJTg/elzpPg=="],
+    "@oligami/browser_wasi_shim-threads": ["@oligami/browser_wasi_shim-threads@0.3.3", "", { "dependencies": { "@bjorn3/browser_wasi_shim": "^0.4.2" } }, "sha512-oLudZxgcLxfu0aw/5BAbM2IH2lfd4mVMl043ZTZ8WuYQT8TLFsTKENqutpVmbISDC5C/69HhS1YQHxbrTv9UXQ=="],
 
     "@rollup/rollup-android-arm-eabi": ["@rollup/rollup-android-arm-eabi@4.60.3", "", { "os": "android", "cpu": "arm" }, "sha512-x35CNW/ANXG3hE/EZpRU8MXX1JDN86hBb2wMGAtltkz7pc6cxgjpy1OMMfDosOQ+2hWqIkag/fGok1Yady9nGw=="],
 
