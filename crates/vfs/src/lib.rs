@@ -8,7 +8,7 @@ use wasi_virt_layer::{
 use std::path::{Path, PathBuf};
 
 wit_bindgen::generate!({
-    world: "init",
+    world: "vfs-host",
 });
 
 struct Wit;
@@ -162,7 +162,7 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
 }
 
 type LFS = StandardDynamicLFS<ShellVirtualStdIO>;
-static LFS_ROOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+pub(crate) static LFS_ROOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub mod process;
 pub mod command;

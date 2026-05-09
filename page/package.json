@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "^0.4.2",
-    "@oligami/browser_wasi_shim-threads": "^0.2.3",
+    "@oligami/browser_wasi_shim-threads": "^0.3.4",
     "@oligami/shared-object": "0.1.1",
     "@tailwindcss/vite": "^4.2.4",
     "@thisbeyond/solid-select": "^0.15.1",

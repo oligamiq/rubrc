@@ -38,6 +38,32 @@ globalThis.addEventListener("message", async (event) => {
     animal.wasiImport as any,
     dummy_wasi_thread_import as any,
     memory as any,
+    {
+      'download-file-chunk': {
+        default: async (...args: unknown[]) => {
+          animal.call_unknown_fn(0, {
+            name: "download-file-chunk",
+            args,
+          })
+        }
+      },
+      'download-file-end': {
+        default: async (...args: unknown[]) => {
+          animal.call_unknown_fn(0, {
+            name: "download-file-end",
+            args,
+          })
+        }
+      },
+      'download-file-start': {
+        default: async (...args: unknown[]) => {
+          animal.call_unknown_fn(0, {
+            name: "download-file-start",
+            args,
+          })
+        }
+      },
+    },
   );
 
   /// TODO!(); The library should provide a function specifically for this purpose

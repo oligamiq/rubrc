@@ -1,8 +1,10 @@
 // world root:component/root
+import type * as VfsHostBridge from './interfaces/vfs-host-bridge.js'; // vfs:host/bridge
 import type * as Wasip1VfsHostVirtualFileSystemWasip1Core from './interfaces/wasip1-vfs-host-virtual-file-system-wasip1-core.js'; // wasip1-vfs:host/virtual-file-system-wasip1-core
 import type * as Wasip1VfsHostVirtualFileSystemWasip1ThreadsImport from './interfaces/wasip1-vfs-host-virtual-file-system-wasip1-threads-import.js'; // wasip1-vfs:host/virtual-file-system-wasip1-threads-import
 import type * as Wasip1VfsHostVirtualFileSystemWasip1ThreadsExport from './interfaces/wasip1-vfs-host-virtual-file-system-wasip1-threads-export.js'; // wasip1-vfs:host/virtual-file-system-wasip1-threads-export
 export interface ImportObject {
+  'vfs:host/bridge': typeof VfsHostBridge,
   'wasip1-vfs:host/virtual-file-system-wasip1-core': typeof Wasip1VfsHostVirtualFileSystemWasip1Core,
   'wasip1-vfs:host/virtual-file-system-wasip1-threads-import': typeof Wasip1VfsHostVirtualFileSystemWasip1ThreadsImport,
 }

@@ -30,7 +30,7 @@ impl KeyEventHandler for TerminalEchoHandler {
                 self.needs_redraw = true;
             }
             KeyEvent::Char(c) => {
-                print!("|{c}");
+                print!("{c}");
             }
             KeyEvent::Right => {
               print!("\x1b[1C");

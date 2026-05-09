@@ -1,11 +1,11 @@
 use parking_lot::Mutex;
 use std::sync::LazyLock;
 use wasi_virt_layer::prelude::*;
-use wasi_virt_layer::memory::WasmAccessRaw;
-use crate::{vfs_shell};
+use crate::*;
 #[cfg(not(feature = "full-tools"))]
-use crate::{rustc_mock, llvm_mock};
-// removed CommandRequest
+
+use crate::vfs::host::bridge::Downloader;
+
 pub struct VirtualArgsState {
     pub args: Vec<String>,
 }
@@ -44,7 +44,47 @@ pub fn handle_command(args: Vec<String>) {
     let cmd = args[0].as_str();
     match cmd {
         "download" => {
-            println!("Download requested: {}", args.get(1).unwrap_or(&String::new()));
+            let filename = args.get(1).map(|s| s.as_str()).unwrap_or("");
+            if filename.is_empty() {
+                println!("Usage: download <filename>");
+                return;
+            }
+
+            let mut current_inode = crate::LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
+            let mut found_file = true;
+            for part in filename.split('/') {
+                if part.is_empty() || part == "." {
+                    continue;
+                }
+                let mut found = false;
+                if let Ok(entries) = crate::VIRTUAL_FILE_SYSTEM.lfs.read_dir(current_inode) {
+                    for (name, child_inode) in entries {
+                        if name == part {
+                            current_inode = child_inode;
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if !found {
+                    found_file = false;
+                    break;
+                }
+            }
+
+            if found_file {
+                if let Ok(data) = crate::VIRTUAL_FILE_SYSTEM.lfs.read_file(current_inode) {
+                    Downloader::download_file_start(filename.as_bytes().as_ptr() as usize as i32, filename.len() as u32 as i32);
+                    for chunk in data.chunks(1024 * 1024) {
+                        Downloader::download_file_chunk(chunk.as_ptr() as usize as i32, chunk.len() as u32 as i32);
+                    }
+                    Downloader::download_file_end();
+                } else {
+                    println!("Failed to read file or not a file: {}", filename);
+                }
+            } else {
+                println!("File not found: {}", filename);
+            }
         }
         _ => {
             println!("Unknown command: {cmd}");
