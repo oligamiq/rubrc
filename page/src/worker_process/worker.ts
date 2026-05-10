@@ -15,7 +15,7 @@ let ctx: Ctx;
 import RustcWorker from "./rustc?worker";
 let shared: SharedObject;
 
-const wasi_refs = [];
+const wasi_refs = [undefined, undefined];
 
 globalThis.addEventListener("message", async (event) => {
   if (event.data.ctx) {
@@ -45,16 +45,16 @@ globalThis.addEventListener("message", async (event) => {
       })();
     }, ctx.load_additional_sysroot_id);
 
-    wasi_refs.push(wasi_ref);
-    if (wasi_refs.length === 2) {
+    wasi_refs[1] = wasi_ref;
+    if (wasi_refs.every((ref) => ref !== undefined)) {
       setup_util_worker(wasi_refs, ctx);
     }
   } else if (event.data.wasi_ref) {
     const { wasi_ref } = event.data;
 
     rustc_worker.postMessage({ wasi_ref_ui: wasi_ref });
-    wasi_refs.push(wasi_ref);
-    if (wasi_refs.length === 2) {
+    wasi_refs[0] = wasi_ref;
+    if (wasi_refs.every((ref) => ref !== undefined)) {
       setup_util_worker(wasi_refs, ctx);
     }
   }

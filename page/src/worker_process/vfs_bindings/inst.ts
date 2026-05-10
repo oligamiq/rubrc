@@ -1,3 +1,4 @@
+import type { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import { type ImportObject, instantiate } from "./vfs.js";function snakeToCamel(snakeCaseString) {
 	return snakeCaseString
 		.toLowerCase()
@@ -15,6 +16,9 @@ export const custom_instantiate = async (
 	memory: {
 		[key: string]: WebAssembly.Memory;
 	},
+  call_unknown_fn: (idx: number, unknown: unknown) => unknown = (idx, unknown) => {
+    console.warn("call_unknown_fn is not set", idx, unknown);
+  },
 ): Promise<WebAssembly.Instance> => {
 	const imports = {};
 	for (const key in wasiImport) {
@@ -42,6 +46,28 @@ export const custom_instantiate = async (
 			"wasip1-vfs:host/virtual-file-system-wasip1-threads-import": {
 				Wasip1Threads: threadSpawnImports,
 			},
+      'vfs:host/bridge': {
+        Downloader: {
+          downloadFileStart: (name_ptr: number, name_len: number) => {
+            call_unknown_fn(0, {
+              name: "downloadFileStart",
+              args: { name_ptr, name_len },
+            });
+          },
+          downloadFileChunk: (data_ptr: number, data_len: number) => {
+            call_unknown_fn(0, {
+              name: "downloadFileChunk",
+              args: { data_ptr, data_len },
+            });
+          },
+          downloadFileEnd: () => {
+            call_unknown_fn(0, {
+              name: "downloadFileEnd",
+              args: {},
+            });
+          },
+        }
+      },
 		} as ImportObject,
 		async (module, imports) => {
 			imports.env = {

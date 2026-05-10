@@ -182,6 +182,12 @@ const get_ref = (term, callback) => {
     new XtermStdio(term),
     new XtermStderr(term),
     [root_dir],
+    {
+      unknown_fn: async (unknown) => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        console.warn("Unknown function called", unknown);
+      }
+    }
   );
 
   callback(farm.get_ref());

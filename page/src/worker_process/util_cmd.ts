@@ -65,36 +65,7 @@ globalThis.addEventListener("message", async (event) => {
     animal.wasiImport as any,
     animal.wasiThreadImport as any,
     animal.get_share_memory(),
-    {
-      'hello:host/bridge': {
-        'Downloader': {
-          'download-file-chunk': {
-            default: async (...args: unknown[]) => {
-              animal.call_unknown_fn(0, {
-                name: "download-file-chunk",
-                args,
-              })
-            }
-          },
-          'download-file-end': {
-            default: async (...args: unknown[]) => {
-              animal.call_unknown_fn(0, {
-                name: "download-file-end",
-                args,
-              })
-            }
-          },
-          'download-file-start': {
-            default: async (...args: unknown[]) => {
-              animal.call_unknown_fn(0, {
-                name: "download-file-start",
-                args,
-              })
-            }
-          },
-        },
-      },
-    },
+    animal.call_unknown_fn.bind(animal),
   );
 
   console.log("vfs component instantiated", vfs_root);
