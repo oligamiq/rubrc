@@ -177,15 +177,50 @@ const get_ref = (term, callback) => {
     ]),
   );
 
+  let download_name = "";
+  let download_chunks: Uint8Array[] = [];
+
   const farm = new WASIFarm(
     new XtermStdio(term),
     new XtermStdio(term),
     new XtermStderr(term),
     [root_dir],
     {
-      unknown_fn: async (unknown) => {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        console.warn("Unknown function called", unknown);
+      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+      unknown_fn: async (unknown: any) => {
+        if (unknown.name === "downloadFileStart") {
+          download_name = unknown.args.name;
+          download_chunks = [];
+        } else if (unknown.name === "downloadFileChunk") {
+          let chunk = unknown.args.data;
+          if (chunk instanceof Uint8Array) {
+            download_chunks.push(chunk);
+          } else if (chunk && chunk.buffer instanceof ArrayBuffer) {
+            download_chunks.push(new Uint8Array(chunk.buffer));
+          } else if (Array.isArray(chunk)) {
+            download_chunks.push(new Uint8Array(chunk));
+          } else if (typeof chunk === 'object' && chunk !== null) {
+            if (Array.isArray(chunk.data)) {
+              download_chunks.push(new Uint8Array(chunk.data));
+            } else {
+              const vals = Object.values(chunk) as number[];
+              download_chunks.push(new Uint8Array(vals));
+            }
+          }
+        } else if (unknown.name === "downloadFileEnd") {
+          const blob = new Blob(download_chunks);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = download_name;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          console.warn("Unknown function called", unknown);
+        }
       }
     }
   );
