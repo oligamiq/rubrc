@@ -5,13 +5,13 @@
 	},
 	"type": "module",
 	"dependencies": {
-		"@bjorn3/browser_wasi_shim": "^0.4.2",
-		"@oligami/browser_wasi_shim-threads": "^0.3.5",
+		"@bjorn3/browser_wasi_shim": "^0.4",
+		"@oligami/browser_wasi_shim-threads": "^0.3",
 		"@xterm/xterm": "^5.5",
 		"xterm-addon-fit": "^0.8.0"
 	},
 	"devDependencies": {
 		"ts-node": "^10.9.2",
-		"vite": "^7.1.7"
+		"vite": "^8.0"
 	}
 }

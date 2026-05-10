@@ -75,7 +75,7 @@ pub fn handle_command(args: Vec<String>) {
             if found_file {
                 if let Ok(data) = crate::VIRTUAL_FILE_SYSTEM.lfs.read_file(current_inode) {
                     Downloader::download_file_start(filename.as_bytes().as_ptr() as usize as i32, filename.len() as u32 as i32);
-                    for chunk in data.chunks(1024 * 1024) {
+                    for chunk in data.chunks(128 * 1024) {
                         Downloader::download_file_chunk(chunk.as_ptr() as usize as i32, chunk.len() as u32 as i32);
                     }
                     Downloader::download_file_end();

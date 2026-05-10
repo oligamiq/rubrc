@@ -1,4 +1,4 @@
-import { thread_spawn_on_worker, type WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
+import { thread_spawn_on_worker } from "@oligami/browser_wasi_shim-threads";
 import { set_fake_worker } from "./common.ts";
 import { custom_instantiate } from "./inst.ts";
 
@@ -7,7 +7,7 @@ await set_fake_worker();
 let animal: WASIFarmAnimal | undefined = undefined;
 
 globalThis.onmessage = async (event) => {
-  thread_spawn_on_worker(
+	thread_spawn_on_worker(
 		event.data,
 		async (
 			thread_spawn_wasm: WebAssembly.Module,
@@ -25,17 +25,16 @@ globalThis.onmessage = async (event) => {
 				imports.wasi_snapshot_preview1,
 				imports.wasi,
 				imports.env,
-        (idx, unknown) => {
-          if (!animal) {
-            console.warn("Animal is not set yet", idx, unknown);
-            return;
-          }
-          animal.call_unknown_fn(idx, unknown);
-        }
+                (idx, unknown) => {
+                    if (!animal) {
+                        console.warn("Animal is not set yet", idx, unknown);
+                        return;
+                    }
+                    animal.call_unknown_fn(idx, unknown);
+                },
 			);
 		},
 		(new_animal) => {
-      console.log("Thread spawned with new animal", new_animal);
 			animal = new_animal;
 		}
 	);

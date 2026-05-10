@@ -228,6 +228,7 @@ pub extern "C" fn vfs_shell_input_char(c: u32) {
     // Delegate to LineReader — handles echo, history, cursor, etc.
     let line = {
         let mut reader = LINE_READER.lock().unwrap();
+        let len_before = reader.buffer().chars().count();
         let mut handler = TerminalEchoHandler { needs_redraw: false };
         let line = reader.input_char_with_handler(c, &mut handler);
 
@@ -246,6 +247,19 @@ pub extern "C" fn vfs_shell_input_char(c: u32) {
                 print!("\x1b[{}D", len - pos);
             }
             io::stdout().flush().unwrap();
+        } else {
+            // Partial redraw: if a character was inserted mid-line, redraw the rest of the line.
+            let pos_after = reader.cursor_pos();
+            let len_after = reader.buffer().chars().count();
+            if len_after > len_before && pos_after < len_after {
+                let buffer = reader.buffer();
+                let rest: String = buffer.chars().skip(pos_after).collect();
+                if !rest.is_empty() {
+                    print!("{}", rest);
+                    print!("\x1b[{}D", rest.chars().count());
+                    io::stdout().flush().unwrap();
+                }
+            }
         }
         line
     };
