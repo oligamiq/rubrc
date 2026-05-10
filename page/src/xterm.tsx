@@ -217,6 +217,10 @@ const get_ref = (term, callback) => {
           a.click();
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
+
+          // reset the download state
+          download_name = "";
+          download_chunks = [];
         } else {
           await new Promise((resolve) => setTimeout(resolve, 500));
           console.warn("Unknown function called", unknown);

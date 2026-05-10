@@ -5,7 +5,25 @@ use std::sync::{LazyLock, Mutex, Arc};
 use wasi_shell::{IoContext, CommandRegistry, handle_parallel, LineEditor, KeyEventHandler, KeyEvent};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
+
+fn normalize_path_logical(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::CurDir => {}
+            Component::Normal(c) => normalized.push(c),
+            Component::RootDir => {
+                normalized.push("/");
+            }
+            Component::Prefix(_) => {}
+        }
+    }
+    normalized
+}
 
 // ============================================================
 // Terminal Echo Handler
@@ -148,9 +166,15 @@ pub unsafe extern "C" fn vfs_shell_write_stderr(id: u32, ptr: u32, len: u32) -> 
 // Import: vfs_execute_command (scalar-only, no pointer args)
 // ----------------------------------------------------------
 
+#[cfg(not(test))]
 #[link(wasm_import_module = "__wasip1_vfs-host")]
 unsafe extern "C" {
     fn vfs_execute_command(context_id: u32) -> i32;
+}
+
+#[cfg(test)]
+unsafe fn vfs_execute_command(_context_id: u32) -> i32 {
+    0
 }
 
 // ============================================================
@@ -159,6 +183,19 @@ unsafe extern "C" {
 
 static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
     let mut reg = CommandRegistry::with_builtins();
+
+    // WASI 環境の相対パス解決やシンボリックリンク解決をサポートする cd
+    reg.register("cd", |args, _ctx| {
+        let new_dir = args.get(1).map(|s| s.as_str()).unwrap_or("/");
+        let current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+        let target = current.join(new_dir);
+
+        let resolved = std::fs::canonicalize(&target)
+            .unwrap_or_else(|_| normalize_path_logical(&target));
+
+        std::env::set_current_dir(&resolved).map_err(|e| format!("cd: {}", e))
+    });
+
     reg.set_fallback(|args: &[String], io: &mut IoContext| {
         println!("Executing command: {:?}", args);
 
@@ -215,6 +252,7 @@ pub extern "C" fn vfs_shell_resize(
   columns: u32,
   lines: u32,
 ) {
+    print!("lines: {}, columns: {}", lines, columns);
     unsafe { std::env::set_var("COLUMNS", columns.to_string()) };
     unsafe { std::env::set_var("LINES", lines.to_string()) };
 }
@@ -328,4 +366,77 @@ fn main() {
     }
 
     print_prompt();
+}
+
+// ============================================================
+// Tests
+// ============================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_normalize_path_logical() {
+        assert_eq!(normalize_path_logical(Path::new("/a/b/../c")), PathBuf::from("/a/c"));
+        assert_eq!(normalize_path_logical(Path::new("/a/./b")), PathBuf::from("/a/b"));
+        assert_eq!(normalize_path_logical(Path::new("/a/b/../..")), PathBuf::from("/"));
+        assert_eq!(normalize_path_logical(Path::new("a/b/../c")), PathBuf::from("a/c"));
+    }
+
+    #[test]
+    fn test_cd_parallel_execution() {
+        // Ensure registry is initialized
+        let registry = Arc::clone(&REGISTRY);
+
+        // Use a temporary directory for testing if possible,
+        // otherwise just test the logic with a simulated sequence.
+        // In wasip1-threads, std::env::set_current_dir modifies process-wide state.
+
+        let start_dir = std::env::current_dir().unwrap();
+
+        // Simulate "cd . && cd ." which should be safe and stay in same dir
+        let line = "cd . && cd .";
+        let results = handle_parallel(
+            vec![line.to_string()],
+            Box::new(Cursor::new("")),
+            Box::new(io::sink()),
+            registry,
+            wasibox_core::CancellationToken::new(),
+        );
+
+        for res in results {
+            res.expect("Parallel cd command failed");
+        }
+
+        assert_eq!(
+            std::env::current_dir().unwrap().canonicalize().unwrap(),
+            start_dir.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_shell_full_interaction_simulation() {
+        let start_dir = std::env::current_dir().unwrap();
+
+        // Ensure state is clean
+        CANCELLATION_TOKEN.reset();
+
+        // Simulate "cd . && cd .\n" input character by character
+        // Most shells/terminals use 13 (\r) for Enter,
+        // LineEditor usually maps 10 or 13 to KeyEvent::Enter.
+        let cmd = "cd . && cd .\r";
+
+        for c in cmd.chars() {
+            vfs_shell_input_char(c as u32);
+        }
+
+        // vfs_shell_input_char handles command execution synchronously via handle_parallel,
+        // so we can check the result immediately.
+        assert_eq!(
+            std::env::current_dir().unwrap().canonicalize().unwrap(),
+            start_dir.canonicalize().unwrap()
+        );
+    }
 }

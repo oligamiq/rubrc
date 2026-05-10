@@ -1,6 +1,7 @@
 use parking_lot::Mutex;
 use std::sync::LazyLock;
 use wasi_virt_layer::prelude::*;
+use std::io::Write;
 use crate::*;
 #[cfg(not(feature = "full-tools"))]
 
@@ -36,6 +37,16 @@ pub fn set_vfs_shell_args(args: &[impl AsRef<str>]) {
 
 #[cfg(not(feature = "full-tools"))]
 wasi_virt_layer::plug_args!(@dynamic, { &mut VIRTUAL_ARGS.lock() }, rustc_mock, llvm_mock, vfs_shell);
+
+fn format_size(size: usize) -> String {
+    if size < 1024 {
+        format!("{} B", size)
+    } else if size < 1024 * 1024 {
+        format!("{:.1} KB", size as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
+    }
+}
 
 pub fn handle_command(args: Vec<String>) {
     if args.is_empty() {
@@ -74,11 +85,30 @@ pub fn handle_command(args: Vec<String>) {
 
             if found_file {
                 if let Ok(data) = crate::VIRTUAL_FILE_SYSTEM.lfs.read_file(current_inode) {
+                    let total_size = data.len();
+                    let mut downloaded = 0;
+                    let bar_width = 25;
+
                     Downloader::download_file_start(filename.as_bytes().as_ptr() as usize as i32, filename.len() as u32 as i32);
                     for chunk in data.chunks(128 * 1024) {
                         Downloader::download_file_chunk(chunk.as_ptr() as usize as i32, chunk.len() as u32 as i32);
+                        downloaded += chunk.len();
+
+                        let progress = (downloaded as f64 / total_size as f64).min(1.0);
+                        let filled = (progress * bar_width as f64) as usize;
+                        let bar = format!("{nil:=>filled$}{nil: >empty$}", nil = "", filled = filled, empty = bar_width - filled);
+                        
+                        print!("\rDownloading {}: [{}] {:.1}% ({}/{})", 
+                            filename, 
+                            bar, 
+                            progress * 100.0, 
+                            format_size(downloaded), 
+                            format_size(total_size)
+                        );
+                        let _ = std::io::stdout().flush();
                     }
                     Downloader::download_file_end();
+                    println!("\nDownload successful.");
                 } else {
                     println!("Failed to read file or not a file: {}", filename);
                 }
