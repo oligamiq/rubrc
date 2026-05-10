@@ -38,8 +38,9 @@ globalThis.addEventListener("message", async (event) => {
     animal.wasiImport as any,
     dummy_wasi_thread_import as any,
     memory as any,
-    animal.call_unknown_fn.bind(animal)
   );
+
+  console.log("Interrupt worker: vfs_root instantiated", vfs_root);
 
   /// TODO!(); The library should provide a function specifically for this purpose
   /// @ts-ignore

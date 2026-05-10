@@ -49,15 +49,22 @@ export const custom_instantiate = async (
       'vfs:host/bridge': {
         Downloader: {
           downloadFileStart: (name_ptr: number, name_len: number) => {
+            const view = new Uint8Array(memory.memory.buffer, name_ptr, name_len);
+            const bytes = new Uint8Array(view); // copy
+            const name = new TextDecoder().decode(bytes);
+            console.log("Download file start", { name });
             call_unknown_fn(0, {
               name: "downloadFileStart",
-              args: { name_ptr, name_len },
+              args: { name },
             });
           },
           downloadFileChunk: (data_ptr: number, data_len: number) => {
+            const view = new Uint8Array(memory.memory.buffer, data_ptr, data_len);
+            const data = new Uint8Array(view); // copy
+            console.log("Download file chunk", { data_len });
             call_unknown_fn(0, {
               name: "downloadFileChunk",
-              args: { data_ptr, data_len },
+              args: { data },
             });
           },
           downloadFileEnd: () => {
