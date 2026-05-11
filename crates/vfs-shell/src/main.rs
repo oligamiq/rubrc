@@ -252,7 +252,6 @@ pub extern "C" fn vfs_shell_resize(
   columns: u32,
   lines: u32,
 ) {
-    print!("lines: {}, columns: {}", lines, columns);
     unsafe { std::env::set_var("COLUMNS", columns.to_string()) };
     unsafe { std::env::set_var("LINES", lines.to_string()) };
 }

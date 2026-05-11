@@ -54,14 +54,28 @@ export const SetupMyTerminal = (props: {
   };
   shared_xterm = new SharedObject(write_terminal, props.ctx.terminal_id);
 
+  new SharedObject(() => {
+    return {
+      cols: xterm?.cols ?? 80,
+      rows: xterm?.rows ?? 24,
+    };
+  }, props.ctx.get_terminal_size_id);
+
   const handleMount = (terminal: Terminal) => {
     xterm = terminal;
     xterm.write(terminal_queue.join(""));
     terminal_queue.length = 0;
     get_ref(terminal, props.callback);
+
     fit_addon.fit();
 
+    const onWindowResize = () => {
+      fit_addon.fit();
+    };
+    window.addEventListener("resize", onWindowResize);
+
     return () => {
+      window.removeEventListener("resize", onWindowResize);
       console.log("Terminal unmounted.");
     };
   };

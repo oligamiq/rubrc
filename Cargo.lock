@@ -621,9 +621,9 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.31.2"
+version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d6d0705320c1e6ba1d912b5e37cf18071b6c2e9b7fa8215a1e8a7651966f5d3"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
 dependencies = [
  "bitflags",
  "cfg-if",
@@ -1022,9 +1022,9 @@ dependencies = [
 
 [[package]]
 name = "wasi_virt_layer"
-version = "0.4.3"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dff9970f63e844439ec27d1569869fb440ee2332eb6717e6e6fa7d8c77fee8fa"
+checksum = "f8a5b61392e9fb6a0bf7d3dac4ec1873c6fa49ea234680eee4389b0be7178be0"
 dependencies = [
  "const_for",
  "const_struct",

@@ -1,4 +1,4 @@
-import { thread_spawn_on_worker } from "@oligami/browser_wasi_shim-threads";
+import { thread_spawn_on_worker, type WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import { set_fake_worker } from "./common.ts";
 import { custom_instantiate } from "./inst.ts";
 

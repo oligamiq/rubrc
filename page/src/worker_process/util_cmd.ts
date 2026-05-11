@@ -70,9 +70,6 @@ globalThis.addEventListener("message", async (event) => {
 
   console.log("vfs component instantiated", vfs_root);
 
-  // Initialize VFS component (runs its main function which sets up thread pool etc.)
-  animal.start(vfs_root as any);
-
   const interrupt_worker = new InterruptWorker();
   interrupt_worker.postMessage({
     vfs_wasm,
@@ -80,6 +77,15 @@ globalThis.addEventListener("message", async (event) => {
     interrupt_id: ctx.interrupt_id,
     wasi_refs,
   });
+
+  // Initialize VFS component (runs its main function which sets up thread pool etc.)
+  animal.start(vfs_root as any);
+
+  const get_terminal_size = new SharedObjectRef(ctx.get_terminal_size_id).proxy<
+    () => Promise<{ cols: number; rows: number }>
+  >();
+  const { cols, rows } = await get_terminal_size();
+  vfs_root.resize(cols, rows);
 
   // Keep other shared objects for backward compatibility if needed
   shared.push(
