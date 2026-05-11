@@ -102,10 +102,13 @@ pub extern "C" fn vfs_shell_get_cmd_args_len() -> u32 {
 // Exported functions for memory allocation (vfs → vfs-shell)
 // ----------------------------------------------------------
 
+static ALLOC_LOCK: Mutex<()> = Mutex::new(());
+
 /// Allocates a buffer in vfs-shell's memory. Returns address as u32.
 /// The caller (vfs) can then use vfs_shell::memcpy to write into this buffer.
 #[unsafe(no_mangle)]
 pub extern "C" fn vfs_shell_alloc_buf(len: u32) -> u32 {
+    let _guard = ALLOC_LOCK.lock().unwrap();
     let buf: Box<[u8]> = vec![0u8; len as usize].into_boxed_slice();
     let ptr = Box::into_raw(buf) as *mut u8;
     ptr as u32
@@ -114,6 +117,7 @@ pub extern "C" fn vfs_shell_alloc_buf(len: u32) -> u32 {
 /// Frees a buffer previously allocated by vfs_shell_alloc_buf.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn vfs_shell_free_buf(ptr: u32, len: u32) {
+    let _guard = ALLOC_LOCK.lock().unwrap();
     let slice = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u8, len as usize) };
     drop(unsafe { Box::from_raw(slice) });
 }

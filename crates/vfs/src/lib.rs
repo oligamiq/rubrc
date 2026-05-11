@@ -16,9 +16,20 @@ struct Wit;
 impl Guest for Wit {
     fn init() {}
     fn main() {
+        let threads = std::env::var("VFS_THREADS")
+            .unwrap_or_else(|_| "4".to_string())
+            .parse::<usize>()
+            .unwrap_or(4);
+
         unsafe { THREAD_POOL.init() };
-        THREAD_POOL.set_capacity(8);
-        THREAD_POOL.flush_capacity().wait();
+
+        for i in 1..=threads {
+            print!("\x1b[2K\r\x1b[36mInitializing Thread Pool: {}/{} ...\x1b[0m", i, threads);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            THREAD_POOL.set_capacity(i);
+            THREAD_POOL.flush_capacity().wait();
+        }
+        println!("\x1b[2K\r\x1b[32mThread Pool Initialized ({} threads)\x1b[0m", threads);
 
         vfs_shell::_reset();
         vfs_shell::_start();

@@ -39,10 +39,11 @@ globalThis.addEventListener("message", async (event) => {
   const vfs_wasm_path = new URL("./vfs_bindings/vfs.core.wasm", import.meta.url).href;
   const vfs_wasm = await fetch(vfs_wasm_path).then(WebAssembly.compileStreaming);
 
+  const vfs_threads = Math.max(4, Math.floor(navigator.hardwareConcurrency / 2) - 3);
   const animal = new WASIFarmAnimal(
     wasi_refs,
     [], // args
-    [], // env
+    [`VFS_THREADS=${vfs_threads}`], // env
     {
       can_thread_spawn: true,
       thread_spawn_worker_url: new URL(thread_spawn_path, import.meta.url).href,
