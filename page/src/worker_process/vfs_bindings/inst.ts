@@ -101,6 +101,7 @@ export const custom_instantiate = async (
               args: { data_ptr, chunk_len },
             });
           },
+        }
       },
 		} as ImportObject,
 		async (module, imports) => {
