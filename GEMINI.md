@@ -34,3 +34,4 @@ The WebAssembly `vfs` component makes host calls via a custom `call_unknown_fn` 
 - There is no way you would run `bun run vfs:truebuild`
 - Calling Rust functions from inside JavaScript functions that are invoked by Rust is prohibited.
 - In WIT, the use of list is prohibited
+- The file layer is split into two layers: one in Rust and one on the Web. File access in the VFS crate is reflected on the Web side, while file access in the vfs-shell crate is reflected in Rust-side file access.
