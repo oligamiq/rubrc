@@ -2,3 +2,4 @@
 **/node_modules
 **/target
 .antigravitycli
+page/src/worker_process/vfs_bindings/vfs.core.wasm
