@@ -6,6 +6,10 @@ interface bridge {
     download-file-start: static func(name-ptr: s32, name-len: s32);
     download-file-chunk: static func(data-ptr: s32, data-len: s32);
     download-file-end: static func();
+
+    sysroot-start-fetch: static func(triple-ptr: s32, triple-len: s32);
+    sysroot-get-next-file-meta: static func(name-len-ptr: s32, data-len-ptr: s32) -> s32;
+    sysroot-read-file: static func(name-ptr: s32, data-ptr: s32);
   }
 }
 

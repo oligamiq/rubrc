@@ -11,6 +11,7 @@ export class Wasip1 {
   static randomGetImport(bufPtr: number, bufLen: number): number;
   static schedYieldImport(): number;
   static clockTimeGetImport(id: number, precision: bigint, timestampPtr: number): number;
+  static clockResGetImport(id: number, timestampPtr: number): number;
   static fdFdstatGetImport(fd: number, fdstatPtr: number): number;
   static fdWriteImport(fd: number, iovsPtr: number, iovsLen: number, writtenPtr: number): number;
   static fdReaddirImport(fd: number, bufPtr: number, bufLen: number, cookie: bigint, bufUsedPtr: number): number;

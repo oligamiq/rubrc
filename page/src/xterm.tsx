@@ -193,6 +193,9 @@ const get_ref = (term, callback) => {
 
   let download_name = "";
   let download_chunks: Uint8Array[] = [];
+  
+  let sysroot_queue: { name: Uint8Array, data: Uint8Array }[] = [];
+  let current_sysroot_file: { name: Uint8Array, data: Uint8Array } | null = null;
 
   const farm = new WASIFarm(
     new XtermStdio(term),
@@ -235,6 +238,50 @@ const get_ref = (term, callback) => {
           // reset the download state
           download_name = "";
           download_chunks = [];
+        } else if (unknown.name === "sysrootStartFetch") {
+          const triple = unknown.args.triple;
+          sysroot_queue = [];
+          
+          try {
+            const { fetch_compressed_stream } = await import("../../lib/src/brotli_stream");
+            const { parseTar } = await import("../../lib/src/parse_tar");
+            
+            const stream = await fetch_compressed_stream(`https://oligamiq.github.io/rust_wasm/v0.2.0/${triple}.tar.br`);
+            await parseTar(stream, (file) => {
+              if (file.data) {
+                sysroot_queue.push({
+                  name: new TextEncoder().encode(file.name),
+                  data: file.data
+                });
+              }
+            });
+          } catch (e) {
+            console.error("Failed to fetch sysroot", e);
+          }
+          return {};
+        } else if (unknown.name === "sysrootGetNextFileMeta") {
+          if (sysroot_queue.length > 0) {
+            current_sysroot_file = sysroot_queue.shift()!;
+            return {
+              has_file: true,
+              name_len: current_sysroot_file.name.length,
+              data_len: current_sysroot_file.data.length
+            };
+          } else {
+            current_sysroot_file = null;
+            return { has_file: false, name_len: 0, data_len: 0 };
+          }
+        } else if (unknown.name === "sysrootReadFile") {
+          if (current_sysroot_file) {
+            // Note: large uint8arrays are passed as objects across SharedObject,
+            // we should convert them to regular arrays or pass directly
+            // call_unknown_fn serializer will handle Uint8Array correctly
+            return {
+              name_bytes: current_sysroot_file.name,
+              data_bytes: current_sysroot_file.data
+            };
+          }
+          return { name_bytes: new Uint8Array(), data_bytes: new Uint8Array() };
         } else {
           await new Promise((resolve) => setTimeout(resolve, 500));
           console.warn("Unknown function called", unknown);

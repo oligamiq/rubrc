@@ -116,6 +116,60 @@ pub fn handle_command(args: Vec<String>) {
                 println!("File not found: {}", filename);
             }
         }
+        "load_sysroot" => {
+            let triple = args.get(1).map(|s| s.as_str()).unwrap_or("wasm32-wasip1");
+            println!("Loading sysroot: {} ...", triple);
+
+            // Start the background fetch. This blocks Wasm via call_unknown_fn until JS completes queueing.
+            Downloader::sysroot_start_fetch(triple.as_bytes().as_ptr() as i32, triple.len() as i32);
+
+            let mut files_loaded = 0;
+            let root_inode = crate::LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
+            
+            // Create /sysroot directory
+            let sysroot_inode = crate::VIRTUAL_FILE_SYSTEM.lfs.add_dir(root_inode, "sysroot").unwrap_or(root_inode);
+
+            loop {
+                let mut name_len = 0i32;
+                let mut data_len = 0i32;
+                
+                // Pull next file metadata from JS
+                let has_next = Downloader::sysroot_get_next_file_meta(&mut name_len as *mut _ as i32, &mut data_len as *mut _ as i32);
+                if has_next == 0 {
+                    break;
+                }
+
+                let mut name_buf = vec![0u8; name_len as usize];
+                let mut data_buf = vec![0u8; data_len as usize];
+
+                // Pull actual file data from JS
+                Downloader::sysroot_read_file(name_buf.as_mut_ptr() as i32, data_buf.as_mut_ptr() as i32);
+
+                if let Ok(name) = String::from_utf8(name_buf) {
+                    // Navigate / Create directories in VFS
+                    let mut current_inode = sysroot_inode;
+                    let parts: Vec<&str> = name.split('/').collect();
+                    
+                    if parts.len() > 1 {
+                        for part in &parts[..parts.len() - 1] {
+                            if part.is_empty() || *part == "." {
+                                continue;
+                            }
+                            current_inode = crate::VIRTUAL_FILE_SYSTEM.lfs.add_dir(current_inode, part).unwrap_or(current_inode);
+                        }
+                    }
+                    
+                    if let Some(file_name) = parts.last() {
+                        let _ = crate::VIRTUAL_FILE_SYSTEM.lfs.add_file(current_inode, file_name, data_buf);
+                    }
+                    
+                    files_loaded += 1;
+                    print!("\r\x1b[KLoaded {} files...", files_loaded);
+                    let _ = std::io::stdout().flush();
+                }
+            }
+            println!("\nSysroot '{}' loaded successfully ({} files).", triple, files_loaded);
+        }
         _ => {
             println!("Unknown command: {cmd}");
         }

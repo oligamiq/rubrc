@@ -96,13 +96,20 @@ export const custom_instantiate = async (
             }
             return 0;
           },
-          sysrootReadFile: (name_ptr: number, data_ptr: number) => {
+          sysrootReadFileName: (name_ptr: number) => {
             const res = call_unknown_fn(0, {
-              name: "sysrootReadFile",
+              name: "sysrootReadFileName",
               args: {},
-            }) as { name_bytes: Uint8Array, data_bytes: Uint8Array };
+            }) as { name_bytes: Uint8Array };
             const view = new Uint8Array(memory.memory.buffer);
             view.set(res.name_bytes, name_ptr);
+          },
+          sysrootReadFileChunk: (data_ptr: number, chunk_len: number) => {
+            const res = call_unknown_fn(0, {
+              name: "sysrootReadFileChunk",
+              args: { chunk_len },
+            }) as { data_bytes: Uint8Array };
+            const view = new Uint8Array(memory.memory.buffer);
             view.set(res.data_bytes, data_ptr);
           },
         }
