@@ -32,3 +32,4 @@ The WebAssembly `vfs` component makes host calls via a custom `call_unknown_fn` 
 # Commands added directly by the user
 - Do not use Atomics and SharedArrayBuffer
 - There is no way you would run `bun run vfs:truebuild`
+- Calling Rust functions from inside JavaScript functions that are invoked by Rust is prohibited.
