@@ -30,6 +30,7 @@ The WebAssembly `vfs` component makes host calls via a custom `call_unknown_fn` 
 - Even when `xterm.tsx` exposes `async` handlers, invocations routed through `inst.ts` and `call_unknown_fn` behave synchronously at the boundary visible to the WebAssembly component. Therefore, async operations on the UI side should be designed with care, especially when interacting with streaming or stateful resources.
 
 # Commands added directly by the user
+BE sure to COMPLY with and take this into account
 - Do not use Atomics and SharedArrayBuffer
 - There is no way you would run `bun run vfs:truebuild`
 - Calling Rust functions from inside JavaScript functions that are invoked by Rust is prohibited.
