@@ -87,12 +87,14 @@ export const custom_instantiate = async (
             const res = call_unknown_fn(0, {
               name: "sysrootGetNextFileMeta",
               args: {},
-            }) as { has_file: boolean, name_len: number, data_len: number };
-            if (res.has_file) {
+            }) as { has_file: boolean, is_waiting?: boolean, name_len: number, data_len: number };
+            if (res && res.has_file) {
               const view32 = new Int32Array(memory.memory.buffer);
               view32[name_len_ptr / 4] = res.name_len;
               view32[data_len_ptr / 4] = res.data_len;
               return 1;
+            } else if (res && res.is_waiting) {
+              return 2;
             }
             return 0;
           },
