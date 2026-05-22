@@ -73,6 +73,38 @@ export const custom_instantiate = async (
               args: {},
             });
           },
+          sysrootStartFetch: (triple_ptr: number, triple_len: number) => {
+            const view = new Uint8Array(memory.memory.buffer, triple_ptr, triple_len);
+            const bytes = new Uint8Array(view); // copy
+            const triple = new TextDecoder().decode(bytes);
+            console.log("Sysroot fetch start", { triple });
+            call_unknown_fn(0, {
+              name: "sysrootStartFetch",
+              args: { triple },
+            });
+          },
+          sysrootGetNextFileMeta: (name_len_ptr: number, data_len_ptr: number): number => {
+            const res = call_unknown_fn(0, {
+              name: "sysrootGetNextFileMeta",
+              args: {},
+            }) as { has_file: boolean, name_len: number, data_len: number };
+            if (res.has_file) {
+              const view32 = new Int32Array(memory.memory.buffer);
+              view32[name_len_ptr / 4] = res.name_len;
+              view32[data_len_ptr / 4] = res.data_len;
+              return 1;
+            }
+            return 0;
+          },
+          sysrootReadFile: (name_ptr: number, data_ptr: number) => {
+            const res = call_unknown_fn(0, {
+              name: "sysrootReadFile",
+              args: {},
+            }) as { name_bytes: Uint8Array, data_bytes: Uint8Array };
+            const view = new Uint8Array(memory.memory.buffer);
+            view.set(res.name_bytes, name_ptr);
+            view.set(res.data_bytes, data_ptr);
+          },
         }
       },
 		} as ImportObject,
