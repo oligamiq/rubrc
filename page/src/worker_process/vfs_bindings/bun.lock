@@ -34,7 +34,7 @@
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.4", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow=="],
 
-    "@oligami/browser_wasi_shim-threads": ["@oligami/browser_wasi_shim-threads@0.3.5", "", { "dependencies": { "@bjorn3/browser_wasi_shim": "^0.4.2" } }, "sha512-TV5eUzMW62sF4Vo8JfOzCsLH8Oq+a8QY9ecNk3jf31R+YOa75yn3rJJMBU4DIT/dHzIFgqAEx5DXCNaQvgylrw=="],
+    "@oligami/browser_wasi_shim-threads": ["@oligami/browser_wasi_shim-threads@0.3.6", "", { "dependencies": { "@bjorn3/browser_wasi_shim": "^0.4.2" } }, "sha512-BVCyyXyI1AE7vp1kjmSNYxnPZFL+uqCqYBfgFWb7Qb5K16psbndo1nASXBj0tLTu/iKvwITChq+WBLlFJWwEVA=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.132.0", "", {}, "sha512-FESMOxil5Se014ui/Eq8fT5uHJo6nIRwH0PfJrZJXs6Gek3ZVFOrpUv3YIZT20m+extU98Hg1Ym72U58rlsxUQ=="],
 

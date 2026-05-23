@@ -239,3 +239,5 @@ plug_thread!({ &THREAD_POOL }, self, rustc_mock, vfs_shell);
 plug_thread!({ &THREAD_POOL }, self, rustc_opt, vfs_shell);
 
 plug_clock!(StandardClock, vfs_shell);
+plug_clock!(StandardClock, rustc_mock);
+plug_clock!(StandardClock, llvm_mock);
