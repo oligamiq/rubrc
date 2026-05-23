@@ -21,20 +21,21 @@ export const load_sysroot_part = async (triple: string): Promise<Directory> => {
     if (!file.data) {
       throw new Error("File data not found");
     }
-    if (file.name.includes("/")) {
-      const parts = file.name.split("/");
-      const created_dir = dir.get(parts[0]);
-      if (created_dir instanceof Directory) {
-        created_dir.contents.set(parts.slice(1).join("/"), new File(file.data));
-      } else {
-        dir.set(
-          parts[0],
-          new Directory([[parts.slice(1).join("/"), new File(file.data)]]),
-        );
+
+    const parts = file.name.split("/");
+    let current_dir_contents = dir;
+
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i];
+      let next_dir = current_dir_contents.get(part);
+      if (!(next_dir instanceof Directory)) {
+        next_dir = new Directory([]);
+        current_dir_contents.set(part, next_dir);
       }
-    } else {
-      dir.set(file.name, new File(file.data));
+      current_dir_contents = next_dir.contents;
     }
+
+    current_dir_contents.set(parts[parts.length - 1], new File(file.data));
 
     console.log(file.name);
   });

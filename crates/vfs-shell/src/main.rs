@@ -215,9 +215,9 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
         }
 
         let mut files_loaded = 0;
-        let sysroot_dir = std::path::Path::new("/sysroot");
+        let sysroot_dir = std::path::Path::new("/sysroot/lib/rustlib").join(triple).join("lib");
         if !sysroot_dir.exists() {
-            std::fs::create_dir_all(sysroot_dir).unwrap_or_default();
+            std::fs::create_dir_all(&sysroot_dir).unwrap_or_default();
         }
 
         loop {
@@ -435,6 +435,7 @@ fn main() {
         "ls -la",
         "tree",
         "seq | grep 2 | head -n5",
+        "load_sysroot wasm32-wasip1",
     ];
 
     for line in pre_lines {
