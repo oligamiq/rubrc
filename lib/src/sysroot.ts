@@ -18,15 +18,12 @@ export const load_sysroot_part = async (triple: string): Promise<Directory> => {
   console.group("Loading sysroot");
 
   await parseTar(decompressed_stream, (file) => {
-    if (!file.data) {
-      throw new Error("File data not found");
-    }
-
     const parts = file.name.split("/");
     let current_dir_contents = dir;
 
     for (let i = 0; i < parts.length - 1; i++) {
       const part = parts[i];
+      if (!part) continue;
       let next_dir = current_dir_contents.get(part);
       if (!(next_dir instanceof Directory)) {
         next_dir = new Directory([]);
@@ -35,7 +32,14 @@ export const load_sysroot_part = async (triple: string): Promise<Directory> => {
       current_dir_contents = next_dir.contents;
     }
 
-    current_dir_contents.set(parts[parts.length - 1], new File(file.data));
+    const last_part = parts[parts.length - 1];
+    if (file.type === "directory") {
+      if (last_part && !current_dir_contents.has(last_part)) {
+        current_dir_contents.set(last_part, new Directory([]));
+      }
+    } else if (file.data) {
+      current_dir_contents.set(last_part, new File(file.data));
+    }
 
     console.log(file.name);
   });

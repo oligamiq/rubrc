@@ -234,33 +234,38 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
 
 
             let mut name_buf = vec![0u8; name_len as usize];
-            let mut data_buf = vec![0u8; data_len as usize];
-
             unsafe {
                 sysroot_read_file_name(name_buf.as_mut_ptr() as i32, name_len);
             }
 
-
-            let mut remaining = data_len as usize;
-            let mut offset = 0;
-            let chunk_size = 128 * 1024;
-            while remaining > 0 {
-                let to_read = std::cmp::min(remaining, chunk_size);
-                unsafe {
-                    sysroot_read_file_chunk(data_buf[offset..].as_mut_ptr() as i32, to_read as i32);
+            let mut data_buf = Vec::new();
+            if data_len >= 0 {
+                data_buf = vec![0u8; data_len as usize];
+                let mut remaining = data_len as usize;
+                let mut offset = 0;
+                let chunk_size = 128 * 1024;
+                while remaining > 0 {
+                    let to_read = std::cmp::min(remaining, chunk_size);
+                    unsafe {
+                        sysroot_read_file_chunk(data_buf[offset..].as_mut_ptr() as i32, to_read as i32);
+                    }
+                    offset += to_read;
+                    remaining -= to_read;
                 }
-                offset += to_read;
-                remaining -= to_read;
             }
 
             if let Ok(name) = String::from_utf8(name_buf) {
                 let file_path = sysroot_dir.join(&name);
-                if let Some(parent) = file_path.parent() {
-                    std::fs::create_dir_all(parent).unwrap_or_default();
-                }
+                if data_len == -1 {
+                    std::fs::create_dir_all(&file_path).unwrap_or_default();
+                } else {
+                    if let Some(parent) = file_path.parent() {
+                        std::fs::create_dir_all(parent).unwrap_or_default();
+                    }
 
-                std::fs::write(&file_path, data_buf)
-                    .unwrap_or_else(|e| eprintln!("Failed to write sysroot file '{}': {}", name, e));
+                    std::fs::write(&file_path, data_buf)
+                        .unwrap_or_else(|e| eprintln!("Failed to write sysroot file '{}': {}", name, e));
+                }
 
                 files_loaded += 1;
                 print!("\r\x1b[KLoaded {} files...", files_loaded);

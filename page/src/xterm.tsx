@@ -248,12 +248,11 @@ const get_ref = (term, callback) => {
 
             const stream = await fetch_compressed_stream(`https://oligamiq.github.io/rust_wasm/v0.2.0/${triple}.tar.br`);
             await parseTar(stream, (file) => {
-              if (file.data) {
-                sysroot_queue.push({
-                  name: new TextEncoder().encode(file.name),
-                  data: file.data
-                });
-              }
+              sysroot_queue.push({
+                name: new TextEncoder().encode(file.name),
+                data: file.data || new Uint8Array(),
+                is_directory: file.type === "directory"
+              });
             });
           } catch (e) {
             console.error("Failed to fetch sysroot", e);
@@ -265,7 +264,7 @@ const get_ref = (term, callback) => {
             return {
               has_file: true,
               name_len: current_sysroot_file.name.length,
-              data_len: current_sysroot_file.data.length
+              data_len: current_sysroot_file.is_directory ? -1 : current_sysroot_file.data.length
             };
           } else {
             current_sysroot_file = null;
