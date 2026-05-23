@@ -167,6 +167,22 @@ pub unsafe extern "C" fn vfs_shell_write_stderr(id: u32, ptr: u32, len: u32) -> 
 }
 
 // ----------------------------------------------------------
+
+#[link(wasm_import_module = "wasi_snapshot_preview1")]
+unsafe extern "C" {
+    #[link_name = "sysroot_start_fetch"]
+    pub fn sysroot_start_fetch(triple_ptr: i32, triple_len: i32);
+    
+    #[link_name = "sysroot_get_next_file_meta"]
+    pub fn sysroot_get_next_file_meta(name_len_ptr: i32, data_len_ptr: i32) -> i32;
+
+    #[link_name = "sysroot_read_file_name"]
+    pub fn sysroot_read_file_name(name_ptr: i32, name_len: i32);
+
+    #[link_name = "sysroot_read_file_chunk"]
+    pub fn sysroot_read_file_chunk(data_ptr: i32, chunk_len: i32);
+}
+
 // Import: vfs_execute_command (scalar-only, no pointer args)
 // ----------------------------------------------------------
 
@@ -189,6 +205,69 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
     let mut reg = CommandRegistry::with_builtins();
 
     // WASI 環境の相対パス解決やシンボリックリンク解決をサポートする cd
+    
+    reg.register("load_sysroot", |args, _io| {
+        let triple = args.get(1).map(|s| s.as_str()).unwrap_or("wasm32-wasip1");
+        println!("Loading sysroot: {} ...", triple);
+
+        unsafe {
+            sysroot_start_fetch(triple.as_ptr() as i32, triple.len() as i32);
+        }
+
+        let mut files_loaded = 0;
+        let sysroot_dir = std::path::Path::new("/sysroot");
+        if !sysroot_dir.exists() {
+            std::fs::create_dir_all(sysroot_dir).unwrap_or_default();
+        }
+
+        loop {
+            let mut name_len = 0i32;
+            let mut data_len = 0i32;
+
+            let has_next = unsafe {
+                sysroot_get_next_file_meta(&mut name_len as *mut _ as i32, &mut data_len as *mut _ as i32)
+            };
+            if has_next == 0 {
+                break;
+            }
+
+            let mut name_buf = vec![0u8; name_len as usize];
+            let mut data_buf = vec![0u8; data_len as usize];
+
+            unsafe {
+                sysroot_read_file_name(name_buf.as_mut_ptr() as i32, name_len);
+            }
+
+            let mut remaining = data_len as usize;
+            let mut offset = 0;
+            let chunk_size = 128 * 1024;
+            while remaining > 0 {
+                let to_read = std::cmp::min(remaining, chunk_size);
+                unsafe {
+                    sysroot_read_file_chunk(data_buf[offset..].as_mut_ptr() as i32, to_read as i32);
+                }
+                offset += to_read;
+                remaining -= to_read;
+            }
+
+            if let Ok(name) = String::from_utf8(name_buf) {
+                let file_path = sysroot_dir.join(&name);
+                if let Some(parent) = file_path.parent() {
+                    std::fs::create_dir_all(parent).unwrap_or_default();
+                }
+                
+                let _ = std::fs::write(&file_path, data_buf);
+                
+                files_loaded += 1;
+                print!("\r\x1b[KLoaded {} files...", files_loaded);
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+            }
+        }
+        println!("\nSysroot '{}' loaded successfully ({} files).", triple, files_loaded);
+        Ok(())
+    });
+
     reg.register("cd", |args, _ctx| {
         let new_dir = args.get(1).map(|s| s.as_str()).unwrap_or("/");
         let current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));

@@ -36,3 +36,4 @@ BE sure to COMPLY with and take this into account
 - Calling Rust functions from inside JavaScript functions that are invoked by Rust is prohibited.
 - In WIT, the use of list is prohibited
 - The file layer is split into two layers: one in Rust and one on the Web. File access in the VFS crate is reflected on the Web side, while file access in the vfs-shell crate is reflected in Rust-side file access.
+- Only memory allocated via VFS can be made available to the web.
