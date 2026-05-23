@@ -168,16 +168,16 @@ pub unsafe extern "C" fn vfs_shell_write_stderr(id: u32, ptr: u32, len: u32) -> 
 
 // ----------------------------------------------------------
 
-#[link(wasm_import_module = "wasi_snapshot_preview1")]
+#[link(wasm_import_module = "__wasip1_vfs-host")]
 unsafe extern "C" {
     #[link_name = "sysroot_start_fetch"]
     pub fn sysroot_start_fetch(triple_ptr: i32, triple_len: i32);
-    
+
     #[link_name = "sysroot_get_next_file_meta"]
     pub fn sysroot_get_next_file_meta(name_len_ptr: i32, data_len_ptr: i32) -> i32;
 
     #[link_name = "sysroot_read_file_name"]
-    pub fn sysroot_read_file_name(name_ptr: i32, name_len: i32);
+    pub fn sysroot_read_file_name(name_ptr: i32);
 
     #[link_name = "sysroot_read_file_chunk"]
     pub fn sysroot_read_file_chunk(data_ptr: i32, chunk_len: i32);
@@ -205,7 +205,7 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
     let mut reg = CommandRegistry::with_builtins();
 
     // WASI 環境の相対パス解決やシンボリックリンク解決をサポートする cd
-    
+
     reg.register("load_sysroot", |args, _io| {
         let triple = args.get(1).map(|s| s.as_str()).unwrap_or("wasm32-wasip1");
         println!("Loading sysroot: {} ...", triple);
@@ -235,7 +235,7 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
             let mut data_buf = vec![0u8; data_len as usize];
 
             unsafe {
-                sysroot_read_file_name(name_buf.as_mut_ptr() as i32, name_len);
+                sysroot_read_file_name(name_buf.as_mut_ptr() as i32);
             }
 
             let mut remaining = data_len as usize;
@@ -255,9 +255,9 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
                 if let Some(parent) = file_path.parent() {
                     std::fs::create_dir_all(parent).unwrap_or_default();
                 }
-                
+
                 let _ = std::fs::write(&file_path, data_buf);
-                
+
                 files_loaded += 1;
                 print!("\r\x1b[KLoaded {} files...", files_loaded);
                 use std::io::Write;
