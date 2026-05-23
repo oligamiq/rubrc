@@ -1,11 +1,10 @@
+#[cfg(not(feature = "full-tools"))]
+use crate::vfs::host::bridge::Downloader;
+use crate::*;
 use parking_lot::Mutex;
+use std::io::Write;
 use std::sync::LazyLock;
 use wasi_virt_layer::prelude::*;
-use std::io::Write;
-use crate::*;
-#[cfg(not(feature = "full-tools"))]
-
-use crate::vfs::host::bridge::Downloader;
 
 pub struct VirtualArgsState {
     pub args: Vec<String>,
@@ -89,20 +88,32 @@ pub fn handle_command(args: Vec<String>) {
                     let mut downloaded = 0;
                     let bar_width = 25;
 
-                    Downloader::download_file_start(filename.as_bytes().as_ptr() as usize as i32, filename.len() as u32 as i32);
-                    for chunk in data.chunks(128 * 1024) {
-                        Downloader::download_file_chunk(chunk.as_ptr() as usize as i32, chunk.len() as u32 as i32);
+                    Downloader::download_file_start(
+                        filename.as_bytes().as_ptr() as usize as i32,
+                        filename.len() as u32 as i32,
+                    );
+                    for chunk in data.chunks(512 * 1024) {
+                        Downloader::download_file_chunk(
+                            chunk.as_ptr() as usize as i32,
+                            chunk.len() as u32 as i32,
+                        );
                         downloaded += chunk.len();
 
                         let progress = (downloaded as f64 / total_size as f64).min(1.0);
                         let filled = (progress * bar_width as f64) as usize;
-                        let bar = format!("{nil:=>filled$}{nil: >empty$}", nil = "", filled = filled, empty = bar_width - filled);
-                        
-                        print!("\rDownloading {}: [{}] {:.1}% ({}/{})", 
-                            filename, 
-                            bar, 
-                            progress * 100.0, 
-                            format_size(downloaded), 
+                        let bar = format!(
+                            "{nil:=>filled$}{nil: >empty$}",
+                            nil = "",
+                            filled = filled,
+                            empty = bar_width - filled
+                        );
+
+                        print!(
+                            "\rDownloading {}: [{}] {:.1}% ({}/{})",
+                            filename,
+                            bar,
+                            progress * 100.0,
+                            format_size(downloaded),
                             format_size(total_size)
                         );
                         let _ = std::io::stdout().flush();

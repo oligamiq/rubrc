@@ -44,7 +44,10 @@ pub extern "C" fn vfs_execute_command(context_id: u32) -> i32 {
     let args_ptr = unsafe { vfs_shell_get_cmd_args_ptr() } as *const u8;
     let args_len = unsafe { vfs_shell_get_cmd_args_len() } as usize;
 
-    println!("vfs_execute_command: getting array of len {} at ptr {:?}", args_len, args_ptr);
+    println!(
+        "vfs_execute_command: getting array of len {} at ptr {:?}",
+        args_len, args_ptr
+    );
 
     // 2. Copy args from vfs-shell's memory into our local buffer
     let args_data = vfs_shell::get_array(args_ptr, args_len);

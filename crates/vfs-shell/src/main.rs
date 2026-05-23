@@ -1,11 +1,13 @@
-use std::io::{self, Write};
 use colored::*;
 use dashmap::DashMap;
-use std::sync::{LazyLock, Mutex, Arc};
-use wasi_shell::{IoContext, CommandRegistry, handle_parallel, LineEditor, KeyEventHandler, KeyEvent};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::env;
+use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
+use wasi_shell::{
+    CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor, handle_parallel,
+};
 
 fn normalize_path_logical(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
@@ -43,7 +45,8 @@ impl KeyEventHandler for TerminalEchoHandler {
                 print!("^C\r\n");
                 self.needs_redraw = true;
             }
-            KeyEvent::Char(c) if c == '\x0c' => { // Ctrl+L
+            KeyEvent::Char(c) if c == '\x0c' => {
+                // Ctrl+L
                 print!("\x1b[2J\x1b[H");
                 self.needs_redraw = true;
             }
@@ -51,10 +54,10 @@ impl KeyEventHandler for TerminalEchoHandler {
                 print!("{c}");
             }
             KeyEvent::Right => {
-              print!("\x1b[1C");
+                print!("\x1b[1C");
             }
             KeyEvent::Left => {
-              print!("\x1b[1D");
+                print!("\x1b[1D");
             }
             _ => {
                 self.needs_redraw = true;
@@ -228,7 +231,9 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
         let mut total_bytes = 0;
         let start_time = std::time::Instant::now();
 
-        let sysroot_dir = std::path::Path::new("/sysroot/lib/rustlib").join(triple).join("lib");
+        let sysroot_dir = std::path::Path::new("/sysroot/lib/rustlib")
+            .join(triple)
+            .join("lib");
         if !sysroot_dir.exists() {
             std::fs::create_dir_all(&sysroot_dir).unwrap_or_default();
         }
@@ -238,7 +243,10 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
             let mut data_len = 0i32;
 
             let has_next = unsafe {
-                sysroot_get_next_file_meta(&mut name_len as *mut _ as i32, &mut data_len as *mut _ as i32)
+                sysroot_get_next_file_meta(
+                    &mut name_len as *mut _ as i32,
+                    &mut data_len as *mut _ as i32,
+                )
             };
             if has_next == 0 {
                 break;
@@ -254,22 +262,30 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
                 data_buf = vec![0u8; data_len as usize];
                 let mut remaining = data_len as usize;
                 let mut offset = 0;
-                let chunk_size = 128 * 1024;
+                let chunk_size = 512 * 1024;
                 while remaining > 0 {
                     let to_read = std::cmp::min(remaining, chunk_size);
                     unsafe {
-                        sysroot_read_file_chunk(data_buf[offset..].as_mut_ptr() as i32, to_read as i32);
+                        sysroot_read_file_chunk(
+                            data_buf[offset..].as_mut_ptr() as i32,
+                            to_read as i32,
+                        );
                     }
                     offset += to_read;
                     remaining -= to_read;
                     total_bytes += to_read;
 
                     let elapsed = start_time.elapsed().as_secs_f64();
-                    let speed = if elapsed > 0.0 { total_bytes as f64 / elapsed } else { 0.0 };
-                    
+                    let speed = if elapsed > 0.0 {
+                        total_bytes as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+
                     if data_len > 1024 * 1024 {
                         let progress = (offset as f64 / data_len as f64) * 100.0;
-                        print!("\r\x1b[KLoading {}... [{:.1}%] Speed: {}/s", 
+                        print!(
+                            "\r\x1b[KLoading {}... [{:.1}%] Speed: {}/s",
                             String::from_utf8_lossy(&name_buf),
                             progress,
                             format_size(speed as usize)
@@ -288,16 +304,22 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
                         std::fs::create_dir_all(parent).unwrap_or_default();
                     }
 
-                    std::fs::write(&file_path, data_buf)
-                        .unwrap_or_else(|e| eprintln!("Failed to write sysroot file '{}': {}", name, e));
+                    std::fs::write(&file_path, data_buf).unwrap_or_else(|e| {
+                        eprintln!("Failed to write sysroot file '{}': {}", name, e)
+                    });
                 }
 
                 files_loaded += 1;
                 let elapsed = start_time.elapsed().as_secs_f64();
-                let speed = if elapsed > 0.0 { total_bytes as f64 / elapsed } else { 0.0 };
-                
-                print!("\r\x1b[KLoaded {} files ({} total) - Speed: {}/s", 
-                    files_loaded, 
+                let speed = if elapsed > 0.0 {
+                    total_bytes as f64 / elapsed
+                } else {
+                    0.0
+                };
+
+                print!(
+                    "\r\x1b[KLoaded {} files ({} total) - Speed: {}/s",
+                    files_loaded,
                     format_size(total_bytes),
                     format_size(speed as usize)
                 );
@@ -307,8 +329,13 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
             }
         }
         let total_elapsed = start_time.elapsed();
-        println!("\nSysroot '{}' loaded successfully ({} files, {} total) in {:.1}s.", 
-            triple, files_loaded, format_size(total_bytes), total_elapsed.as_secs_f64());
+        println!(
+            "\nSysroot '{}' loaded successfully ({} files, {} total) in {:.1}s.",
+            triple,
+            files_loaded,
+            format_size(total_bytes),
+            total_elapsed.as_secs_f64()
+        );
         Ok(())
     });
 
@@ -317,8 +344,8 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
         let current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
         let target = current.join(new_dir);
 
-        let resolved = std::fs::canonicalize(&target)
-            .unwrap_or_else(|_| normalize_path_logical(&target));
+        let resolved =
+            std::fs::canonicalize(&target).unwrap_or_else(|_| normalize_path_logical(&target));
 
         std::env::set_current_dir(&resolved).map_err(|e| format!("cd: {}", e))
     });
@@ -375,10 +402,7 @@ pub extern "C" fn vfs_shell_interrupt() {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vfs_shell_resize(
-  columns: u32,
-  lines: u32,
-) {
+pub extern "C" fn vfs_shell_resize(columns: u32, lines: u32) {
     unsafe { std::env::set_var("COLUMNS", columns.to_string()) };
     unsafe { std::env::set_var("LINES", lines.to_string()) };
 }
@@ -393,7 +417,9 @@ pub extern "C" fn vfs_shell_input_char(c: u32) {
     let line = {
         let mut reader = LINE_READER.lock().unwrap();
         let len_before = reader.buffer().chars().count();
-        let mut handler = TerminalEchoHandler { needs_redraw: false };
+        let mut handler = TerminalEchoHandler {
+            needs_redraw: false,
+        };
         let line = reader.input_char_with_handler(c, &mut handler);
 
         if handler.needs_redraw {
@@ -506,10 +532,22 @@ mod tests {
 
     #[test]
     fn test_normalize_path_logical() {
-        assert_eq!(normalize_path_logical(Path::new("/a/b/../c")), PathBuf::from("/a/c"));
-        assert_eq!(normalize_path_logical(Path::new("/a/./b")), PathBuf::from("/a/b"));
-        assert_eq!(normalize_path_logical(Path::new("/a/b/../..")), PathBuf::from("/"));
-        assert_eq!(normalize_path_logical(Path::new("a/b/../c")), PathBuf::from("a/c"));
+        assert_eq!(
+            normalize_path_logical(Path::new("/a/b/../c")),
+            PathBuf::from("/a/c")
+        );
+        assert_eq!(
+            normalize_path_logical(Path::new("/a/./b")),
+            PathBuf::from("/a/b")
+        );
+        assert_eq!(
+            normalize_path_logical(Path::new("/a/b/../..")),
+            PathBuf::from("/")
+        );
+        assert_eq!(
+            normalize_path_logical(Path::new("a/b/../c")),
+            PathBuf::from("a/c")
+        );
     }
 
     #[test]

@@ -1,13 +1,13 @@
-use wasi_virt_layer::prelude::*;
 use wasi_virt_layer::memory::WasmAccessName;
+use wasi_virt_layer::prelude::*;
 use wasi_virt_layer::process::ProcessExit;
 use wasi_virt_layer::wasi::wrap_unreachable::WrapUnreachable;
 
-use crate::{vfs_shell};
+use crate::vfs_shell;
 #[cfg(not(feature = "full-tools"))]
-use crate::{rustc_mock, llvm_mock};
+use crate::{llvm_mock, rustc_mock};
 #[cfg(feature = "full-tools")]
-use crate::{rustc_opt, llvm_opt};
+use crate::{llvm_opt, rustc_opt};
 
 pub const SUCCESS_FLAG: i32 = 999;
 
@@ -18,24 +18,14 @@ impl ProcessExit for CustomProcess {
         if code == 0 {
             match Wasm::NAME {
                 #[cfg(not(feature = "full-tools"))]
-                rustc_mock::NAME => {
-                    WrapUnreachableRustcMock::set_flag(SUCCESS_FLAG)
-                }
+                rustc_mock::NAME => WrapUnreachableRustcMock::set_flag(SUCCESS_FLAG),
                 #[cfg(not(feature = "full-tools"))]
-                llvm_mock::NAME => {
-                    WrapUnreachableLlvmMock::set_flag(SUCCESS_FLAG)
-                }
+                llvm_mock::NAME => WrapUnreachableLlvmMock::set_flag(SUCCESS_FLAG),
                 #[cfg(feature = "full-tools")]
-                rustc_opt::NAME => {
-                    WrapUnreachableRustcOpt::set_flag(SUCCESS_FLAG)
-                }
+                rustc_opt::NAME => WrapUnreachableRustcOpt::set_flag(SUCCESS_FLAG),
                 #[cfg(feature = "full-tools")]
-                llvm_opt::NAME => {
-                    WrapUnreachableLlvmOpt::set_flag(SUCCESS_FLAG)
-                }
-                vfs_shell::NAME => {
-                    WrapUnreachableVfsShell::set_flag(SUCCESS_FLAG)
-                }
+                llvm_opt::NAME => WrapUnreachableLlvmOpt::set_flag(SUCCESS_FLAG),
+                vfs_shell::NAME => WrapUnreachableVfsShell::set_flag(SUCCESS_FLAG),
                 _ => unreachable!(),
             }
         }

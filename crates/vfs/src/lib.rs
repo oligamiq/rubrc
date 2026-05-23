@@ -1,11 +1,6 @@
 use const_struct::*;
-use wasi_virt_layer::{
-    file::*,
-    prelude::*,
-    poll::*,
-    thread::VirtualThreadPool,
-};
 use std::path::{Path, PathBuf};
+use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
 
 wit_bindgen::generate!({
     world: "vfs-host",
@@ -24,12 +19,18 @@ impl Guest for Wit {
         unsafe { THREAD_POOL.init() };
 
         for i in 1..=threads {
-            print!("\x1b[2K\r\x1b[36mInitializing Thread Pool: {}/{} ...\x1b[0m", i, threads);
+            print!(
+                "\x1b[2K\r\x1b[36mInitializing Thread Pool: {}/{} ...\x1b[0m",
+                i, threads
+            );
             let _ = std::io::Write::flush(&mut std::io::stdout());
             THREAD_POOL.set_capacity(i);
             THREAD_POOL.flush_capacity().wait();
         }
-        println!("\x1b[2K\r\x1b[32mThread Pool Initialized ({} threads)\x1b[0m", threads);
+        println!(
+            "\x1b[2K\r\x1b[32mThread Pool Initialized ({} threads)\x1b[0m",
+            threads
+        );
 
         vfs_shell::_reset();
         vfs_shell::_start();
@@ -57,7 +58,9 @@ impl Guest for Wit {
                     let name = path.file_name().unwrap().to_string_lossy().to_string();
 
                     if path.is_dir() {
-                        let vfs_child = VIRTUAL_FILE_SYSTEM.lfs.add_dir(vfs_parent, &name)
+                        let vfs_child = VIRTUAL_FILE_SYSTEM
+                            .lfs
+                            .add_dir(vfs_parent, &name)
                             .unwrap_or(vfs_parent);
                         walk_host(&path, vfs_child);
                     } else if path.is_file() {
@@ -78,7 +81,9 @@ impl Guest for Wit {
         fn walk_vfs(vfs_inode: usize, host_path: PathBuf) {
             if let Ok(entries) = VIRTUAL_FILE_SYSTEM.lfs.read_dir(vfs_inode) {
                 for (name, child_inode) in entries {
-                    if name == "." || name == ".." { continue; }
+                    if name == "." || name == ".." {
+                        continue;
+                    }
                     let child_path = host_path.join(&name);
 
                     // Try to list as directory to check if it is one
@@ -108,7 +113,8 @@ impl Guest for Wit {
 
     fn resize(columns: u32, lines: u32) {
         let mut env = VIRTUAL_SHELL_ENV.lock();
-        env.env.retain(|s| !s.starts_with("COLUMNS=") && !s.starts_with("LINES="));
+        env.env
+            .retain(|s| !s.starts_with("COLUMNS=") && !s.starts_with("LINES="));
         env.env.push(format!("COLUMNS={}", columns));
         env.env.push(format!("LINES={}", lines));
         unsafe { crate::shell::vfs_shell_resize(columns, lines) };
@@ -129,16 +135,20 @@ impl<'a> VirtualEnv<'a> for VirtualEnvState {
 }
 
 pub static VIRTUAL_SHELL_ENV: std::sync::LazyLock<parking_lot::Mutex<VirtualEnvState>> =
-    std::sync::LazyLock::new(|| parking_lot::Mutex::new(VirtualEnvState {
-        env: vec!["HOME=~/".to_string()],
-    }));
+    std::sync::LazyLock::new(|| {
+        parking_lot::Mutex::new(VirtualEnvState {
+            env: vec!["HOME=~/".to_string()],
+        })
+    });
 
 #[derive(Debug)]
 pub struct ShellVirtualStdIO;
 
 impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
     fn write(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
-        let id = crate::shell::CURRENT_CONTEXT_ID.with(|id| id.get()).unwrap_or(0);
+        let id = crate::shell::CURRENT_CONTEXT_ID
+            .with(|id| id.get())
+            .unwrap_or(0);
         if id != 0 {
             let len = buf.len() as u32;
             // 1. Allocate buffer in vfs-shell's memory
@@ -155,7 +165,9 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
         }
     }
     fn ewrite(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
-        let id = crate::shell::CURRENT_CONTEXT_ID.with(|id| id.get()).unwrap_or(0);
+        let id = crate::shell::CURRENT_CONTEXT_ID
+            .with(|id| id.get())
+            .unwrap_or(0);
         if id != 0 {
             let len = buf.len() as u32;
             let shell_ptr = unsafe { crate::shell::vfs_shell_alloc_buf(len) };
@@ -175,18 +187,19 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
 type LFS = StandardDynamicLFS<ShellVirtualStdIO>;
 pub(crate) static LFS_ROOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-pub mod process;
 pub mod command;
+pub mod process;
 pub mod shell;
 
-pub static VIRTUAL_FILE_SYSTEM: std::sync::LazyLock<StandardDynamicFileSystem<LFS>> = std::sync::LazyLock::new(|| {
-    let lfs = StandardDynamicLFS::new();
-    let root_inode = lfs.add_preopen(".");
-    LFS_ROOT.store(root_inode, std::sync::atomic::Ordering::SeqCst);
-    let vfs = StandardDynamicFileSystem::new(lfs);
-    vfs.add_fd(root_inode, !0, !0);
-    vfs
-});
+pub static VIRTUAL_FILE_SYSTEM: std::sync::LazyLock<StandardDynamicFileSystem<LFS>> =
+    std::sync::LazyLock::new(|| {
+        let lfs = StandardDynamicLFS::new();
+        let root_inode = lfs.add_preopen(".");
+        LFS_ROOT.store(root_inode, std::sync::atomic::Ordering::SeqCst);
+        let vfs = StandardDynamicFileSystem::new(lfs);
+        vfs.add_fd(root_inode, !0, !0);
+        vfs
+    });
 
 import_wasm!(vfs_shell);
 
@@ -219,7 +232,6 @@ plug_env!(@dynamic, { &mut VIRTUAL_SHELL_ENV.lock() }, vfs_shell);
 
 // plug_process!(StandardProcess, rustc_mock, llvm_mock);
 
-
 #[cfg(not(feature = "full-tools"))]
 plug_random!(StandardRandom, rustc_mock, llvm_mock, vfs_shell);
 
@@ -229,8 +241,7 @@ plug_poll!(WaitPoll, rustc_mock, llvm_mock, vfs_shell);
 #[cfg(feature = "full-tools")]
 plug_poll!(WaitPoll, rustc_opt, llvm_opt, vfs_shell);
 
-static THREAD_POOL: VirtualThreadPool<ThreadAccessor> =
-    unsafe { VirtualThreadPool::new_const(1) };
+static THREAD_POOL: VirtualThreadPool<ThreadAccessor> = unsafe { VirtualThreadPool::new_const(1) };
 
 #[cfg(not(feature = "full-tools"))]
 plug_thread!({ &THREAD_POOL }, self, rustc_mock, vfs_shell);
@@ -242,20 +253,26 @@ plug_clock!(StandardClock, vfs_shell);
 plug_clock!(StandardClock, rustc_mock);
 plug_clock!(StandardClock, llvm_mock);
 
-
-
-
 #[unsafe(no_mangle)]
 pub extern "C" fn sysroot_start_fetch(vfs_shell_triple_ptr: i32, triple_len: i32) {
     let triple_data = vfs_shell::get_array(vfs_shell_triple_ptr as *const u8, triple_len as usize);
-    crate::vfs::host::bridge::Downloader::sysroot_start_fetch(triple_data.as_ptr() as i32, triple_len);
+    crate::vfs::host::bridge::Downloader::sysroot_start_fetch(
+        triple_data.as_ptr() as i32,
+        triple_len,
+    );
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sysroot_get_next_file_meta(vfs_shell_name_len_ptr: i32, vfs_shell_data_len_ptr: i32) -> i32 {
+pub extern "C" fn sysroot_get_next_file_meta(
+    vfs_shell_name_len_ptr: i32,
+    vfs_shell_data_len_ptr: i32,
+) -> i32 {
     let mut name_len = 0i32;
     let mut data_len = 0i32;
-    let has_next = crate::vfs::host::bridge::Downloader::sysroot_get_next_file_meta(&mut name_len as *mut _ as i32, &mut data_len as *mut _ as i32);
+    let has_next = crate::vfs::host::bridge::Downloader::sysroot_get_next_file_meta(
+        &mut name_len as *mut _ as i32,
+        &mut data_len as *mut _ as i32,
+    );
 
     vfs_shell::memcpy(vfs_shell_name_len_ptr as *mut u8, &name_len.to_ne_bytes());
     vfs_shell::memcpy(vfs_shell_data_len_ptr as *mut u8, &data_len.to_ne_bytes());
@@ -273,6 +290,9 @@ pub extern "C" fn sysroot_read_file_name(vfs_shell_name_ptr: i32, name_len: i32)
 #[unsafe(no_mangle)]
 pub extern "C" fn sysroot_read_file_chunk(vfs_shell_data_ptr: i32, chunk_len: i32) {
     let mut local_buf = vec![0u8; chunk_len as usize];
-    crate::vfs::host::bridge::Downloader::sysroot_read_file_chunk(local_buf.as_mut_ptr() as i32, chunk_len);
+    crate::vfs::host::bridge::Downloader::sysroot_read_file_chunk(
+        local_buf.as_mut_ptr() as i32,
+        chunk_len,
+    );
     vfs_shell::memcpy(vfs_shell_data_ptr as *mut u8, local_buf.as_slice());
 }
