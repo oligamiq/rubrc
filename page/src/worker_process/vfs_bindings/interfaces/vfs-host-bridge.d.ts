@@ -10,5 +10,6 @@ export class Downloader {
   static downloadFileEnd(): void;
   static sysrootStartFetch(triplePtr: number, tripleLen: number): void;
   static sysrootGetNextFileMeta(nameLenPtr: number, dataLenPtr: number): number;
-  static sysrootReadFile(namePtr: number, dataPtr: number): void;
+  static sysrootReadFileName(namePtr: number): void;
+  static sysrootReadFileChunk(dataPtr: number, chunkLen: number): void;
 }

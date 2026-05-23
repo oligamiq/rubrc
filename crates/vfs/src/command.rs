@@ -143,7 +143,17 @@ pub fn handle_command(args: Vec<String>) {
                 let mut data_buf = vec![0u8; data_len as usize];
 
                 // Pull actual file data from JS
-                Downloader::sysroot_read_file(name_buf.as_mut_ptr() as i32, data_buf.as_mut_ptr() as i32);
+                Downloader::sysroot_read_file_name(name_buf.as_mut_ptr() as i32);
+                
+                let mut remaining = data_len as usize;
+                let mut offset = 0;
+                let chunk_size = 128 * 1024;
+                while remaining > 0 {
+                    let to_read = std::cmp::min(remaining, chunk_size);
+                    Downloader::sysroot_read_file_chunk(data_buf[offset..].as_mut_ptr() as i32, to_read as i32);
+                    offset += to_read;
+                    remaining -= to_read;
+                }
 
                 if let Ok(name) = String::from_utf8(name_buf) {
                     // Navigate / Create directories in VFS

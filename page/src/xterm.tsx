@@ -271,17 +271,19 @@ const get_ref = (term, callback) => {
             current_sysroot_file = null;
             return { has_file: false, name_len: 0, data_len: 0 };
           }
-        } else if (unknown.name === "sysrootReadFile") {
+        } else if (unknown.name === "sysrootReadFileName") {
           if (current_sysroot_file) {
-            // Note: large uint8arrays are passed as objects across SharedObject,
-            // we should convert them to regular arrays or pass directly
-            // call_unknown_fn serializer will handle Uint8Array correctly
-            return {
-              name_bytes: current_sysroot_file.name,
-              data_bytes: current_sysroot_file.data
-            };
+            return { name: current_sysroot_file.name };
           }
-          return { name_bytes: new Uint8Array(), data_bytes: new Uint8Array() };
+          return { name: new Uint8Array() };
+        } else if (unknown.name === "sysrootReadFileChunk") {
+          if (current_sysroot_file) {
+            const chunk_len = unknown.args.chunk_len as number;
+            const chunk = current_sysroot_file.data.slice(0, chunk_len);
+            current_sysroot_file.data = current_sysroot_file.data.slice(chunk_len);
+            return { chunk };
+          }
+          return { chunk: new Uint8Array() };
         } else {
           await new Promise((resolve) => setTimeout(resolve, 500));
           console.warn("Unknown function called", unknown);
