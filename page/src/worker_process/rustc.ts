@@ -42,10 +42,6 @@ globalThis.addEventListener("message", async (event) => {
 
     await terminal("loaded rustc\r\n");
 
-    while (wasi_refs.length === 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
     await terminal("loaded wasi\r\n");
 
     const wasi = new WASIFarmAnimal(

@@ -4,7 +4,6 @@ import {
   File,
   Directory,
 } from "@bjorn3/browser_wasi_shim";
-import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
 
 import { fetch_compressed_stream } from "./brotli_stream";
 import { parseTar } from "./parse_tar";
@@ -48,46 +47,3 @@ export const load_sysroot_part = async (triple: string): Promise<Directory> => {
 };
 
 const toMap = (arr: Array<[string, Inode]>) => {
-  const map = new Map<string, Inode>();
-  for (const [key, value] of arr) {
-    map.set(key, value);
-  }
-  return map;
-};
-
-let rustlib_dir: Directory | undefined;
-
-export const load_default_sysroot = async (): Promise<PreopenDirectory> => {
-  const sysroot_part = await load_sysroot_part("wasm32-wasip1");
-  rustlib_dir = new Directory([
-    ["wasm32-wasip1", new Directory([["lib", sysroot_part]])],
-  ]);
-  const sysroot = new PreopenDirectory(
-    "/sysroot",
-    toMap([["lib", new Directory([["rustlib", rustlib_dir]])]]),
-  );
-  loaded_triples.add("wasm32-wasip1");
-  return sysroot;
-};
-
-const loaded_triples: Set<string> = new Set();
-
-export const load_additional_sysroot = async (triple: string) => {
-  if (loaded_triples.has(triple)) {
-    return;
-  }
-  const sysroot_part = await load_sysroot_part(triple);
-  if (!rustlib_dir) {
-    throw new Error("Default sysroot not loaded");
-  }
-  rustlib_dir.contents.set(triple, new Directory([["lib", sysroot_part]]));
-  loaded_triples.add(triple);
-};
-
-export const get_default_sysroot_wasi_farm = async (): Promise<WASIFarm> => {
-  const fds = [await load_default_sysroot()];
-  const farm = new WASIFarm(undefined, undefined, undefined, fds, {
-    allocator_size: 1024 * 1024 * 1024,
-  });
-  return farm;
-};
