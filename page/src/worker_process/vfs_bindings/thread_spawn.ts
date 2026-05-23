@@ -30,7 +30,7 @@ globalThis.onmessage = async (event) => {
                         console.warn("Animal is not set yet", idx, unknown);
                         return;
                     }
-                    animal.call_unknown_fn(idx, unknown);
+                    return animal.call_unknown_fn(idx, unknown);
                 },
 			);
 		},
