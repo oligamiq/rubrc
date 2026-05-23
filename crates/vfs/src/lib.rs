@@ -266,10 +266,7 @@ pub extern "C" fn sysroot_get_next_file_meta(vfs_shell_name_len_ptr: i32, vfs_sh
 #[unsafe(no_mangle)]
 pub extern "C" fn sysroot_read_file_name(vfs_shell_name_ptr: i32, name_len: i32) {
     let mut local_buf = vec![0u8; name_len as usize];
-    let ptr = local_buf.as_mut_ptr() as i32;
-    eprintln!("VFS sysroot_read_file_name: ptr={}, name_len={}", ptr, name_len);
-    crate::vfs::host::bridge::Downloader::sysroot_read_file_name(ptr);
-    eprintln!("VFS after JS call: local_buf={:?}", local_buf);
+    crate::vfs::host::bridge::Downloader::sysroot_read_file_name(local_buf.as_mut_ptr() as i32);
     vfs_shell::memcpy(vfs_shell_name_ptr as *mut u8, local_buf.as_slice());
 }
 

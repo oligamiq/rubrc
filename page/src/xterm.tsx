@@ -272,7 +272,7 @@ const get_ref = (term, callback) => {
             return { has_file: false, name_len: 0, data_len: 0 };
           }
         } else if (unknown.name === "sysrootReadFileName") {
-          if (current_sysroot_file) {
+          if (current_sysroot_file?.name) {
             return { name: current_sysroot_file.name };
           }
           throw new Error("No current sysroot file to read name from");

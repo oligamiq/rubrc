@@ -231,7 +231,7 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
                 break;
             }
 
-            println!("Next file - name_len: {}, data_len: {}", name_len, data_len);
+
 
             let mut name_buf = vec![0u8; name_len as usize];
             let mut data_buf = vec![0u8; data_len as usize];
@@ -239,7 +239,6 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
             unsafe {
                 sysroot_read_file_name(name_buf.as_mut_ptr() as i32, name_len);
             }
-            eprintln!("DEBUG name_len: {}, name_buf: {:?}", name_len, name_buf);
 
 
             let mut remaining = data_len as usize;
