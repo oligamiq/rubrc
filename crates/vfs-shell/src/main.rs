@@ -201,6 +201,16 @@ unsafe fn vfs_execute_command(_context_id: u32) -> i32 {
 // Shell configuration
 // ============================================================
 
+fn format_size(size: usize) -> String {
+    if size < 1024 {
+        format!("{} B", size)
+    } else if size < 1024 * 1024 {
+        format!("{:.1} KB", size as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
+    }
+}
+
 static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
     let mut reg = CommandRegistry::with_builtins();
 
@@ -215,6 +225,9 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
         }
 
         let mut files_loaded = 0;
+        let mut total_bytes = 0;
+        let start_time = std::time::Instant::now();
+
         let sysroot_dir = std::path::Path::new("/sysroot/lib/rustlib").join(triple).join("lib");
         if !sysroot_dir.exists() {
             std::fs::create_dir_all(&sysroot_dir).unwrap_or_default();
@@ -230,8 +243,6 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
             if has_next == 0 {
                 break;
             }
-
-
 
             let mut name_buf = vec![0u8; name_len as usize];
             unsafe {
@@ -251,6 +262,20 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
                     }
                     offset += to_read;
                     remaining -= to_read;
+                    total_bytes += to_read;
+
+                    let elapsed = start_time.elapsed().as_secs_f64();
+                    let speed = if elapsed > 0.0 { total_bytes as f64 / elapsed } else { 0.0 };
+                    
+                    if data_len > 1024 * 1024 {
+                        let progress = (offset as f64 / data_len as f64) * 100.0;
+                        print!("\r\x1b[KLoading {}... [{:.1}%] Speed: {}/s", 
+                            String::from_utf8_lossy(&name_buf),
+                            progress,
+                            format_size(speed as usize)
+                        );
+                        let _ = std::io::stdout().flush();
+                    }
                 }
             }
 
@@ -268,14 +293,22 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
                 }
 
                 files_loaded += 1;
-                print!("\r\x1b[KLoaded {} files...", files_loaded);
-                use std::io::Write;
+                let elapsed = start_time.elapsed().as_secs_f64();
+                let speed = if elapsed > 0.0 { total_bytes as f64 / elapsed } else { 0.0 };
+                
+                print!("\r\x1b[KLoaded {} files ({} total) - Speed: {}/s", 
+                    files_loaded, 
+                    format_size(total_bytes),
+                    format_size(speed as usize)
+                );
                 let _ = std::io::stdout().flush();
             } else {
                 eprintln!("Failed to decode sysroot file name");
             }
         }
-        println!("\nSysroot '{}' loaded successfully ({} files).", triple, files_loaded);
+        let total_elapsed = start_time.elapsed();
+        println!("\nSysroot '{}' loaded successfully ({} files, {} total) in {:.1}s.", 
+            triple, files_loaded, format_size(total_bytes), total_elapsed.as_secs_f64());
         Ok(())
     });
 
