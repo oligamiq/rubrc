@@ -5,6 +5,25 @@ import { type ImportObject, instantiate } from "./vfs.js";function snakeToCamel(
 		.replace(/_([a-z])/g, (match, letter) => letter.toUpperCase());
 }
 
+// call_unknown_fn serializes Uint8Array as plain objects {0: v, 1: v, ...}.
+// This helper converts any serialized form back to a proper Uint8Array.
+function _toUint8Array(data: unknown): Uint8Array {
+	if (data instanceof Uint8Array) {
+		return data;
+	}
+	if (data && (data as any).buffer instanceof ArrayBuffer) {
+		return new Uint8Array((data as any).buffer);
+	}
+	if (Array.isArray(data)) {
+		return new Uint8Array(data);
+	}
+	if (typeof data === 'object' && data !== null) {
+		const vals = Object.values(data) as number[];
+		return new Uint8Array(vals);
+	}
+	return new Uint8Array();
+}
+
 export const custom_instantiate = async (
 	wasm_module: WebAssembly.Module,
 	wasiImport: {
@@ -89,7 +108,7 @@ export const custom_instantiate = async (
               args: {},
             }) as { has_file: boolean | number, name_len?: number, data_len?: number };
             const view32 = new Int32Array(memory.memory.buffer);
-            
+
             if (res.has_file === 1 || res.has_file === true) {
               view32[name_len_ptr / 4] = res.name_len!;
               view32[data_len_ptr / 4] = res.data_len!;
@@ -100,17 +119,19 @@ export const custom_instantiate = async (
             const res = call_unknown_fn(0, {
               name: "sysrootReadFileName",
               args: {},
-            }) as { name: Uint8Array };
+            }) as { name: unknown };
+            const name_bytes = _toUint8Array(res.name);
             const view8 = new Uint8Array(memory.memory.buffer);
-            view8.set(res.name, name_ptr);
+            view8.set(name_bytes, name_ptr);
           },
           sysrootReadFileChunk: (data_ptr: number, chunk_len: number): void => {
             const res = call_unknown_fn(0, {
               name: "sysrootReadFileChunk",
               args: { chunk_len },
-            }) as { chunk: Uint8Array };
+            }) as { chunk: unknown };
+            const chunk_bytes = _toUint8Array(res.chunk);
             const view8 = new Uint8Array(memory.memory.buffer);
-            view8.set(res.chunk, data_ptr);
+            view8.set(chunk_bytes, data_ptr);
           },
         }
       },

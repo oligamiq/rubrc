@@ -177,7 +177,7 @@ unsafe extern "C" {
     pub fn sysroot_get_next_file_meta(name_len_ptr: i32, data_len_ptr: i32) -> i32;
 
     #[link_name = "sysroot_read_file_name"]
-    pub fn sysroot_read_file_name(name_ptr: i32);
+    pub fn sysroot_read_file_name(name_ptr: i32, name_len: i32);
 
     #[link_name = "sysroot_read_file_chunk"]
     pub fn sysroot_read_file_chunk(data_ptr: i32, chunk_len: i32);
@@ -231,12 +231,16 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
                 break;
             }
 
+            println!("Next file - name_len: {}, data_len: {}", name_len, data_len);
+
             let mut name_buf = vec![0u8; name_len as usize];
             let mut data_buf = vec![0u8; data_len as usize];
 
             unsafe {
-                sysroot_read_file_name(name_buf.as_mut_ptr() as i32);
+                sysroot_read_file_name(name_buf.as_mut_ptr() as i32, name_len);
             }
+            eprintln!("DEBUG name_len: {}, name_buf: {:?}", name_len, name_buf);
+
 
             let mut remaining = data_len as usize;
             let mut offset = 0;
@@ -256,12 +260,15 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
                     std::fs::create_dir_all(parent).unwrap_or_default();
                 }
 
-                let _ = std::fs::write(&file_path, data_buf);
+                std::fs::write(&file_path, data_buf)
+                    .unwrap_or_else(|e| eprintln!("Failed to write sysroot file '{}': {}", name, e));
 
                 files_loaded += 1;
                 print!("\r\x1b[KLoaded {} files...", files_loaded);
                 use std::io::Write;
                 let _ = std::io::stdout().flush();
+            } else {
+                eprintln!("Failed to decode sysroot file name");
             }
         }
         println!("\nSysroot '{}' loaded successfully ({} files).", triple, files_loaded);

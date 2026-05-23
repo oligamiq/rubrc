@@ -193,7 +193,7 @@ const get_ref = (term, callback) => {
 
   let download_name = "";
   let download_chunks: Uint8Array[] = [];
-  
+
   let sysroot_queue: { name: Uint8Array, data: Uint8Array }[] = [];
   let current_sysroot_file: { name: Uint8Array, data: Uint8Array } | null = null;
 
@@ -241,11 +241,11 @@ const get_ref = (term, callback) => {
         } else if (unknown.name === "sysrootStartFetch") {
           const triple = unknown.args.triple;
           sysroot_queue = [];
-          
+
           try {
             const { fetch_compressed_stream } = await import("../../lib/src/brotli_stream");
             const { parseTar } = await import("../../lib/src/parse_tar");
-            
+
             const stream = await fetch_compressed_stream(`https://oligamiq.github.io/rust_wasm/v0.2.0/${triple}.tar.br`);
             await parseTar(stream, (file) => {
               if (file.data) {
@@ -275,7 +275,7 @@ const get_ref = (term, callback) => {
           if (current_sysroot_file) {
             return { name: current_sysroot_file.name };
           }
-          return { name: new Uint8Array() };
+          throw new Error("No current sysroot file to read name from");
         } else if (unknown.name === "sysrootReadFileChunk") {
           if (current_sysroot_file) {
             const chunk_len = unknown.args.chunk_len as number;

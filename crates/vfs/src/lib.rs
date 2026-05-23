@@ -256,23 +256,26 @@ pub extern "C" fn sysroot_get_next_file_meta(vfs_shell_name_len_ptr: i32, vfs_sh
     let mut name_len = 0i32;
     let mut data_len = 0i32;
     let has_next = crate::vfs::host::bridge::Downloader::sysroot_get_next_file_meta(&mut name_len as *mut _ as i32, &mut data_len as *mut _ as i32);
-    
+
     vfs_shell::memcpy(vfs_shell_name_len_ptr as *mut u8, &name_len.to_ne_bytes());
     vfs_shell::memcpy(vfs_shell_data_len_ptr as *mut u8, &data_len.to_ne_bytes());
-    
+
     has_next
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn sysroot_read_file_name(vfs_shell_name_ptr: i32, name_len: i32) {
     let mut local_buf = vec![0u8; name_len as usize];
-    crate::vfs::host::bridge::Downloader::sysroot_read_file_name(local_buf.as_mut_ptr() as i32);
-    vfs_shell::memcpy(vfs_shell_name_ptr as *mut u8, &local_buf);
+    let ptr = local_buf.as_mut_ptr() as i32;
+    eprintln!("VFS sysroot_read_file_name: ptr={}, name_len={}", ptr, name_len);
+    crate::vfs::host::bridge::Downloader::sysroot_read_file_name(ptr);
+    eprintln!("VFS after JS call: local_buf={:?}", local_buf);
+    vfs_shell::memcpy(vfs_shell_name_ptr as *mut u8, local_buf.as_slice());
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn sysroot_read_file_chunk(vfs_shell_data_ptr: i32, chunk_len: i32) {
     let mut local_buf = vec![0u8; chunk_len as usize];
     crate::vfs::host::bridge::Downloader::sysroot_read_file_chunk(local_buf.as_mut_ptr() as i32, chunk_len);
-    vfs_shell::memcpy(vfs_shell_data_ptr as *mut u8, &local_buf);
+    vfs_shell::memcpy(vfs_shell_data_ptr as *mut u8, local_buf.as_slice());
 }

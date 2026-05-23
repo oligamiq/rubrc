@@ -2927,7 +2927,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
     let gen = (function* _initGenerator () {
       
       const _trampoline0 = function(arg0, arg1) {
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-start"] [Instruction::CallInterface] (sync, @ enter)');
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-get-next-file-meta"] [Instruction::CallInterface] (sync, @ enter)');
         let hostProvided = true;
         
         let parentTask;
@@ -2938,7 +2938,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           const results = createNewCurrentTask({
             componentIdx: -1,
             isAsync: false,
-            entryFnName: 'Downloader.downloadFileStart',
+            entryFnName: 'Downloader.sysrootGetNextFileMeta',
             getCallbackFn: () => null,
             callbackFnName: null,
             errHandling: 'none',
@@ -2974,10 +2974,10 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         let ret;
         
         try {
-          _withGlobalCurrentTaskMeta({
+          ret = _withGlobalCurrentTaskMeta({
             componentIdx: task.componentIdx(),
             taskID: task.id(),
-            fn: () => Downloader.downloadFileStart(arg0, arg1),
+            fn: () => Downloader.sysrootGetNextFileMeta(arg0, arg1),
           })
           ;
         } catch (err) {
@@ -2989,19 +2989,20 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
         }
         
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-start"][Instruction::Return]', {
-          funcName: '[static]downloader.download-file-start',
-          paramCount: 0,
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-get-next-file-meta"][Instruction::Return]', {
+          funcName: '[static]downloader.sysroot-get-next-file-meta',
+          paramCount: 1,
           async: false,
           postReturn: false
         });
-        task.resolve([ret]);
+        task.resolve([toInt32(ret)]);
         task.exit();
+        return toInt32(ret);
       }
-      _trampoline0.fnName = 'vfs:host/bridge#Downloader.downloadFileStart';
+      _trampoline0.fnName = 'vfs:host/bridge#Downloader.sysrootGetNextFileMeta';
       
       const _trampoline1 = function(arg0, arg1) {
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-chunk"] [Instruction::CallInterface] (sync, @ enter)');
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-read-file-chunk"] [Instruction::CallInterface] (sync, @ enter)');
         let hostProvided = true;
         
         let parentTask;
@@ -3012,7 +3013,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           const results = createNewCurrentTask({
             componentIdx: -1,
             isAsync: false,
-            entryFnName: 'Downloader.downloadFileChunk',
+            entryFnName: 'Downloader.sysrootReadFileChunk',
             getCallbackFn: () => null,
             callbackFnName: null,
             errHandling: 'none',
@@ -3051,7 +3052,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           _withGlobalCurrentTaskMeta({
             componentIdx: task.componentIdx(),
             taskID: task.id(),
-            fn: () => Downloader.downloadFileChunk(arg0, arg1),
+            fn: () => Downloader.sysrootReadFileChunk(arg0, arg1),
           })
           ;
         } catch (err) {
@@ -3063,8 +3064,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
         }
         
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-chunk"][Instruction::Return]', {
-          funcName: '[static]downloader.download-file-chunk',
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-read-file-chunk"][Instruction::Return]', {
+          funcName: '[static]downloader.sysroot-read-file-chunk',
           paramCount: 0,
           async: false,
           postReturn: false
@@ -3072,10 +3073,10 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
-      _trampoline1.fnName = 'vfs:host/bridge#Downloader.downloadFileChunk';
+      _trampoline1.fnName = 'vfs:host/bridge#Downloader.sysrootReadFileChunk';
       
-      const _trampoline2 = function() {
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-end"] [Instruction::CallInterface] (sync, @ enter)');
+      const _trampoline2 = function(arg0) {
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-read-file-name"] [Instruction::CallInterface] (sync, @ enter)');
         let hostProvided = true;
         
         let parentTask;
@@ -3086,7 +3087,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           const results = createNewCurrentTask({
             componentIdx: -1,
             isAsync: false,
-            entryFnName: 'Downloader.downloadFileEnd',
+            entryFnName: 'Downloader.sysrootReadFileName',
             getCallbackFn: () => null,
             callbackFnName: null,
             errHandling: 'none',
@@ -3125,7 +3126,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           _withGlobalCurrentTaskMeta({
             componentIdx: task.componentIdx(),
             taskID: task.id(),
-            fn: () => Downloader.downloadFileEnd(),
+            fn: () => Downloader.sysrootReadFileName(arg0),
           })
           ;
         } catch (err) {
@@ -3137,8 +3138,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
         }
         
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-end"][Instruction::Return]', {
-          funcName: '[static]downloader.download-file-end',
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-read-file-name"][Instruction::Return]', {
+          funcName: '[static]downloader.sysroot-read-file-name',
           paramCount: 0,
           async: false,
           postReturn: false
@@ -3146,7 +3147,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
-      _trampoline2.fnName = 'vfs:host/bridge#Downloader.downloadFileEnd';
+      _trampoline2.fnName = 'vfs:host/bridge#Downloader.sysrootReadFileName';
       
       const _trampoline3 = function(arg0, arg1) {
         _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-start-fetch"] [Instruction::CallInterface] (sync, @ enter)');
@@ -3223,7 +3224,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       _trampoline3.fnName = 'vfs:host/bridge#Downloader.sysrootStartFetch';
       
       const _trampoline4 = function(arg0, arg1) {
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-get-next-file-meta"] [Instruction::CallInterface] (sync, @ enter)');
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-start"] [Instruction::CallInterface] (sync, @ enter)');
         let hostProvided = true;
         
         let parentTask;
@@ -3234,82 +3235,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           const results = createNewCurrentTask({
             componentIdx: -1,
             isAsync: false,
-            entryFnName: 'Downloader.sysrootGetNextFileMeta',
-            getCallbackFn: () => null,
-            callbackFnName: null,
-            errHandling: 'none',
-            callingWasmExport: false,
-          });
-          task = results[0];
-        };
-        
-        taskCreation: {
-          parentTask = getCurrentTask(
-          0,
-          _getGlobalCurrentTaskMeta(0)?.taskID,
-          )?.task;
-          
-          if (!parentTask) {
-            createTask();
-            break taskCreation;
-          }
-          
-          createTask();
-          
-          if (hostProvided) {
-            subtask = parentTask.getLatestSubtask();
-            if (!subtask) {
-              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
-            }
-            task.setParentSubtask(subtask);
-          }
-        }
-        
-        const started = task.enterSync();
-        
-        let ret;
-        
-        try {
-          ret = _withGlobalCurrentTaskMeta({
-            componentIdx: task.componentIdx(),
-            taskID: task.id(),
-            fn: () => Downloader.sysrootGetNextFileMeta(arg0, arg1),
-          })
-          ;
-        } catch (err) {
-          
-          task.setErrored(err);
-          task.reject(err);
-          task.exit();
-          throw err;
-          
-        }
-        
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-get-next-file-meta"][Instruction::Return]', {
-          funcName: '[static]downloader.sysroot-get-next-file-meta',
-          paramCount: 1,
-          async: false,
-          postReturn: false
-        });
-        task.resolve([toInt32(ret)]);
-        task.exit();
-        return toInt32(ret);
-      }
-      _trampoline4.fnName = 'vfs:host/bridge#Downloader.sysrootGetNextFileMeta';
-      
-      const _trampoline5 = function(arg0) {
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-read-file-name"] [Instruction::CallInterface] (sync, @ enter)');
-        let hostProvided = true;
-        
-        let parentTask;
-        let task;
-        let subtask;
-        
-        const createTask = () => {
-          const results = createNewCurrentTask({
-            componentIdx: -1,
-            isAsync: false,
-            entryFnName: 'Downloader.sysrootReadFileName',
+            entryFnName: 'Downloader.downloadFileStart',
             getCallbackFn: () => null,
             callbackFnName: null,
             errHandling: 'none',
@@ -3348,7 +3274,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           _withGlobalCurrentTaskMeta({
             componentIdx: task.componentIdx(),
             taskID: task.id(),
-            fn: () => Downloader.sysrootReadFileName(arg0),
+            fn: () => Downloader.downloadFileStart(arg0, arg1),
           })
           ;
         } catch (err) {
@@ -3360,8 +3286,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
         }
         
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-read-file-name"][Instruction::Return]', {
-          funcName: '[static]downloader.sysroot-read-file-name',
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-start"][Instruction::Return]', {
+          funcName: '[static]downloader.download-file-start',
           paramCount: 0,
           async: false,
           postReturn: false
@@ -3369,10 +3295,10 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
-      _trampoline5.fnName = 'vfs:host/bridge#Downloader.sysrootReadFileName';
+      _trampoline4.fnName = 'vfs:host/bridge#Downloader.downloadFileStart';
       
-      const _trampoline6 = function(arg0, arg1) {
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-read-file-chunk"] [Instruction::CallInterface] (sync, @ enter)');
+      const _trampoline5 = function(arg0, arg1) {
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-chunk"] [Instruction::CallInterface] (sync, @ enter)');
         let hostProvided = true;
         
         let parentTask;
@@ -3383,7 +3309,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           const results = createNewCurrentTask({
             componentIdx: -1,
             isAsync: false,
-            entryFnName: 'Downloader.sysrootReadFileChunk',
+            entryFnName: 'Downloader.downloadFileChunk',
             getCallbackFn: () => null,
             callbackFnName: null,
             errHandling: 'none',
@@ -3422,7 +3348,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           _withGlobalCurrentTaskMeta({
             componentIdx: task.componentIdx(),
             taskID: task.id(),
-            fn: () => Downloader.sysrootReadFileChunk(arg0, arg1),
+            fn: () => Downloader.downloadFileChunk(arg0, arg1),
           })
           ;
         } catch (err) {
@@ -3434,8 +3360,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
         }
         
-        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-read-file-chunk"][Instruction::Return]', {
-          funcName: '[static]downloader.sysroot-read-file-chunk',
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-chunk"][Instruction::Return]', {
+          funcName: '[static]downloader.download-file-chunk',
           paramCount: 0,
           async: false,
           postReturn: false
@@ -3443,7 +3369,81 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
-      _trampoline6.fnName = 'vfs:host/bridge#Downloader.sysrootReadFileChunk';
+      _trampoline5.fnName = 'vfs:host/bridge#Downloader.downloadFileChunk';
+      
+      const _trampoline6 = function() {
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-end"] [Instruction::CallInterface] (sync, @ enter)');
+        let hostProvided = true;
+        
+        let parentTask;
+        let task;
+        let subtask;
+        
+        const createTask = () => {
+          const results = createNewCurrentTask({
+            componentIdx: -1,
+            isAsync: false,
+            entryFnName: 'Downloader.downloadFileEnd',
+            getCallbackFn: () => null,
+            callbackFnName: null,
+            errHandling: 'none',
+            callingWasmExport: false,
+          });
+          task = results[0];
+        };
+        
+        taskCreation: {
+          parentTask = getCurrentTask(
+          0,
+          _getGlobalCurrentTaskMeta(0)?.taskID,
+          )?.task;
+          
+          if (!parentTask) {
+            createTask();
+            break taskCreation;
+          }
+          
+          createTask();
+          
+          if (hostProvided) {
+            subtask = parentTask.getLatestSubtask();
+            if (!subtask) {
+              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
+            }
+            task.setParentSubtask(subtask);
+          }
+        }
+        
+        const started = task.enterSync();
+        
+        let ret;
+        
+        try {
+          _withGlobalCurrentTaskMeta({
+            componentIdx: task.componentIdx(),
+            taskID: task.id(),
+            fn: () => Downloader.downloadFileEnd(),
+          })
+          ;
+        } catch (err) {
+          
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        
+        _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-end"][Instruction::Return]', {
+          funcName: '[static]downloader.download-file-end',
+          paramCount: 0,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([ret]);
+        task.exit();
+      }
+      _trampoline6.fnName = 'vfs:host/bridge#Downloader.downloadFileEnd';
       
       const _trampoline7 = function(arg0) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-threads-import", function="[static]wasip1-threads.thread-spawn-import"] [Instruction::CallInterface] (sync, @ enter)');
@@ -5325,7 +5325,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         isAsync: false,
         isManualAsync: _trampoline0.manuallyAsync,
         paramLiftFns: [_liftFlatS32,_liftFlatS32],
-        resultLowerFns: [],
+        resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
         getCallbackFn: () => null,
@@ -5345,7 +5345,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         isAsync: false,
         isManualAsync: _trampoline0.manuallyAsync,
         paramLiftFns: [_liftFlatS32,_liftFlatS32],
-        resultLowerFns: [],
+        resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
         getCallbackFn: () => null,
@@ -5406,7 +5406,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline2.manuallyAsync,
-        paramLiftFns: [],
+        paramLiftFns: [_liftFlatS32],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -5426,7 +5426,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline2.manuallyAsync,
-        paramLiftFns: [],
+        paramLiftFns: [_liftFlatS32],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -5489,7 +5489,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         isAsync: false,
         isManualAsync: _trampoline4.manuallyAsync,
         paramLiftFns: [_liftFlatS32,_liftFlatS32],
-        resultLowerFns: [_lowerFlatS32],
+        resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
         getCallbackFn: () => null,
@@ -5509,7 +5509,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         isAsync: false,
         isManualAsync: _trampoline4.manuallyAsync,
         paramLiftFns: [_liftFlatS32,_liftFlatS32],
-        resultLowerFns: [_lowerFlatS32],
+        resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
         getCallbackFn: () => null,
@@ -5529,7 +5529,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline5.manuallyAsync,
-        paramLiftFns: [_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -5549,7 +5549,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline5.manuallyAsync,
-        paramLiftFns: [_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -5570,7 +5570,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline6.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -5590,7 +5590,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline6.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -6385,12 +6385,12 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       );
       ({ exports: exports0 } = yield instantiateCore(yield module0, {
         'vfs:host/bridge': {
-          '[static]downloader.download-file-chunk': trampoline1,
-          '[static]downloader.download-file-end': trampoline2,
-          '[static]downloader.download-file-start': trampoline0,
-          '[static]downloader.sysroot-get-next-file-meta': trampoline4,
-          '[static]downloader.sysroot-read-file-chunk': trampoline6,
-          '[static]downloader.sysroot-read-file-name': trampoline5,
+          '[static]downloader.download-file-chunk': trampoline5,
+          '[static]downloader.download-file-end': trampoline6,
+          '[static]downloader.download-file-start': trampoline4,
+          '[static]downloader.sysroot-get-next-file-meta': trampoline0,
+          '[static]downloader.sysroot-read-file-chunk': trampoline1,
+          '[static]downloader.sysroot-read-file-name': trampoline2,
           '[static]downloader.sysroot-start-fetch': trampoline3,
         },
         'wasip1-vfs:host/virtual-file-system-wasip1-core': {
