@@ -84,22 +84,32 @@ export const custom_instantiate = async (
             });
           },
           sysrootGetNextFileMeta: (has_file_ptr: number, name_len_ptr: number, data_len_ptr: number): void => {
-            call_unknown_fn(0, {
+            const res = call_unknown_fn(0, {
               name: "sysrootGetNextFileMeta",
-              args: { has_file_ptr, name_len_ptr, data_len_ptr },
-            });
+              args: {},
+            }) as { has_file: number, name_len?: number, data_len?: number };
+            const view32 = new Int32Array(memory.memory.buffer);
+            view32[has_file_ptr / 4] = res.has_file;
+            if (res.has_file === 1) {
+              view32[name_len_ptr / 4] = res.name_len!;
+              view32[data_len_ptr / 4] = res.data_len!;
+            }
           },
           sysrootReadFileName: (name_ptr: number): void => {
-            call_unknown_fn(0, {
+            const res = call_unknown_fn(0, {
               name: "sysrootReadFileName",
-              args: { name_ptr },
-            });
+              args: {},
+            }) as { name: Uint8Array };
+            const view8 = new Uint8Array(memory.memory.buffer);
+            view8.set(res.name, name_ptr);
           },
           sysrootReadFileChunk: (data_ptr: number, chunk_len: number): void => {
-            call_unknown_fn(0, {
+            const res = call_unknown_fn(0, {
               name: "sysrootReadFileChunk",
-              args: { data_ptr, chunk_len },
-            });
+              args: { chunk_len },
+            }) as { chunk: Uint8Array };
+            const view8 = new Uint8Array(memory.memory.buffer);
+            view8.set(res.chunk, data_ptr);
           },
         }
       },
