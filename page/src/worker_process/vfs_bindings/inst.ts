@@ -83,17 +83,18 @@ export const custom_instantiate = async (
               args: { triple },
             });
           },
-          sysrootGetNextFileMeta: (has_file_ptr: number, name_len_ptr: number, data_len_ptr: number): void => {
+          sysrootGetNextFileMeta: (name_len_ptr: number, data_len_ptr: number): number => {
             const res = call_unknown_fn(0, {
               name: "sysrootGetNextFileMeta",
               args: {},
             }) as { has_file: number, name_len?: number, data_len?: number };
             const view32 = new Int32Array(memory.memory.buffer);
-            view32[has_file_ptr / 4] = res.has_file;
+            
             if (res.has_file === 1) {
               view32[name_len_ptr / 4] = res.name_len!;
               view32[data_len_ptr / 4] = res.data_len!;
             }
+            return res.has_file;
           },
           sysrootReadFileName: (name_ptr: number): void => {
             const res = call_unknown_fn(0, {
