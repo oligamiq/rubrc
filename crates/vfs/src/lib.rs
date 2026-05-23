@@ -250,8 +250,15 @@ plug_thread!({ &THREAD_POOL }, self, rustc_mock, vfs_shell);
 plug_thread!({ &THREAD_POOL }, self, rustc_opt, vfs_shell);
 
 plug_clock!(StandardClock, vfs_shell);
+#[cfg(not(feature = "full-tools"))]
 plug_clock!(StandardClock, rustc_mock);
+#[cfg(not(feature = "full-tools"))]
 plug_clock!(StandardClock, llvm_mock);
+
+#[cfg(feature = "full-tools")]
+plug_clock!(StandardClock, rustc_opt);
+#[cfg(feature = "full-tools")]
+plug_clock!(StandardClock, llvm_opt);
 
 #[unsafe(no_mangle)]
 pub extern "C" fn sysroot_start_fetch(vfs_shell_triple_ptr: i32, triple_len: i32) {
