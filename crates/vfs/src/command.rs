@@ -139,6 +139,38 @@ pub fn handle_command(args: Vec<String>) {
                 println!("File not found: {}", filename);
             }
         }
+        "rustc" => {
+            #[cfg(not(feature = "full-tools"))]
+            {
+                set_rustc_mock_args(&args);
+                crate::rustc_mock::_reset();
+                crate::rustc_mock::_start();
+                crate::rustc_mock::_main();
+            }
+            #[cfg(feature = "full-tools")]
+            {
+                set_rustc_opt_args(&args);
+                crate::rustc_opt::_reset();
+                crate::rustc_opt::_start();
+                crate::rustc_opt::_main();
+            }
+        }
+        "clang" | "llvm" => {
+            #[cfg(not(feature = "full-tools"))]
+            {
+                set_llvm_mock_args(&args);
+                crate::llvm_mock::_reset();
+                crate::llvm_mock::_start();
+                crate::llvm_mock::_main();
+            }
+            #[cfg(feature = "full-tools")]
+            {
+                set_llvm_opt_args(&args);
+                crate::llvm_opt::_reset();
+                crate::llvm_opt::_start();
+                crate::llvm_opt::_main();
+            }
+        }
         _ => {
             println!("Unknown command: {cmd}");
         }
