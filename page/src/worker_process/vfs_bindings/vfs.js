@@ -2956,7 +2956,81 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
     Wasip1Threads._isHostProvided = true;
     let gen = (function* _initGenerator () {
       
-      const _trampoline0 = function(arg0, arg1) {
+      const _trampoline0 = function(arg0, arg1, arg2) {
+        _debugLog('[iface="vfs:host/bridge", function="[static]terminal.terminal-write"] [Instruction::CallInterface] (sync, @ enter)');
+        let hostProvided = true;
+        
+        let parentTask;
+        let task;
+        let subtask;
+        
+        const createTask = () => {
+          const results = createNewCurrentTask({
+            componentIdx: -1,
+            isAsync: false,
+            entryFnName: 'Terminal.terminalWrite',
+            getCallbackFn: () => null,
+            callbackFnName: null,
+            errHandling: 'none',
+            callingWasmExport: false,
+          });
+          task = results[0];
+        };
+        
+        taskCreation: {
+          parentTask = getCurrentTask(
+          0,
+          _getGlobalCurrentTaskMeta(0)?.taskID,
+          )?.task;
+          
+          if (!parentTask) {
+            createTask();
+            break taskCreation;
+          }
+          
+          createTask();
+          
+          if (hostProvided) {
+            subtask = parentTask.getLatestSubtask();
+            if (!subtask) {
+              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
+            }
+            task.setParentSubtask(subtask);
+          }
+        }
+        
+        const started = task.enterSync();
+        
+        let ret;
+        
+        try {
+          _withGlobalCurrentTaskMeta({
+            componentIdx: task.componentIdx(),
+            taskID: task.id(),
+            fn: () => Terminal.terminalWrite(arg0 >>> 0, arg1, arg2),
+          })
+          ;
+        } catch (err) {
+          
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        
+        _debugLog('[iface="vfs:host/bridge", function="[static]terminal.terminal-write"][Instruction::Return]', {
+          funcName: '[static]terminal.terminal-write',
+          paramCount: 0,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([ret]);
+        task.exit();
+      }
+      _trampoline0.fnName = 'vfs:host/bridge#Terminal.terminalWrite';
+      
+      const _trampoline1 = function(arg0, arg1) {
         _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-get-next-file-meta"] [Instruction::CallInterface] (sync, @ enter)');
         let hostProvided = true;
         
@@ -3029,9 +3103,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline0.fnName = 'vfs:host/bridge#Downloader.sysrootGetNextFileMeta';
+      _trampoline1.fnName = 'vfs:host/bridge#Downloader.sysrootGetNextFileMeta';
       
-      const _trampoline1 = function(arg0, arg1) {
+      const _trampoline2 = function(arg0, arg1) {
         _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-read-file-chunk"] [Instruction::CallInterface] (sync, @ enter)');
         let hostProvided = true;
         
@@ -3103,9 +3177,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
-      _trampoline1.fnName = 'vfs:host/bridge#Downloader.sysrootReadFileChunk';
+      _trampoline2.fnName = 'vfs:host/bridge#Downloader.sysrootReadFileChunk';
       
-      const _trampoline2 = function(arg0) {
+      const _trampoline3 = function(arg0) {
         _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-read-file-name"] [Instruction::CallInterface] (sync, @ enter)');
         let hostProvided = true;
         
@@ -3177,9 +3251,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
-      _trampoline2.fnName = 'vfs:host/bridge#Downloader.sysrootReadFileName';
+      _trampoline3.fnName = 'vfs:host/bridge#Downloader.sysrootReadFileName';
       
-      const _trampoline3 = function(arg0, arg1) {
+      const _trampoline4 = function(arg0, arg1) {
         _debugLog('[iface="vfs:host/bridge", function="[static]downloader.sysroot-start-fetch"] [Instruction::CallInterface] (sync, @ enter)');
         let hostProvided = true;
         
@@ -3251,81 +3325,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
-      _trampoline3.fnName = 'vfs:host/bridge#Downloader.sysrootStartFetch';
-      
-      const _trampoline4 = function(arg0, arg1, arg2) {
-        _debugLog('[iface="vfs:host/bridge", function="[static]terminal.terminal-write"] [Instruction::CallInterface] (sync, @ enter)');
-        let hostProvided = true;
-        
-        let parentTask;
-        let task;
-        let subtask;
-        
-        const createTask = () => {
-          const results = createNewCurrentTask({
-            componentIdx: -1,
-            isAsync: false,
-            entryFnName: 'Terminal.terminalWrite',
-            getCallbackFn: () => null,
-            callbackFnName: null,
-            errHandling: 'none',
-            callingWasmExport: false,
-          });
-          task = results[0];
-        };
-        
-        taskCreation: {
-          parentTask = getCurrentTask(
-          0,
-          _getGlobalCurrentTaskMeta(0)?.taskID,
-          )?.task;
-          
-          if (!parentTask) {
-            createTask();
-            break taskCreation;
-          }
-          
-          createTask();
-          
-          if (hostProvided) {
-            subtask = parentTask.getLatestSubtask();
-            if (!subtask) {
-              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
-            }
-            task.setParentSubtask(subtask);
-          }
-        }
-        
-        const started = task.enterSync();
-        
-        let ret;
-        
-        try {
-          _withGlobalCurrentTaskMeta({
-            componentIdx: task.componentIdx(),
-            taskID: task.id(),
-            fn: () => Terminal.terminalWrite(arg0 >>> 0, arg1, arg2),
-          })
-          ;
-        } catch (err) {
-          
-          task.setErrored(err);
-          task.reject(err);
-          task.exit();
-          throw err;
-          
-        }
-        
-        _debugLog('[iface="vfs:host/bridge", function="[static]terminal.terminal-write"][Instruction::Return]', {
-          funcName: '[static]terminal.terminal-write',
-          paramCount: 0,
-          async: false,
-          postReturn: false
-        });
-        task.resolve([ret]);
-        task.exit();
-      }
-      _trampoline4.fnName = 'vfs:host/bridge#Terminal.terminalWrite';
+      _trampoline4.fnName = 'vfs:host/bridge#Downloader.sysrootStartFetch';
       
       const _trampoline5 = function(arg0, arg1) {
         _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-start"] [Instruction::CallInterface] (sync, @ enter)');
@@ -5316,8 +5316,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline0.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32],
-        resultLowerFns: [_lowerFlatS32],
+        paramLiftFns: [_liftFlatU32,_liftFlatS32,_liftFlatS32],
+        resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
         getCallbackFn: () => null,
@@ -5336,8 +5336,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline0.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32],
-        resultLowerFns: [_lowerFlatS32],
+        paramLiftFns: [_liftFlatU32,_liftFlatS32,_liftFlatS32],
+        resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
         getCallbackFn: () => null,
@@ -5358,7 +5358,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         isAsync: false,
         isManualAsync: _trampoline1.manuallyAsync,
         paramLiftFns: [_liftFlatS32,_liftFlatS32],
-        resultLowerFns: [],
+        resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
         getCallbackFn: () => null,
@@ -5378,7 +5378,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         isAsync: false,
         isManualAsync: _trampoline1.manuallyAsync,
         paramLiftFns: [_liftFlatS32,_liftFlatS32],
-        resultLowerFns: [],
+        resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
         getCallbackFn: () => null,
@@ -5398,7 +5398,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline2.manuallyAsync,
-        paramLiftFns: [_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -5418,7 +5418,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline2.manuallyAsync,
-        paramLiftFns: [_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -5439,7 +5439,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline3.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -5459,7 +5459,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline3.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -5480,7 +5480,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline4.manuallyAsync,
-        paramLiftFns: [_liftFlatU32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -5500,7 +5500,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline4.manuallyAsync,
-        paramLiftFns: [_liftFlatU32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32],
         resultLowerFns: [],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -6421,11 +6421,11 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           '[static]downloader.download-file-chunk': trampoline6,
           '[static]downloader.download-file-end': trampoline7,
           '[static]downloader.download-file-start': trampoline5,
-          '[static]downloader.sysroot-get-next-file-meta': trampoline0,
-          '[static]downloader.sysroot-read-file-chunk': trampoline1,
-          '[static]downloader.sysroot-read-file-name': trampoline2,
-          '[static]downloader.sysroot-start-fetch': trampoline3,
-          '[static]terminal.terminal-write': trampoline4,
+          '[static]downloader.sysroot-get-next-file-meta': trampoline1,
+          '[static]downloader.sysroot-read-file-chunk': trampoline2,
+          '[static]downloader.sysroot-read-file-name': trampoline3,
+          '[static]downloader.sysroot-start-fetch': trampoline4,
+          '[static]terminal.terminal-write': trampoline0,
         },
         'wasip1-vfs:host/virtual-file-system-wasip1-core': {
           '[static]wasip1.clock-res-get-import': trampoline10,

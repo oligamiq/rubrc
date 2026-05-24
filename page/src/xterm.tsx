@@ -1,3 +1,4 @@
+import { createEffect, on } from "solid-js";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
@@ -58,11 +59,25 @@ export const SetupMyTerminal = (props: {
   ctx: Ctx;
   sessionId: number;
   isMain: boolean;
+  isActive: boolean;
   callback?: (wasi_ref: WASIFarmRef) => void;
 }) => {
   let xterm: Terminal | undefined = undefined;
 
   const fit_addon = new FitAddon();
+
+  const resize_fn = new SharedObjectRef(props.ctx.resize_id).proxy<
+    (args: { sessionId: number, cols: number, rows: number }) => Promise<void>
+  >();
+
+  createEffect(on(() => props.isActive, (active) => {
+    if (active && xterm) {
+      setTimeout(() => {
+        fit_addon.fit();
+        resize_fn({ sessionId: props.sessionId, cols: xterm!.cols, rows: xterm!.rows }).catch(console.error);
+      }, 0);
+    }
+  }));
 
   if (!shared_xterm) {
     const terminal_handler = (session_id: number, data: Uint8Array) => {
@@ -96,22 +111,6 @@ export const SetupMyTerminal = (props: {
     };
   }, props.ctx.get_terminal_size_id);
 
-  const create_session_fn = new SharedObjectRef(props.ctx.create_session_id).proxy<
-    (args: { sessionId: number }) => Promise<void>
-  >();
-
-  const input_char = new SharedObjectRef(props.ctx.input_char_id).proxy<
-    (args: { sessionId: number, c: number }) => Promise<void>
-  >();
-
-  const interrupt_fn = new SharedObjectRef(props.ctx.interrupt_id).proxy<
-    (args: { sessionId: number }) => Promise<void>
-  >();
-
-  const resize_fn = new SharedObjectRef(props.ctx.resize_id).proxy<
-    (args: { sessionId: number, cols: number, rows: number }) => Promise<void>
-  >();
-
   const handleMount = (terminal: Terminal) => {
     xterm = terminal;
     terminals.set(props.sessionId, terminal);
@@ -119,6 +118,9 @@ export const SetupMyTerminal = (props: {
     if (props.isMain && props.callback) {
       get_ref(terminal, props.callback);
     } else {
+      const create_session_fn = new SharedObjectRef(props.ctx.create_session_id).proxy<
+        (args: { sessionId: number }) => Promise<void>
+      >();
       create_session_fn({ sessionId: props.sessionId }).catch(console.error);
     }
 
@@ -139,6 +141,13 @@ export const SetupMyTerminal = (props: {
   };
 
   const onData = (data: string) => {
+    const input_char = new SharedObjectRef(props.ctx.input_char_id).proxy<
+      (args: { sessionId: number, c: number }) => Promise<void>
+    >();
+    const interrupt_fn = new SharedObjectRef(props.ctx.interrupt_id).proxy<
+      (args: { sessionId: number }) => Promise<void>
+    >();
+
     for (let i = 0; i < data.length; i++) {
       if (data.charCodeAt(i) === 3) {
         interrupt_fn({ sessionId: props.sessionId }).catch(console.error);

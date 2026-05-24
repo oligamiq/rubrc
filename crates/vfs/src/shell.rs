@@ -29,6 +29,12 @@ unsafe extern "C" {
 
 thread_local! {
     pub static CURRENT_CONTEXT_ID: std::cell::Cell<Option<u32>> = std::cell::Cell::new(None);
+    pub static CURRENT_SESSION_ID: std::cell::Cell<u32> = std::cell::Cell::new(0);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vfs_set_current_session_id(session_id: u32) {
+    CURRENT_SESSION_ID.with(|id| id.set(session_id));
 }
 
 /// Called by vfs-shell via C-ABI. Only receives a scalar context_id.
@@ -39,17 +45,10 @@ pub extern "C" fn vfs_execute_command(context_id: u32) -> i32 {
     let args_ptr = unsafe { vfs_shell_get_cmd_args_ptr() } as *const u8;
     let args_len = unsafe { vfs_shell_get_cmd_args_len() } as usize;
 
-    println!(
-        "vfs_execute_command: getting array of len {} at ptr {:?}",
-        args_len, args_ptr
-    );
-
     // 2. Copy args from vfs-shell's memory into our local buffer
     let args_data = vfs_shell::get_array(args_ptr, args_len);
     let args_string = String::from_utf8_lossy(&args_data);
     let args_vec: Vec<String> = args_string.split('\0').map(String::from).collect();
-
-    println!("vfs_execute_command: executing {:?}", args_vec);
 
     // 3. Execute command with context_id for stdout/stderr routing
     CURRENT_CONTEXT_ID.with(|id| id.set(Some(context_id)));

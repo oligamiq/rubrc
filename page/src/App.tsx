@@ -35,10 +35,12 @@ const App = (props: {
 
   const [triple, setTriple] = createSignal("wasm32-wasip1");
   const [terminalIds, setTerminalIds] = createSignal([0]);
+  const [activeTerminalId, setActiveTerminalId] = createSignal(0);
 
   const addTerminal = () => {
     const nextId = Math.max(...terminalIds()) + 1;
     setTerminalIds([...terminalIds(), nextId]);
+    setActiveTerminalId(nextId);
   };
 
   return (
@@ -62,25 +64,49 @@ const App = (props: {
         />
       </Suspense>
 
-      <div class="flex-1 flex flex-col overflow-hidden">
+      <div class="flex bg-gray-800 border-t border-gray-700 overflow-x-auto">
+        <For each={terminalIds()}>
+          {(id) => (
+            <button
+              class={`px-4 py-2 text-sm transition-colors border-r border-gray-700 whitespace-nowrap ${
+                activeTerminalId() === id 
+                  ? "bg-gray-900 text-green-400 border-b-2 border-b-green-500" 
+                  : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+              }`}
+              onClick={() => setActiveTerminalId(id)}
+            >
+              Session {id}
+            </button>
+          )}
+        </For>
+        <button 
+          class="px-4 py-2 text-sm bg-green-800 text-white hover:bg-green-700 transition-colors whitespace-nowrap"
+          onClick={addTerminal}
+        >
+          + New Tab
+        </button>
+      </div>
+
+      <div class="flex-1 flex flex-col overflow-hidden bg-black">
         <For each={terminalIds()}>
           {(id, index) => (
-            <div class="flex-1 border-t border-gray-700 relative">
+            <div 
+              class="flex-1"
+              style={{ display: activeTerminalId() === id ? "block" : "none" }}
+            >
               <SetupMyTerminal 
                 ctx={props.ctx} 
                 sessionId={id}
                 isMain={index() === 0}
+                isActive={activeTerminalId() === id}
                 callback={index() === 0 ? props.callback : undefined} 
               />
-              <div class="absolute top-0 right-0 bg-gray-800 text-white text-xs px-2 opacity-50">
-                Session {id}
-              </div>
             </div>
           )}
         </For>
       </div>
 
-      <div class="flex items-center bg-gray-900">
+      <div class="flex items-center bg-gray-900 border-t border-gray-700">
         <div class="p-2 text-white">
           <RunButton triple={triple()} />
         </div>
@@ -102,12 +128,6 @@ const App = (props: {
         <div class="p-2 text-white">
           <DownloadButton />
         </div>
-        <button 
-          class="p-2 mx-2 bg-green-700 text-white rounded hover:bg-green-600 transition-colors"
-          onClick={addTerminal}
-        >
-          Add Terminal
-        </button>
       </div>
     </div>
   );

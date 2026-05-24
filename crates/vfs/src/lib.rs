@@ -155,7 +155,17 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
             unsafe { crate::shell::vfs_shell_free_buf(shell_ptr, len) };
             Ok(written as usize)
         } else {
-            wasi_virt_layer::wasi::file::stdio::DefaultStdIO::write(buf)
+            let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
+            if session_id != 0 {
+                crate::vfs::host::bridge::Terminal::terminal_write(
+                    session_id,
+                    buf.as_ptr() as i32,
+                    buf.len() as i32,
+                );
+                Ok(buf.len())
+            } else {
+                wasi_virt_layer::wasi::file::stdio::DefaultStdIO::write(buf)
+            }
         }
     }
     fn ewrite(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
@@ -170,7 +180,17 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
             unsafe { crate::shell::vfs_shell_free_buf(shell_ptr, len) };
             Ok(written as usize)
         } else {
-            wasi_virt_layer::wasi::file::stdio::DefaultStdIO::ewrite(buf)
+            let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
+            if session_id != 0 {
+                crate::vfs::host::bridge::Terminal::terminal_write(
+                    session_id,
+                    buf.as_ptr() as i32,
+                    buf.len() as i32,
+                );
+                Ok(buf.len())
+            } else {
+                wasi_virt_layer::wasi::file::stdio::DefaultStdIO::ewrite(buf)
+            }
         }
     }
     fn read(buf: &mut [u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {

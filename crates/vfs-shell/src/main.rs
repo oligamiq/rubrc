@@ -201,6 +201,9 @@ unsafe extern "C" {
 
     #[link_name = "terminal_write"]
     pub fn terminal_write(session_id: u32, data_ptr: i32, data_len: i32);
+
+    #[link_name = "vfs_set_current_session_id"]
+    pub fn vfs_set_current_session_id(session_id: u32);
 }
 
 // Import: vfs_execute_command (scalar-only, no pointer args)
@@ -231,12 +234,24 @@ fn format_size(size: usize) -> String {
     }
 }
 
-static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
-    let mut reg = CommandRegistry::with_builtins();
+static BUILTIN_REGISTRY: LazyLock<Arc<CommandRegistry>> =
+    LazyLock::new(|| Arc::new(CommandRegistry::with_builtins()));
 
-    // WASI 環境の相対パス解決やシンボリックリンク解決をサポートする cd
+fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
+    let mut reg = CommandRegistry::new();
 
-    reg.register("load_sysroot", |args, io| {
+    // Register session-aware wrappers for common built-ins
+    for cmd in ["sl", "ls", "tree", "seq", "grep", "head", "help", "pwd"] {
+        let sid = session_id;
+        reg.register(cmd, move |args, io| {
+            unsafe { vfs_set_current_session_id(sid) };
+            (**BUILTIN_REGISTRY).execute(args, io)
+        });
+    }
+
+    let sid = session_id;
+    reg.register("load_sysroot", move |args, io| {
+        unsafe { vfs_set_current_session_id(sid) };
         let triple = args.get(1).map(|s| s.as_str()).unwrap_or("wasm32-wasip1");
         writeln!(io.stdout, "Loading sysroot: {} ...", triple).unwrap();
 
@@ -359,7 +374,9 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
         Ok(())
     });
 
-    reg.register("cd", |args, _ctx| {
+    let sid = session_id;
+    reg.register("cd", move |args, _ctx| {
+        unsafe { vfs_set_current_session_id(sid) };
         let new_dir = args.get(1).map(|s| s.as_str()).unwrap_or("/");
         let current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
         let target = current.join(new_dir);
@@ -370,8 +387,10 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
         std::env::set_current_dir(&resolved).map_err(|e| format!("cd: {}", e))
     });
 
-    reg.set_fallback(|args: &[String], io: &mut IoContext| {
-        println!("Executing command: {:?}", args);
+    let sid = session_id;
+    reg.set_fallback(move |args: &[String], io: &mut IoContext| {
+        unsafe { vfs_set_current_session_id(sid) };
+        writeln!(io.stdout, "Executing command: {:?}", args).unwrap();
 
         let args_str = args.join("\0"); // serialize args with NUL separator
         let context_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
@@ -394,7 +413,7 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
         }
     });
     Arc::new(reg)
-});
+}
 
 #[derive(Debug, FromRepr)]
 #[repr(u32)]
@@ -504,13 +523,43 @@ fn run_session_loop(
     rx: mpsc::Receiver<SessionEvent>,
     cancellation_token: wasibox_core::CancellationToken,
 ) {
+    unsafe { vfs_set_current_session_id(session_id) };
     CANCELLATION_TOKEN.with(|t| *t.borrow_mut() = Some(cancellation_token.clone()));
 
     let mut line_reader = LineEditor::new(20);
     let mut stdout = SessionStdout::new(session_id);
+    let session_reg = create_session_registry(session_id);
 
     writeln!(stdout, "{}", "Welcome to WASI-Shell!".green().bold()).unwrap();
     writeln!(stdout, "Type 'help' for available commands or 'exit' to quit.").unwrap();
+
+    if session_id == 0 {
+        let pre_lines = vec![
+            "help",
+            "echo Hello, World!",
+            "ls -la",
+            "tree",
+            "seq | grep 2 | head -n5",
+            "load_sysroot wasm32-wasip1",
+        ];
+
+        for line in pre_lines {
+            writeln!(stdout, "{}", line).unwrap();
+            let results = handle_parallel(
+                vec![line.to_string()],
+                Box::new(io::stdin()),
+                Box::new(SessionStdout::new(session_id)),
+                Arc::clone(&session_reg),
+                cancellation_token.clone(),
+            );
+            for res in results {
+                if let Err(e) = res {
+                    writeln!(stdout, "{}", e.red()).unwrap();
+                }
+            }
+        }
+    }
+
     print_prompt(&mut stdout);
 
     while let Ok(event) = rx.recv() {
@@ -566,7 +615,7 @@ fn run_session_loop(
                         vec![trimmed.to_string()],
                         Box::new(io::stdin()),
                         Box::new(SessionStdout::new(session_id)),
-                        Arc::clone(&REGISTRY),
+                        Arc::clone(&session_reg),
                         cancellation_token.clone(),
                     );
 
@@ -596,7 +645,7 @@ fn run_session_loop(
 // ============================================================
 
 fn main() {
-    let _ = LazyLock::force(&REGISTRY);
+    let _ = LazyLock::force(&BUILTIN_REGISTRY);
     // Keep the main thread alive if needed, but returning is fine for wasi-threads 
     // since background threads will keep running.
     // loop {
