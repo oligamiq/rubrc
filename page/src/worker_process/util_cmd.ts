@@ -107,6 +107,23 @@ globalThis.addEventListener("message", async (event) => {
   );
 
   shared.push(
+    new SharedObject(({ sessionId, data }: { sessionId: number, data: string }) => {
+      (async () => {
+        try {
+          const bytes = new TextEncoder().encode(data);
+          const ptr = vfs_root.allocBuf(bytes.length);
+          const view = new Uint8Array(animal.get_share_memory().memory.buffer);
+          view.set(bytes, ptr);
+          vfs_root.dispatch(sessionId, 4, ptr, bytes.length);
+          vfs_root.freeBuf(ptr, bytes.length);
+        } catch (e) {
+          await terminal(sessionId, new TextEncoder().encode(`Error: ${e}\r\n`));
+        }
+      })();
+    }, ctx.input_string_id),
+  );
+
+  shared.push(
     new SharedObject(({ sessionId }: { sessionId: number }) => {
       vfs_root.dispatch(sessionId, 2, 0, 0);
     }, ctx.interrupt_id),

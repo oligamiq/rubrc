@@ -13,6 +13,7 @@ export type Ctx = {
   load_additional_sysroot_id: string;
   llvm_id: string;
   input_char_id: string;
+  input_string_id: string;
   interrupt_id: string;
   resize_id: string;
   get_terminal_size_id: string;
@@ -33,6 +34,7 @@ export const gen_ctx = (): Ctx => {
     load_additional_sysroot_id: uuidv4(),
     llvm_id: uuidv4(),
     input_char_id: uuidv4(),
+    input_string_id: uuidv4(),
     interrupt_id: uuidv4(),
     resize_id: uuidv4(),
     get_terminal_size_id: uuidv4(),

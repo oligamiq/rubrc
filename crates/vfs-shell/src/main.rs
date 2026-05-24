@@ -422,6 +422,7 @@ pub enum SessionEventType {
     Resize = 1,
     Interrupt = 2,
     CreateSession = 3,
+    InputString = 4,
 }
 
 #[derive(Debug)]
@@ -430,6 +431,7 @@ pub enum SessionEvent {
     Resize(u32, u32),
     Interrupt,
     CreateSession,
+    InputString(String),
 }
 
 impl SessionEvent {
@@ -440,6 +442,13 @@ impl SessionEvent {
             SessionEventType::Resize => Some(Self::Resize(arg1, arg2)),
             SessionEventType::Interrupt => Some(Self::Interrupt),
             SessionEventType::CreateSession => Some(Self::CreateSession),
+            SessionEventType::InputString => {
+                let ptr = arg1 as *const u8;
+                let len = arg2 as usize;
+                let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+                let s = String::from_utf8_lossy(slice).into_owned();
+                Some(Self::InputString(s))
+            }
         }
     }
 }
@@ -565,67 +574,25 @@ fn run_session_loop(
     while let Ok(event) = rx.recv() {
         match event {
             SessionEvent::InputChar(c) => {
-                if cancellation_token.is_cancelled() {
-                    cancellation_token.reset();
-                }
-
-                let len_before = line_reader.buffer().chars().count();
-                let mut handler = TerminalEchoHandler {
-                    needs_redraw: false,
-                    writer: &mut stdout,
-                };
-                let line = line_reader.input_char_with_handler(c, &mut handler);
-
-                if handler.needs_redraw {
-                    write!(stdout, "\r").unwrap();
-                    print_prompt(&mut stdout);
-                    let buffer = line_reader.buffer();
-                    write!(stdout, "{}", buffer).unwrap();
-                    write!(stdout, "\x1b[K").unwrap();
-
-                    let pos = line_reader.cursor_pos();
-                    let len = buffer.chars().count();
-                    if pos < len {
-                        write!(stdout, "\x1b[{}D", len - pos).unwrap();
-                    }
-                    stdout.flush().unwrap();
-                } else {
-                    let pos_after = line_reader.cursor_pos();
-                    let len_after = line_reader.buffer().chars().count();
-                    if len_after > len_before && pos_after < len_after {
-                        let buffer = line_reader.buffer();
-                        let rest: String = buffer.chars().skip(pos_after).collect();
-                        if !rest.is_empty() {
-                            write!(stdout, "{}", rest).unwrap();
-                            write!(stdout, "\x1b[{}D", rest.chars().count()).unwrap();
-                            stdout.flush().unwrap();
-                        }
-                    }
-                }
-
-                if let Some(line) = line {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        print_prompt(&mut stdout);
-                        continue;
-                    }
-
-                    cancellation_token.reset();
-                    let results = handle_parallel(
-                        vec![trimmed.to_string()],
-                        Box::new(io::stdin()),
-                        Box::new(SessionStdout::new(session_id)),
-                        Arc::clone(&session_reg),
-                        cancellation_token.clone(),
+                process_input_char(
+                    c,
+                    &mut line_reader,
+                    &cancellation_token,
+                    &mut stdout,
+                    &session_reg,
+                    session_id,
+                );
+            }
+            SessionEvent::InputString(s) => {
+                for c in s.chars() {
+                    process_input_char(
+                        c as u32,
+                        &mut line_reader,
+                        &cancellation_token,
+                        &mut stdout,
+                        &session_reg,
+                        session_id,
                     );
-
-                    for res in results {
-                        if let Err(e) = res {
-                            writeln!(stdout, "{}", e.red()).unwrap();
-                        }
-                    }
-
-                    print_prompt(&mut stdout);
                 }
             }
             SessionEvent::Resize(_cols, _rows) => {
@@ -637,6 +604,78 @@ fn run_session_loop(
             }
             SessionEvent::CreateSession => unreachable!(),
         }
+    }
+}
+
+fn process_input_char(
+    c: u32,
+    line_reader: &mut LineEditor,
+    cancellation_token: &wasibox_core::CancellationToken,
+    stdout: &mut SessionStdout,
+    session_reg: &Arc<CommandRegistry>,
+    session_id: u32,
+) {
+    if cancellation_token.is_cancelled() {
+        cancellation_token.reset();
+    }
+
+    let len_before = line_reader.buffer().chars().count();
+    let mut handler = TerminalEchoHandler {
+        needs_redraw: false,
+        writer: stdout,
+    };
+    let line = line_reader.input_char_with_handler(c, &mut handler);
+
+    if handler.needs_redraw {
+        write!(stdout, "\r").unwrap();
+        print_prompt(stdout);
+        let buffer = line_reader.buffer();
+        write!(stdout, "{}", buffer).unwrap();
+        write!(stdout, "\x1b[K").unwrap();
+
+        let pos = line_reader.cursor_pos();
+        let len = buffer.chars().count();
+        if pos < len {
+            write!(stdout, "\x1b[{}D", len - pos).unwrap();
+        }
+        stdout.flush().unwrap();
+    } else {
+        let pos_after = line_reader.cursor_pos();
+        let len_after = line_reader.buffer().chars().count();
+        if len_after > len_before && pos_after < len_after {
+            let buffer = line_reader.buffer();
+            let rest: String = buffer.chars().skip(pos_after).collect();
+            if !rest.is_empty() {
+                write!(stdout, "{}", rest).unwrap();
+                write!(stdout, "\x1b[{}D", rest.chars().count()).unwrap();
+                stdout.flush().unwrap();
+            }
+        }
+    }
+
+    if let Some(line) = line {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            print_prompt(stdout);
+            return;
+        }
+
+        cancellation_token.reset();
+        let results = handle_parallel(
+            vec![trimmed.to_string()],
+            Box::new(io::stdin()),
+            Box::new(stdout.clone()),
+            Arc::clone(session_reg),
+            cancellation_token.clone(),
+        );
+
+        for res in results {
+            if let Err(e) = res {
+                writeln!(stdout, "{}", e.red()).unwrap();
+            }
+        }
+
+        print_prompt(stdout);
     }
 }
 

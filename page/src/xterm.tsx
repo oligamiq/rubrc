@@ -111,6 +111,18 @@ export const SetupMyTerminal = (props: {
     };
   }, props.ctx.get_terminal_size_id);
 
+  const input_char = new SharedObjectRef(props.ctx.input_char_id).proxy<
+    (args: { sessionId: number, c: number }) => Promise<void>
+  >();
+
+  const input_string = new SharedObjectRef(props.ctx.input_string_id).proxy<
+    (args: { sessionId: number, data: string }) => Promise<void>
+  >();
+
+  const interrupt_fn = new SharedObjectRef(props.ctx.interrupt_id).proxy<
+    (args: { sessionId: number }) => Promise<void>
+  >();
+
   const handleMount = (terminal: Terminal) => {
     xterm = terminal;
     terminals.set(props.sessionId, terminal);
@@ -133,20 +145,27 @@ export const SetupMyTerminal = (props: {
     };
     window.addEventListener("resize", onWindowResize);
 
+    const onPaste = (e: ClipboardEvent) => {
+      const data = e.clipboardData?.getData("text");
+      if (data) {
+        input_string({ sessionId: props.sessionId, data }).catch(console.error);
+      }
+    };
+    terminal.element?.addEventListener("paste", onPaste);
+
     return () => {
       terminals.delete(props.sessionId);
       window.removeEventListener("resize", onWindowResize);
+      terminal.element?.removeEventListener("paste", onPaste);
       console.log(`Terminal ${props.sessionId} unmounted.`);
     };
   };
 
   const onData = (data: string) => {
-    const input_char = new SharedObjectRef(props.ctx.input_char_id).proxy<
-      (args: { sessionId: number, c: number }) => Promise<void>
-    >();
-    const interrupt_fn = new SharedObjectRef(props.ctx.interrupt_id).proxy<
-      (args: { sessionId: number }) => Promise<void>
-    >();
+    if (data.length > 1) {
+      input_string({ sessionId: props.sessionId, data }).catch(console.error);
+      return;
+    }
 
     for (let i = 0; i < data.length; i++) {
       if (data.charCodeAt(i) === 3) {

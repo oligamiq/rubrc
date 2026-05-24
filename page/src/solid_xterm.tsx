@@ -340,7 +340,7 @@ const XTerm = ({
     });
   });
 
-  return <div id="term-wrapper" class={className} ref={handleRef} />;
+  return <div class={className} ref={handleRef} />;
 };
 
 export default XTerm;

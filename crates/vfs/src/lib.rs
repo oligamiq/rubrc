@@ -113,6 +113,14 @@ impl Guest for Wit {
         }
         unsafe { crate::shell::vfs_shell_dispatch(session_id, event_type, arg1, arg2) };
     }
+
+    fn alloc_buf(len: u32) -> u32 {
+        unsafe { crate::shell::vfs_shell_alloc_buf(len) }
+    }
+
+    fn free_buf(ptr: u32, len: u32) {
+        unsafe { crate::shell::vfs_shell_free_buf(ptr, len) }
+    }
 }
 
 export!(Wit);

@@ -25,6 +25,8 @@ world vfs-host {
 
   export flush-from-vfs: func();
   export dispatch: func(session-id: u32, event-type: u32, arg1: u32, arg2: u32);
+  export alloc-buf: func(len: u32) -> u32;
+  export free-buf: func(ptr: u32, len: u32);
   export init: func();
   export main: func();
 }

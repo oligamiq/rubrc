@@ -91,8 +91,7 @@ const App = (props: {
         <For each={terminalIds()}>
           {(id, index) => (
             <div 
-              class="flex-1"
-              style={{ display: activeTerminalId() === id ? "block" : "none" }}
+              class={activeTerminalId() === id ? "flex-1 flex flex-col min-h-0" : "hidden"}
             >
               <SetupMyTerminal 
                 ctx={props.ctx} 

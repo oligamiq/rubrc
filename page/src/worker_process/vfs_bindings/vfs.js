@@ -5141,6 +5141,119 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
+      let exports0AllocBuf;
+      
+      function allocBuf(arg0) {
+        _debugLog('[iface="alloc-buf", function="alloc-buf"][Instruction::CallWasm] enter', {
+          funcName: 'alloc-buf',
+          paramCount: 1,
+          async: false,
+          postReturn: false,
+        });
+        const hostProvided = false;
+        
+        const [task, _wasm_call_currentTaskID] = createNewCurrentTask({
+          componentIdx: 0,
+          isAsync: false,
+          isManualAsync: false,
+          entryFnName: 'exports0AllocBuf',
+          getCallbackFn: () => null,
+          callbackFnName: null,
+          errHandling: 'none',
+          callingWasmExport: true,
+        });
+        
+        const started = task.enterSync();
+        
+        if (null!== null) {
+          task.setReturnMemoryIdx(null);
+          task.setReturnMemory(() => null());
+        }
+        
+        
+        let ret;
+        
+        try {
+          ret =   _withGlobalCurrentTaskMeta({
+            taskID: task.id(),
+            componentIdx: task.componentIdx(),
+            fn: () => exports0AllocBuf(toUint32(arg0)),
+          });
+        } catch (err) {
+          
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        
+        _debugLog('[iface="alloc-buf", function="alloc-buf"][Instruction::Return]', {
+          funcName: 'alloc-buf',
+          paramCount: 1,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([ret >>> 0]);
+        task.exit();
+        return ret >>> 0;
+      }
+      let exports0FreeBuf;
+      
+      function freeBuf(arg0, arg1) {
+        _debugLog('[iface="free-buf", function="free-buf"][Instruction::CallWasm] enter', {
+          funcName: 'free-buf',
+          paramCount: 2,
+          async: false,
+          postReturn: false,
+        });
+        const hostProvided = false;
+        
+        const [task, _wasm_call_currentTaskID] = createNewCurrentTask({
+          componentIdx: 0,
+          isAsync: false,
+          isManualAsync: false,
+          entryFnName: 'exports0FreeBuf',
+          getCallbackFn: () => null,
+          callbackFnName: null,
+          errHandling: 'none',
+          callingWasmExport: true,
+        });
+        
+        const started = task.enterSync();
+        
+        if (null!== null) {
+          task.setReturnMemoryIdx(null);
+          task.setReturnMemory(() => null());
+        }
+        
+        
+        let ret;
+        
+        try {
+          _withGlobalCurrentTaskMeta({
+            taskID: task.id(),
+            componentIdx: task.componentIdx(),
+            fn: () => exports0FreeBuf(toUint32(arg0), toUint32(arg1)),
+          });
+        } catch (err) {
+          
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        
+        _debugLog('[iface="free-buf", function="free-buf"][Instruction::Return]', {
+          funcName: 'free-buf',
+          paramCount: 0,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([ret]);
+        task.exit();
+      }
       let exports0Init;
       
       function init() {
@@ -6454,6 +6567,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       exports0FlushToVfs = exports0['flush-to-vfs'];
       exports0FlushFromVfs = exports0['flush-from-vfs'];
       exports0Dispatch = exports0.dispatch;
+      exports0AllocBuf = exports0['alloc-buf'];
+      exports0FreeBuf = exports0['free-buf'];
       exports0Init = exports0.init;
       exports0Main = exports0.main;
       virtualFileSystemWasip1ThreadsExportWasiThreadStart = exports0['wasip1-vfs:host/virtual-file-system-wasip1-threads-export#wasi-thread-start'];
@@ -6462,7 +6577,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         
       };
       
-      return { virtualFileSystemWasip1ThreadsExport, dispatch, flushFromVfs, flushToVfs, init, main, 'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': virtualFileSystemWasip1ThreadsExport,  };
+      return { virtualFileSystemWasip1ThreadsExport, allocBuf, dispatch, flushFromVfs, flushToVfs, freeBuf, init, main, 'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': virtualFileSystemWasip1ThreadsExport,  };
     })();
     let promise, resolve, reject;
     function runNext (value) {

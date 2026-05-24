@@ -14,6 +14,8 @@ export interface Root {
   flushToVfs(): void,
   flushFromVfs(): void,
   dispatch(sessionId: number, eventType: number, arg1: number, arg2: number): void,
+  allocBuf(len: number): number,
+  freeBuf(ptr: number, len: number): void,
   init(): void,
   main(): void,
 }
