@@ -46,4 +46,4 @@ export const load_sysroot_part = async (triple: string): Promise<Directory> => {
   return new Directory(dir);
 };
 
-const toMap = (arr: Array<[string, Inode]>) => {
+
