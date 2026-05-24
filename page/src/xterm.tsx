@@ -238,6 +238,12 @@ const get_ref = (term, callback) => {
           // reset the download state
           download_name = "";
           download_chunks = [];
+        } else if (unknown.name === "terminalWrite") {
+          const data = unknown.args.data as Uint8Array;
+          const decoded = new TextDecoder().decode(data);
+          const fixed = decoded.replace(/\n/g, "\r\n");
+          term.write(fixed);
+          out_buff += fixed;
         } else if (unknown.name === "sysrootStartFetch") {
           const triple = unknown.args.triple;
           sysroot_queue = [];

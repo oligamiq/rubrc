@@ -13,3 +13,11 @@ export class Downloader {
   static sysrootReadFileName(namePtr: number): void;
   static sysrootReadFileChunk(dataPtr: number, chunkLen: number): void;
 }
+
+export class Terminal {
+  /**
+   * This type does not have a public constructor.
+   */
+  private constructor();
+  static terminalWrite(sessionId: number, dataPtr: number, dataLen: number): void;
+}

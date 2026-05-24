@@ -103,21 +103,15 @@ impl Guest for Wit {
         walk_vfs(root, PathBuf::from("."));
     }
 
-    fn input_char(c: u32) {
-        unsafe { crate::shell::vfs_shell_input_char(c) };
-    }
-
-    fn interrupt() {
-        unsafe { crate::shell::vfs_shell_interrupt() };
-    }
-
-    fn resize(columns: u32, lines: u32) {
-        let mut env = VIRTUAL_SHELL_ENV.lock();
-        env.env
-            .retain(|s| !s.starts_with("COLUMNS=") && !s.starts_with("LINES="));
-        env.env.push(format!("COLUMNS={}", columns));
-        env.env.push(format!("LINES={}", lines));
-        unsafe { crate::shell::vfs_shell_resize(columns, lines) };
+    fn dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
+        if event_type == 1 {
+            let mut env = VIRTUAL_SHELL_ENV.lock();
+            env.env
+                .retain(|s| !s.starts_with("COLUMNS=") && !s.starts_with("LINES="));
+            env.env.push(format!("COLUMNS={}", arg1));
+            env.env.push(format!("LINES={}", arg2));
+        }
+        unsafe { crate::shell::vfs_shell_dispatch(session_id, event_type, arg1, arg2) };
     }
 }
 
@@ -302,4 +296,9 @@ pub extern "C" fn sysroot_read_file_chunk(vfs_shell_data_ptr: i32, chunk_len: i3
         chunk_len,
     );
     vfs_shell::memcpy(vfs_shell_data_ptr as *mut u8, local_buf.as_slice());
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terminal_write(session_id: u32, vfs_shell_data_ptr: i32, data_len: i32) {
+    crate::vfs::host::bridge::Terminal::terminal_write(session_id, vfs_shell_data_ptr, data_len);
 }

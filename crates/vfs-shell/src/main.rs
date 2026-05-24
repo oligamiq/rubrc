@@ -5,9 +5,16 @@ use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::mpsc;
 use wasi_shell::{
-    CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor, handle_parallel,
+    handle_parallel, CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor,
 };
+use strum::FromRepr;
+use std::cell::RefCell;
+
+thread_local! {
+    static CANCELLATION_TOKEN: RefCell<Option<wasibox_core::CancellationToken>> = RefCell::new(None);
+}
 
 fn normalize_path_logical(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
@@ -31,39 +38,40 @@ fn normalize_path_logical(path: &Path) -> PathBuf {
 // Terminal Echo Handler
 // ============================================================
 
-struct TerminalEchoHandler {
+struct TerminalEchoHandler<'a> {
     pub needs_redraw: bool,
+    pub writer: &'a mut dyn Write,
 }
 
-impl KeyEventHandler for TerminalEchoHandler {
+impl<'a> KeyEventHandler for TerminalEchoHandler<'a> {
     fn on_key_event(&mut self, key: KeyEvent) {
         match key {
             KeyEvent::Enter => {
-                print!("\r\n");
+                write!(self.writer, "\r\n").unwrap();
             }
             KeyEvent::CtrlC => {
-                print!("^C\r\n");
+                write!(self.writer, "^C\r\n").unwrap();
                 self.needs_redraw = true;
             }
             KeyEvent::Char(c) if c == '\x0c' => {
                 // Ctrl+L
-                print!("\x1b[2J\x1b[H");
+                write!(self.writer, "\x1b[2J\x1b[H").unwrap();
                 self.needs_redraw = true;
             }
             KeyEvent::Char(c) => {
-                print!("{c}");
+                write!(self.writer, "{c}").unwrap();
             }
             KeyEvent::Right => {
-                print!("\x1b[1C");
+                write!(self.writer, "\x1b[1C").unwrap();
             }
             KeyEvent::Left => {
-                print!("\x1b[1D");
+                write!(self.writer, "\x1b[1D").unwrap();
             }
             _ => {
                 self.needs_redraw = true;
             }
         }
-        io::stdout().flush().unwrap();
+        self.writer.flush().unwrap();
     }
 }
 
@@ -135,7 +143,10 @@ pub unsafe extern "C" fn vfs_shell_free_buf(ptr: u32, len: u32) {
 /// Thread-safe: acquires Mutex before writing.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn vfs_shell_write_stdout(id: u32, ptr: u32, len: u32) -> u32 {
-    if CANCELLATION_TOKEN.is_cancelled() {
+    let is_cancelled = CANCELLATION_TOKEN.with(|t| {
+        t.borrow().as_ref().map(|ct| ct.is_cancelled()).unwrap_or(false)
+    });
+    if is_cancelled {
         return 0;
     }
     if let Some(entry) = IO_REGISTRY.get(&id) {
@@ -154,7 +165,10 @@ pub unsafe extern "C" fn vfs_shell_write_stdout(id: u32, ptr: u32, len: u32) -> 
 /// Thread-safe: acquires Mutex before writing.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn vfs_shell_write_stderr(id: u32, ptr: u32, len: u32) -> u32 {
-    if CANCELLATION_TOKEN.is_cancelled() {
+    let is_cancelled = CANCELLATION_TOKEN.with(|t| {
+        t.borrow().as_ref().map(|ct| ct.is_cancelled()).unwrap_or(false)
+    });
+    if is_cancelled {
         return 0;
     }
     if let Some(entry) = IO_REGISTRY.get(&id) {
@@ -184,6 +198,9 @@ unsafe extern "C" {
 
     #[link_name = "sysroot_read_file_chunk"]
     pub fn sysroot_read_file_chunk(data_ptr: i32, chunk_len: i32);
+
+    #[link_name = "terminal_write"]
+    pub fn terminal_write(session_id: u32, data_ptr: i32, data_len: i32);
 }
 
 // Import: vfs_execute_command (scalar-only, no pointer args)
@@ -219,9 +236,9 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
 
     // WASI 環境の相対パス解決やシンボリックリンク解決をサポートする cd
 
-    reg.register("load_sysroot", |args, _io| {
+    reg.register("load_sysroot", |args, io| {
         let triple = args.get(1).map(|s| s.as_str()).unwrap_or("wasm32-wasip1");
-        println!("Loading sysroot: {} ...", triple);
+        writeln!(io.stdout, "Loading sysroot: {} ...", triple).unwrap();
 
         unsafe {
             sysroot_start_fetch(triple.as_ptr() as i32, triple.len() as i32);
@@ -284,13 +301,14 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
 
                     if data_len > 1024 * 1024 {
                         let progress = (offset as f64 / data_len as f64) * 100.0;
-                        print!(
+                        write!(
+                            io.stdout,
                             "\r\x1b[KLoading {}... [{:.1}%] Speed: {}/s",
                             String::from_utf8_lossy(&name_buf),
                             progress,
                             format_size(speed as usize)
-                        );
-                        let _ = std::io::stdout().flush();
+                        ).unwrap();
+                        let _ = io.stdout.flush();
                     }
                 }
             }
@@ -305,7 +323,7 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
                     }
 
                     std::fs::write(&file_path, data_buf).unwrap_or_else(|e| {
-                        eprintln!("Failed to write sysroot file '{}': {}", name, e)
+                        writeln!(io.stderr, "Failed to write sysroot file '{}': {}", name, e).unwrap();
                     });
                 }
 
@@ -317,25 +335,27 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
                     0.0
                 };
 
-                print!(
+                write!(
+                    io.stdout,
                     "\r\x1b[KLoaded {} files ({} total) - Speed: {}/s",
                     files_loaded,
                     format_size(total_bytes),
                     format_size(speed as usize)
-                );
-                let _ = std::io::stdout().flush();
+                ).unwrap();
+                let _ = io.stdout.flush();
             } else {
-                eprintln!("Failed to decode sysroot file name");
+                writeln!(io.stderr, "Failed to decode sysroot file name").unwrap();
             }
         }
         let total_elapsed = start_time.elapsed();
-        println!(
+        writeln!(
+            io.stdout,
             "\nSysroot '{}' loaded successfully ({} files, {} total) in {:.1}s.",
             triple,
             files_loaded,
             format_size(total_bytes),
             total_elapsed.as_secs_f64()
-        );
+        ).unwrap();
         Ok(())
     });
 
@@ -376,108 +396,191 @@ static REGISTRY: LazyLock<Arc<CommandRegistry>> = LazyLock::new(|| {
     Arc::new(reg)
 });
 
-static CANCELLATION_TOKEN: LazyLock<wasibox_core::CancellationToken> =
-    LazyLock::new(|| wasibox_core::CancellationToken::new());
-
-static LINE_READER: LazyLock<Mutex<LineEditor>> = LazyLock::new(|| Mutex::new(LineEditor::new(20)));
-
-// ============================================================
-// Exported functions for host interaction
-// ============================================================
-
-fn print_prompt() {
-    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    print!("{} $ ", cwd.display().to_string().cyan());
-    io::stdout().flush().unwrap();
+#[derive(Debug, FromRepr)]
+#[repr(u32)]
+pub enum SessionEventType {
+    InputChar = 0,
+    Resize = 1,
+    Interrupt = 2,
+    CreateSession = 3,
 }
 
-#[unsafe(no_mangle)]
-/// This function works precisely because it does not interact with memory and stack at all.
-/// If it were to modify anything other than shared memory,
-/// it would break functions running on other threads. It would be like running the main function again on the same memory space.
-/// In that case, it would be necessary to create a new thread and implement it
-/// so that the shared memory held statically can be modified while that thread remains in a waiting state.
-pub extern "C" fn vfs_shell_interrupt() {
-    CANCELLATION_TOKEN.cancel();
+#[derive(Debug)]
+pub enum SessionEvent {
+    InputChar(u32),
+    Resize(u32, u32),
+    Interrupt,
+    CreateSession,
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn vfs_shell_resize(columns: u32, lines: u32) {
-    unsafe { std::env::set_var("COLUMNS", columns.to_string()) };
-    unsafe { std::env::set_var("LINES", lines.to_string()) };
+impl SessionEvent {
+    pub fn from_raw(event_type: u32, arg1: u32, arg2: u32) -> Option<Self> {
+        let ty = SessionEventType::from_repr(event_type)?;
+        match ty {
+            SessionEventType::InputChar => Some(Self::InputChar(arg1)),
+            SessionEventType::Resize => Some(Self::Resize(arg1, arg2)),
+            SessionEventType::Interrupt => Some(Self::Interrupt),
+            SessionEventType::CreateSession => Some(Self::CreateSession),
+        }
+    }
 }
 
+struct SessionState {
+    sender: mpsc::Sender<SessionEvent>,
+    cancellation_token: wasibox_core::CancellationToken,
+}
+
+static SESSIONS: LazyLock<DashMap<u32, SessionState>> = LazyLock::new(|| DashMap::new());
+
 #[unsafe(no_mangle)]
-pub extern "C" fn vfs_shell_input_char(c: u32) {
-    if CANCELLATION_TOKEN.is_cancelled() {
-        CANCELLATION_TOKEN.reset();
+pub extern "C" fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
+    let event = match SessionEvent::from_raw(event_type, arg1, arg2) {
+        Some(e) => e,
+        None => return,
+    };
+
+    if let SessionEvent::CreateSession = event {
+        let (tx, rx) = mpsc::channel();
+        let cancellation_token = wasibox_core::CancellationToken::new();
+        let state = SessionState {
+            sender: tx,
+            cancellation_token: cancellation_token.clone(),
+        };
+        SESSIONS.insert(session_id, state);
+        std::thread::spawn(move || {
+            run_session_loop(session_id, rx, cancellation_token);
+        });
+        return;
     }
 
-    // Delegate to LineReader — handles echo, history, cursor, etc.
-    let line = {
-        let mut reader = LINE_READER.lock().unwrap();
-        let len_before = reader.buffer().chars().count();
-        let mut handler = TerminalEchoHandler {
-            needs_redraw: false,
-        };
-        let line = reader.input_char_with_handler(c, &mut handler);
-
-        if handler.needs_redraw {
-            // Soft redraw: don't clear the whole line to avoid flicker/prompt disappearance.
-            // Move to start of line, re-print prompt and buffer, then clear to end of line.
-            print!("\r");
-            print_prompt();
-            let buffer = reader.buffer();
-            print!("{}", buffer);
-            print!("\x1b[K"); // Clear from cursor to end of line (in case new line is shorter)
-
-            let pos = reader.cursor_pos();
-            let len = buffer.chars().count();
-            if pos < len {
-                print!("\x1b[{}D", len - pos);
-            }
-            io::stdout().flush().unwrap();
+    if let Some(session) = SESSIONS.get(&session_id) {
+        if let SessionEvent::Interrupt = event {
+            session.cancellation_token.cancel();
         } else {
-            // Partial redraw: if a character was inserted mid-line, redraw the rest of the line.
-            let pos_after = reader.cursor_pos();
-            let len_after = reader.buffer().chars().count();
-            if len_after > len_before && pos_after < len_after {
-                let buffer = reader.buffer();
-                let rest: String = buffer.chars().skip(pos_after).collect();
-                if !rest.is_empty() {
-                    print!("{}", rest);
-                    print!("\x1b[{}D", rest.chars().count());
-                    io::stdout().flush().unwrap();
+            let _ = session.sender.send(event);
+        }
+    }
+}
+
+#[derive(Clone)]
+struct SessionStdout {
+    session_id: u32,
+}
+
+impl SessionStdout {
+    fn new(session_id: u32) -> Self {
+        Self { session_id }
+    }
+}
+
+impl Write for SessionStdout {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        unsafe {
+            terminal_write(self.session_id, buf.as_ptr() as i32, buf.len() as i32);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn print_prompt(writer: &mut dyn Write) {
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    write!(writer, "{} $ ", cwd.display().to_string().cyan()).unwrap();
+    writer.flush().unwrap();
+}
+
+fn run_session_loop(
+    session_id: u32,
+    rx: mpsc::Receiver<SessionEvent>,
+    cancellation_token: wasibox_core::CancellationToken,
+) {
+    CANCELLATION_TOKEN.with(|t| *t.borrow_mut() = Some(cancellation_token.clone()));
+
+    let mut line_reader = LineEditor::new(20);
+    let mut stdout = SessionStdout::new(session_id);
+
+    writeln!(stdout, "{}", "Welcome to WASI-Shell!".green().bold()).unwrap();
+    writeln!(stdout, "Type 'help' for available commands or 'exit' to quit.").unwrap();
+    print_prompt(&mut stdout);
+
+    while let Ok(event) = rx.recv() {
+        match event {
+            SessionEvent::InputChar(c) => {
+                if cancellation_token.is_cancelled() {
+                    cancellation_token.reset();
+                }
+
+                let len_before = line_reader.buffer().chars().count();
+                let mut handler = TerminalEchoHandler {
+                    needs_redraw: false,
+                    writer: &mut stdout,
+                };
+                let line = line_reader.input_char_with_handler(c, &mut handler);
+
+                if handler.needs_redraw {
+                    write!(stdout, "\r").unwrap();
+                    print_prompt(&mut stdout);
+                    let buffer = line_reader.buffer();
+                    write!(stdout, "{}", buffer).unwrap();
+                    write!(stdout, "\x1b[K").unwrap();
+
+                    let pos = line_reader.cursor_pos();
+                    let len = buffer.chars().count();
+                    if pos < len {
+                        write!(stdout, "\x1b[{}D", len - pos).unwrap();
+                    }
+                    stdout.flush().unwrap();
+                } else {
+                    let pos_after = line_reader.cursor_pos();
+                    let len_after = line_reader.buffer().chars().count();
+                    if len_after > len_before && pos_after < len_after {
+                        let buffer = line_reader.buffer();
+                        let rest: String = buffer.chars().skip(pos_after).collect();
+                        if !rest.is_empty() {
+                            write!(stdout, "{}", rest).unwrap();
+                            write!(stdout, "\x1b[{}D", rest.chars().count()).unwrap();
+                            stdout.flush().unwrap();
+                        }
+                    }
+                }
+
+                if let Some(line) = line {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        print_prompt(&mut stdout);
+                        continue;
+                    }
+
+                    cancellation_token.reset();
+                    let results = handle_parallel(
+                        vec![trimmed.to_string()],
+                        Box::new(io::stdin()),
+                        Box::new(SessionStdout::new(session_id)),
+                        Arc::clone(&REGISTRY),
+                        cancellation_token.clone(),
+                    );
+
+                    for res in results {
+                        if let Err(e) = res {
+                            writeln!(stdout, "{}", e.red()).unwrap();
+                        }
+                    }
+
+                    print_prompt(&mut stdout);
                 }
             }
-        }
-        line
-    };
-    // Drop the lock before executing so subsequent input_char calls aren't blocked
-
-    if let Some(line) = line {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            print_prompt();
-            return;
-        }
-
-        CANCELLATION_TOKEN.reset();
-        let results = handle_parallel(
-            vec![trimmed.to_string()],
-            Box::new(io::stdin()),
-            Box::new(io::stdout()),
-            Arc::clone(&REGISTRY),
-            CANCELLATION_TOKEN.clone(),
-        );
-
-        for res in results {
-            if let Err(e) = res {
-                eprintln!("{}", e.red());
+            SessionEvent::Resize(_cols, _rows) => {
+                // Resize event logic is handled before dispatching
+                // See `vfs_shell_dispatch` in vfs
             }
+            SessionEvent::Interrupt => {
+                cancellation_token.cancel();
+            }
+            SessionEvent::CreateSession => unreachable!(),
         }
-
-        print_prompt();
     }
 }
 
@@ -487,38 +590,11 @@ pub extern "C" fn vfs_shell_input_char(c: u32) {
 
 fn main() {
     let _ = LazyLock::force(&REGISTRY);
-    let _ = LazyLock::force(&LINE_READER);
-    CANCELLATION_TOKEN.reset();
-
-    println!("{}", "Welcome to WASI-Shell!".green().bold());
-    println!("Type 'help' for available commands or 'exit' to quit.");
-
-    let pre_lines = vec![
-        "help",
-        "echo Hello, World!",
-        "ls -la",
-        "tree",
-        "seq | grep 2 | head -n5",
-        "load_sysroot wasm32-wasip1",
-    ];
-
-    for line in pre_lines {
-        println!("{}", line);
-        let results = handle_parallel(
-            vec![line.to_string()],
-            Box::new(io::stdin()),
-            Box::new(io::stdout()),
-            Arc::clone(&REGISTRY),
-            CANCELLATION_TOKEN.clone(),
-        );
-        for res in results {
-            if let Err(e) = res {
-                eprintln!("{}", e.red());
-            }
-        }
+    // Keep the main thread alive if needed, but returning is fine for wasi-threads 
+    // since background threads will keep running.
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
     }
-
-    print_prompt();
 }
 
 // ============================================================

@@ -23,13 +23,8 @@ unsafe extern "C" {
     /// Write stderr: ptr/len refer to vfs-shell's own memory
     pub fn vfs_shell_write_stderr(id: u32, ptr: u32, len: u32) -> u32;
 
-    /// Send a character to vfs-shell
-    pub fn vfs_shell_input_char(c: u32);
-
-    /// Interrupt the shell
-    pub fn vfs_shell_interrupt();
-
-    pub fn vfs_shell_resize(columns: u32, lines: u32);
+    /// Dispatch an event to vfs-shell
+    pub fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32);
 }
 
 thread_local! {

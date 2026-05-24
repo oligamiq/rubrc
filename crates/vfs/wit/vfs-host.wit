@@ -12,6 +12,10 @@ interface bridge {
     sysroot-read-file-name: static func(name-ptr: s32);
     sysroot-read-file-chunk: static func(data-ptr: s32, chunk-len: s32);
   }
+
+  resource terminal {
+    terminal-write: static func(session-id: u32, data-ptr: s32, data-len: s32);
+  }
 }
 
 world vfs-host {
@@ -20,9 +24,7 @@ world vfs-host {
   export flush-to-vfs: func();
 
   export flush-from-vfs: func();
-  export input-char: func(c: u32);
-  export interrupt: func();
-  export resize: func(columns: u32, lines: u32);
+  export dispatch: func(session-id: u32, event-type: u32, arg1: u32, arg2: u32);
   export init: func();
   export main: func();
 }

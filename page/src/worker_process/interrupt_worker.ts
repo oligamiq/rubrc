@@ -52,11 +52,11 @@ globalThis.addEventListener("message", async (event) => {
         try {
           console.log("animal.wasiImport", animal.wasiImport);
           console.log("Interrupt worker: Calling interrupt...", vfs_root);
-          if (vfs_root.interrupt) {
-            vfs_root.interrupt();
+          if (vfs_root.dispatch) {
+            vfs_root.dispatch(0, 2, 0, 0);
             console.log("Interrupt worker: Interrupt called successfully");
           } else {
-            console.error("vfs_root.interrupt is not defined");
+            console.error("vfs_root.dispatch is not defined");
           }
         } catch (e) {
           console.error("Error calling interrupt:", e);

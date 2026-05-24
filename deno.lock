@@ -3,11 +3,9 @@
   "specifiers": {
     "npm:@biomejs/biome@2.3.5": "2.3.5",
     "npm:@bjorn3/browser_wasi_shim@~0.4.2": "0.4.2",
-    "npm:@oligami/browser_wasi_shim-threads@~0.2.3": "0.2.3_@bjorn3+browser_wasi_shim@0.4.2",
     "npm:@oligami/shared-object@0.1.1": "0.1.1",
     "npm:@swc/cli@~0.7.10": "0.7.10_@swc+core@1.15.33",
     "npm:@swc/core@^1.15.33": "1.15.33",
-    "npm:@tailwindcss/vite@^4.2.4": "4.2.4_vite@7.3.2",
     "npm:@thisbeyond/solid-select@~0.15.1": "0.15.1_solid-js@1.9.12",
     "npm:@types/tar-stream@^3.1.4": "3.1.4",
     "npm:@xterm/addon-fit@0.10": "0.10.0_@xterm+xterm@5.5.0",
@@ -21,13 +19,11 @@
     "npm:solid-devtools@~0.34.5": "0.34.5_solid-js@1.9.12_vite@7.3.2",
     "npm:solid-js@^1.9.12": "1.9.12",
     "npm:solid-monaco@0.3": "0.3.0_monaco-editor@0.48.0_solid-js@1.9.12",
-    "npm:tailwindcss@^4.2.4": "4.2.4",
     "npm:typescript@^5.9.3": "5.9.3",
     "npm:unplugin-swc@^1.5.9": "1.5.9_@swc+core@1.15.33",
     "npm:uuid@^13.0.2": "13.0.2",
     "npm:vite-plugin-dts@^4.5.4": "4.5.4_typescript@5.9.3_vite@7.3.2",
-    "npm:vite-plugin-solid@^2.11.12": "2.11.12_solid-js@1.9.12_vite@7.3.2",
-    "npm:vite@^7.3.2": "7.3.2"
+    "npm:vite-plugin-solid@^2.11.12": "2.11.12_solid-js@1.9.12_vite@7.3.2"
   },
   "npm": {
     "@babel/code-frame@7.29.0": {
@@ -2861,12 +2857,12 @@
         "npm:better-typescript-lib@^2.12.0",
         "npm:npm-watch@0.13",
         "npm:solid-devtools@~0.34.5",
-        "npm:tailwindcss@^4.2.4",
+        "npm:tailwindcss@^4.3.0",
         "npm:typescript@^5.9.3",
         "npm:unplugin-swc@^1.5.9",
         "npm:vite-plugin-dts@^4.5.4",
         "npm:vite-plugin-solid@^2.11.12",
-        "npm:vite@^7.3.2"
+        "npm:vite@^7.3.3"
       ]
     },
     "members": {
@@ -2874,7 +2870,7 @@
         "packageJson": {
           "dependencies": [
             "npm:@bjorn3/browser_wasi_shim@~0.4.2",
-            "npm:@oligami/browser_wasi_shim-threads@~0.2.3",
+            "npm:@oligami/browser_wasi_shim-threads@~0.3.5",
             "npm:brotli-dec-wasm@^2.3.0"
           ]
         }
@@ -2883,9 +2879,9 @@
         "packageJson": {
           "dependencies": [
             "npm:@bjorn3/browser_wasi_shim@~0.4.2",
-            "npm:@oligami/browser_wasi_shim-threads@~0.2.3",
+            "npm:@oligami/browser_wasi_shim-threads@~0.3.6",
             "npm:@oligami/shared-object@0.1.1",
-            "npm:@tailwindcss/vite@^4.2.4",
+            "npm:@tailwindcss/vite@^4.3.0",
             "npm:@thisbeyond/solid-select@~0.15.1",
             "npm:@xterm/addon-fit@0.10",
             "npm:@xterm/addon-search@0.15",
@@ -2893,7 +2889,7 @@
             "npm:nanotar@~0.2.1",
             "npm:solid-js@^1.9.12",
             "npm:solid-monaco@0.3",
-            "npm:tailwindcss@^4.2.4",
+            "npm:tailwindcss@^4.3.0",
             "npm:uuid@^13.0.2"
           ]
         }

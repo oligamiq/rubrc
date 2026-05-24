@@ -13,9 +13,7 @@ export interface Root {
   virtualFileSystemWasip1ThreadsExport: typeof Wasip1VfsHostVirtualFileSystemWasip1ThreadsExport,
   flushToVfs(): void,
   flushFromVfs(): void,
-  inputChar(c: number): void,
-  interrupt(): void,
-  resize(columns: number, lines: number): void,
+  dispatch(sessionId: number, eventType: number, arg1: number, arg2: number): void,
   init(): void,
   main(): void,
 }

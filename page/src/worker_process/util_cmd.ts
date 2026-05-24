@@ -82,18 +82,20 @@ globalThis.addEventListener("message", async (event) => {
   // Initialize VFS component (runs its main function which sets up thread pool etc.)
   animal.start(vfs_root as any);
 
+  vfs_root.dispatch(0, 3, 0, 0);
+
   const get_terminal_size = new SharedObjectRef(ctx.get_terminal_size_id).proxy<
     () => Promise<{ cols: number; rows: number }>
   >();
   const { cols, rows } = await get_terminal_size();
-  vfs_root.resize(cols, rows);
+  vfs_root.dispatch(0, 1, cols, rows);
 
   // Keep other shared objects for backward compatibility if needed
   shared.push(
     new SharedObject((c: number) => {
       (async () => {
         try {
-          vfs_root.inputChar(c);
+          vfs_root.dispatch(0, 0, c, 0);
         } catch (e) {
           await terminal(`Error: ${e}\r\n`);
         }
@@ -105,7 +107,7 @@ globalThis.addEventListener("message", async (event) => {
     new SharedObject((cols: number, rows: number) => {
       (async () => {
         try {
-          vfs_root.resize(cols, rows);
+          vfs_root.dispatch(0, 1, cols, rows);
         } catch (e) {
           await terminal(`Error: ${e}\r\n`);
         }
