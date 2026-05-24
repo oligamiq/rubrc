@@ -133,6 +133,16 @@ export const custom_instantiate = async (
             const view8 = new Uint8Array(memory.memory.buffer);
             view8.set(chunk_bytes, data_ptr);
           },
+        },
+        Terminal: {
+          terminalWrite: (session_id: number, data_ptr: number, data_len: number) => {
+            const view = new Uint8Array(memory.memory.buffer, data_ptr, data_len);
+            const data = new Uint8Array(view); // copy
+            call_unknown_fn(0, {
+              name: "terminalWrite",
+              args: { session_id, data },
+            });
+          }
         }
       },
 		} as ImportObject,
