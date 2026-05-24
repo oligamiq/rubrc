@@ -300,5 +300,6 @@ pub extern "C" fn sysroot_read_file_chunk(vfs_shell_data_ptr: i32, chunk_len: i3
 
 #[unsafe(no_mangle)]
 pub extern "C" fn terminal_write(session_id: u32, vfs_shell_data_ptr: i32, data_len: i32) {
-    crate::vfs::host::bridge::Terminal::terminal_write(session_id, vfs_shell_data_ptr, data_len);
+    let data = vfs_shell::get_array(vfs_shell_data_ptr as *const u8, data_len as usize);
+    crate::vfs::host::bridge::Terminal::terminal_write(session_id, data.as_ptr() as i32, data_len);
 }

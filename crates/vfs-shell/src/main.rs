@@ -439,6 +439,13 @@ pub extern "C" fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32
         None => return,
     };
 
+    if let SessionEvent::Resize(cols, rows) = event {
+        unsafe {
+            std::env::set_var("COLUMNS", cols.to_string());
+            std::env::set_var("LINES", rows.to_string());
+        }
+    }
+
     if let SessionEvent::CreateSession = event {
         let (tx, rx) = mpsc::channel();
         let cancellation_token = wasibox_core::CancellationToken::new();
@@ -592,9 +599,9 @@ fn main() {
     let _ = LazyLock::force(&REGISTRY);
     // Keep the main thread alive if needed, but returning is fine for wasi-threads 
     // since background threads will keep running.
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(3600));
-    }
+    // loop {
+    //     std::thread::sleep(std::time::Duration::from_secs(3600));
+    // }
 }
 
 // ============================================================

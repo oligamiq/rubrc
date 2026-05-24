@@ -9,7 +9,6 @@ import { set_fake_worker } from "./vfs_bindings/common";
 
 import thread_spawn_path from "./vfs_bindings/thread_spawn.ts?worker&url";
 import worker_background_worker_url from "./vfs_bindings/worker_background_worker.ts?worker&url";
-import InterruptWorker from "./interrupt_worker.ts?worker";
 
 await set_fake_worker();
 
@@ -27,7 +26,7 @@ globalThis.addEventListener("message", async (event) => {
   console.log("loading virtualized vfs component");
 
   const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
-    (string: string) => Promise<void>
+    (session_id: number, data: Uint8Array) => Promise<void>
   >();
   const waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
     set_end_of_exec: (_end_of_exec: boolean) => Promise<void>;
@@ -66,22 +65,21 @@ globalThis.addEventListener("message", async (event) => {
     animal.wasiImport as any,
     animal.wasiThreadImport as any,
     animal.get_share_memory(),
-    animal.call_unknown_fn.bind(animal),
+    (idx, unknown: any) => {
+      if (unknown.name === "terminalWrite") {
+        terminal(unknown.args.session_id, unknown.args.data);
+      } else {
+        animal.call_unknown_fn(idx, unknown);
+      }
+    },
   );
 
   console.log("vfs component instantiated", vfs_root);
 
-  const interrupt_worker = new InterruptWorker();
-  interrupt_worker.postMessage({
-    vfs_wasm,
-    memory: animal.get_share_memory(),
-    interrupt_id: ctx.interrupt_id,
-    wasi_refs,
-  });
-
   // Initialize VFS component (runs its main function which sets up thread pool etc.)
   animal.start(vfs_root as any);
 
+  // Initialize main session
   vfs_root.dispatch(0, 3, 0, 0);
 
   const get_terminal_size = new SharedObjectRef(ctx.get_terminal_size_id).proxy<
@@ -90,26 +88,37 @@ globalThis.addEventListener("message", async (event) => {
   const { cols, rows } = await get_terminal_size();
   vfs_root.dispatch(0, 1, cols, rows);
 
-  // Keep other shared objects for backward compatibility if needed
   shared.push(
-    new SharedObject((c: number) => {
+    new SharedObject(({ sessionId }: { sessionId: number }) => {
+      vfs_root.dispatch(sessionId, 3, 0, 0);
+    }, ctx.create_session_id),
+  );
+
+  shared.push(
+    new SharedObject(({ sessionId, c }: { sessionId: number, c: number }) => {
       (async () => {
         try {
-          vfs_root.dispatch(0, 0, c, 0);
+          vfs_root.dispatch(sessionId, 0, c, 0);
         } catch (e) {
-          await terminal(`Error: ${e}\r\n`);
+          await terminal(sessionId, new TextEncoder().encode(`Error: ${e}\r\n`));
         }
       })();
     }, ctx.input_char_id),
   );
 
   shared.push(
-    new SharedObject((cols: number, rows: number) => {
+    new SharedObject(({ sessionId }: { sessionId: number }) => {
+      vfs_root.dispatch(sessionId, 2, 0, 0);
+    }, ctx.interrupt_id),
+  );
+
+  shared.push(
+    new SharedObject(({ sessionId, cols, rows }: { sessionId: number, cols: number, rows: number }) => {
       (async () => {
         try {
-          vfs_root.dispatch(0, 1, cols, rows);
+          vfs_root.dispatch(sessionId, 1, cols, rows);
         } catch (e) {
-          await terminal(`Error: ${e}\r\n`);
+          await terminal(sessionId, new TextEncoder().encode(`Error: ${e}\r\n`));
         }
       })();
     }, ctx.resize_id),

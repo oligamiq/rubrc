@@ -2,7 +2,7 @@ import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import XTerm from "./solid_xterm";
-import { WASIFarm, type WASIFarmRef } from "@oligami/browser_wasi_shim-threads";
+import { WASIFarm, type WASIFarmRef, wait_async_polyfill } from "@oligami/browser_wasi_shim-threads";
 import {
   Directory,
   Fd,
@@ -13,46 +13,81 @@ import {
 import type { Ctx } from "./ctx";
 import { rust_file } from "./config";
 
-import { wait_async_polyfill } from "@oligami/browser_wasi_shim-threads";
-
 wait_async_polyfill();
 
-let shared_xterm: SharedObject;
-
-let error_buff = "";
+let shared_xterm: SharedObject | undefined;
+const terminals = new Map<number, Terminal>();
 let out_buff = "";
+let error_buff = "";
+
+const toUint8Array = (data: any): Uint8Array => {
+  if (data instanceof Uint8Array) {
+    return data;
+  }
+  if (data && data.buffer instanceof ArrayBuffer) {
+    return new Uint8Array(data.buffer);
+  }
+  if (Array.isArray(data)) {
+    return new Uint8Array(data as number[]);
+  }
+  if (typeof data === "object" && data !== null) {
+    if (Array.isArray(data.data)) {
+      return new Uint8Array(data.data as number[]);
+    }
+    const vals = Object.values(data) as number[];
+    return new Uint8Array(vals);
+  }
+  return new Uint8Array();
+};
+
+const write_to_terminal = (session_id: number, data: any) => {
+  const terminal = terminals.get(session_id);
+  if (terminal) {
+    const bytes = toUint8Array(data);
+    const decoded = new TextDecoder().decode(bytes);
+    const fixed = decoded.replace(/\n/g, "\r\n");
+    terminal.write(fixed);
+
+    if (session_id === 0) {
+      out_buff += fixed;
+    }
+  }
+};
 
 export const SetupMyTerminal = (props: {
   ctx: Ctx;
-  callback: (wasi_ref: WASIFarmRef) => void;
+  sessionId: number;
+  isMain: boolean;
+  callback?: (wasi_ref: WASIFarmRef) => void;
 }) => {
   let xterm: Terminal | undefined = undefined;
 
   const fit_addon = new FitAddon();
 
-  const terminal_queue = [];
-  const write_terminal = (str: string) => {
-    if (xterm) {
-      xterm.write(str);
-    } else {
-      terminal_queue.push(str);
-    }
-  };
-  write_terminal.reset_err_buff = () => {
-    error_buff = "";
-  };
-  write_terminal.get_err_buff = () => {
-    console.log("called get_err_buff");
-    return error_buff;
-  };
-  write_terminal.get_out_buff = () => {
-    console.log("called get_out_buff");
-    return out_buff;
-  };
-  write_terminal.reset_out_buff = () => {
-    out_buff = "";
-  };
-  shared_xterm = new SharedObject(write_terminal, props.ctx.terminal_id);
+  if (!shared_xterm) {
+    const terminal_handler = (session_id: number, data: Uint8Array) => {
+      write_to_terminal(session_id, data);
+    };
+
+    // @ts-ignore
+    terminal_handler.reset_err_buff = () => {
+      error_buff = "";
+    };
+    // @ts-ignore
+    terminal_handler.get_err_buff = () => {
+      return error_buff;
+    };
+    // @ts-ignore
+    terminal_handler.reset_out_buff = () => {
+      out_buff = "";
+    };
+    // @ts-ignore
+    terminal_handler.get_out_buff = () => {
+      return out_buff;
+    };
+
+    shared_xterm = new SharedObject(terminal_handler, props.ctx.terminal_id);
+  }
 
   new SharedObject(() => {
     return {
@@ -61,60 +96,69 @@ export const SetupMyTerminal = (props: {
     };
   }, props.ctx.get_terminal_size_id);
 
+  const create_session_fn = new SharedObjectRef(props.ctx.create_session_id).proxy<
+    (args: { sessionId: number }) => Promise<void>
+  >();
+
+  const input_char = new SharedObjectRef(props.ctx.input_char_id).proxy<
+    (args: { sessionId: number, c: number }) => Promise<void>
+  >();
+
+  const interrupt_fn = new SharedObjectRef(props.ctx.interrupt_id).proxy<
+    (args: { sessionId: number }) => Promise<void>
+  >();
+
+  const resize_fn = new SharedObjectRef(props.ctx.resize_id).proxy<
+    (args: { sessionId: number, cols: number, rows: number }) => Promise<void>
+  >();
+
   const handleMount = (terminal: Terminal) => {
     xterm = terminal;
-    xterm.write(terminal_queue.join(""));
-    terminal_queue.length = 0;
-    get_ref(terminal, props.callback);
+    terminals.set(props.sessionId, terminal);
+
+    if (props.isMain && props.callback) {
+      get_ref(terminal, props.callback);
+    } else {
+      create_session_fn({ sessionId: props.sessionId }).catch(console.error);
+    }
 
     fit_addon.fit();
+    resize_fn({ sessionId: props.sessionId, cols: terminal.cols, rows: terminal.rows }).catch(console.error);
 
     const onWindowResize = () => {
       fit_addon.fit();
+      resize_fn({ sessionId: props.sessionId, cols: terminal.cols, rows: terminal.rows }).catch(console.error);
     };
     window.addEventListener("resize", onWindowResize);
 
     return () => {
+      terminals.delete(props.sessionId);
       window.removeEventListener("resize", onWindowResize);
-      console.log("Terminal unmounted.");
+      console.log(`Terminal ${props.sessionId} unmounted.`);
     };
   };
-
-  const input_char = new SharedObjectRef(props.ctx.input_char_id).proxy<
-    (c: number) => Promise<void>
-  >();
-
-  const interrupt_fn = new SharedObjectRef(props.ctx.interrupt_id).proxy<
-    () => Promise<void>
-  >();
-
-  const resize_fn = new SharedObjectRef(props.ctx.resize_id).proxy<
-    (cols: number, rows: number) => Promise<void>
-  >();
 
   const onData = (data: string) => {
     for (let i = 0; i < data.length; i++) {
       if (data.charCodeAt(i) === 3) {
-        interrupt_fn().catch(console.error);
+        interrupt_fn({ sessionId: props.sessionId }).catch(console.error);
         continue;
       }
-      // console.log("sending char code", data.charCodeAt(i));
-      input_char(data.charCodeAt(i)).catch(console.error);
+      input_char({ sessionId: props.sessionId, c: data.charCodeAt(i) }).catch(console.error);
     }
   };
 
   const onResize = (size: { cols: number; rows: number }) => {
-    resize_fn(size.cols, size.rows).catch(console.error);
+    resize_fn({ sessionId: props.sessionId, cols: size.cols, rows: size.rows }).catch(console.error);
   };
 
-  // You can pass either an ITerminalAddon constructor or an instance, depending on whether you need to access it later.
   return (
     <XTerm
       onMount={handleMount}
       onData={onData}
       onResize={onResize}
       addons={[fit_addon]}
-      class="w-full"
+      class="w-full h-full"
     />
   );
 };
@@ -209,21 +253,8 @@ const get_ref = (term, callback) => {
           download_name = unknown.args.name;
           download_chunks = [];
         } else if (unknown.name === "downloadFileChunk") {
-          let chunk = unknown.args.data;
-          if (chunk instanceof Uint8Array) {
-            download_chunks.push(chunk);
-          } else if (chunk && chunk.buffer instanceof ArrayBuffer) {
-            download_chunks.push(new Uint8Array(chunk.buffer));
-          } else if (Array.isArray(chunk)) {
-            download_chunks.push(new Uint8Array(chunk));
-          } else if (typeof chunk === 'object' && chunk !== null) {
-            if (Array.isArray(chunk.data)) {
-              download_chunks.push(new Uint8Array(chunk.data));
-            } else {
-              const vals = Object.values(chunk) as number[];
-              download_chunks.push(new Uint8Array(vals));
-            }
-          }
+          const chunk = toUint8Array(unknown.args.data);
+          download_chunks.push(chunk);
         } else if (unknown.name === "downloadFileEnd") {
           const blob = new Blob(download_chunks);
           const url = URL.createObjectURL(blob);
@@ -238,12 +269,6 @@ const get_ref = (term, callback) => {
           // reset the download state
           download_name = "";
           download_chunks = [];
-        } else if (unknown.name === "terminalWrite") {
-          const data = unknown.args.data as Uint8Array;
-          const decoded = new TextDecoder().decode(data);
-          const fixed = decoded.replace(/\n/g, "\r\n");
-          term.write(fixed);
-          out_buff += fixed;
         } else if (unknown.name === "sysrootStartFetch") {
           const triple = unknown.args.triple;
           sysroot_queue = [];
@@ -289,6 +314,9 @@ const get_ref = (term, callback) => {
             return { chunk };
           }
           return { chunk: new Uint8Array() };
+        } else if (unknown.name === "terminalWrite") {
+          const { session_id, data } = unknown.args;
+          write_to_terminal(session_id, data);
         } else {
           await new Promise((resolve) => setTimeout(resolve, 500));
           console.warn("Unknown function called", unknown);

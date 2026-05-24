@@ -16,6 +16,7 @@ export type Ctx = {
   interrupt_id: string;
   resize_id: string;
   get_terminal_size_id: string;
+  create_session_id: string;
 };
 
 export const gen_ctx = (): Ctx => {
@@ -35,5 +36,6 @@ export const gen_ctx = (): Ctx => {
     interrupt_id: uuidv4(),
     resize_id: uuidv4(),
     get_terminal_size_id: uuidv4(),
+    create_session_id: uuidv4(),
   };
 };

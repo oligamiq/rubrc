@@ -1,10 +1,11 @@
-import { createSignal, lazy, Suspense, type Component } from "solid-js";
+import { createSignal, For, lazy, Suspense } from "solid-js";
 import { SetupMyTerminal } from "./xterm";
 import type { WASIFarmRef } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
 import { default_value, rust_file } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
+import { SharedObjectRef } from "@oligami/shared-object";
 
 const Select = lazy(async () => {
   const selector = import("@thisbeyond/solid-select");
@@ -15,7 +16,6 @@ const Select = lazy(async () => {
   return { default: mod.Select };
 });
 
-import { SharedObjectRef } from "@oligami/shared-object";
 const MonacoEditor = lazy(() =>
   import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor })),
 );
@@ -24,19 +24,25 @@ const App = (props: {
   ctx: Ctx;
   callback: (wasi_ref: WASIFarmRef) => void;
 }) => {
-  const handleMount = (monaco, editor) => {
+  const handleMount = (_monaco, _editor) => {
     // Use monaco and editor instances here
   };
   const handleEditorChange = (value) => {
     // Handle editor value change
     rust_file.data = new TextEncoder().encode(value);
   };
-  let load_additional_sysroot: (string) => void;
+  let load_additional_sysroot: (triple: string) => void;
 
   const [triple, setTriple] = createSignal("wasm32-wasip1");
+  const [terminalIds, setTerminalIds] = createSignal([0]);
+
+  const addTerminal = () => {
+    const nextId = Math.max(...terminalIds()) + 1;
+    setTerminalIds([...terminalIds(), nextId]);
+  };
 
   return (
-    <div>
+    <div class="h-screen flex flex-col overflow-hidden">
       <Suspense
         fallback={
           <div
@@ -55,33 +61,53 @@ const App = (props: {
           onChange={handleEditorChange}
         />
       </Suspense>
-      {/* <p class="text-4xl text-green-700 text-center">Hello tailwind!</p> */}
-      <div class="flex" style={{ width: "100vw" }}>
-        <SetupMyTerminal ctx={props.ctx} callback={props.callback} />
+
+      <div class="flex-1 flex flex-col overflow-hidden">
+        <For each={terminalIds()}>
+          {(id, index) => (
+            <div class="flex-1 border-t border-gray-700 relative">
+              <SetupMyTerminal 
+                ctx={props.ctx} 
+                sessionId={id}
+                isMain={index() === 0}
+                callback={index() === 0 ? props.callback : undefined} 
+              />
+              <div class="absolute top-0 right-0 bg-gray-800 text-white text-xs px-2 opacity-50">
+                Session {id}
+              </div>
+            </div>
+          )}
+        </For>
       </div>
-      <div class="flex">
-        <div class="p-4 text-white">
+
+      <div class="flex items-center bg-gray-900">
+        <div class="p-2 text-white">
           <RunButton triple={triple()} />
         </div>
-        <div class="p-4 text-white" style={{ width: "60vw" }}>
+        <div class="p-2 text-white flex-1 max-w-sm">
           <Select
             options={triples}
-            class="text-4xl text-green-700"
+            class="text-sm text-green-700"
             onChange={(value) => {
-              console.log(value);
               setTriple(value);
               if (load_additional_sysroot === undefined) {
                 load_additional_sysroot = new SharedObjectRef(
                   props.ctx.load_additional_sysroot_id,
-                ).proxy<(string) => void>();
+                ).proxy<(triple: string) => void>();
               }
               load_additional_sysroot(value);
             }}
           />
         </div>
-        <div class="p-4 text-white">
+        <div class="p-2 text-white">
           <DownloadButton />
         </div>
+        <button 
+          class="p-2 mx-2 bg-green-700 text-white rounded hover:bg-green-600 transition-colors"
+          onClick={addTerminal}
+        >
+          Add Terminal
+        </button>
       </div>
     </div>
   );
