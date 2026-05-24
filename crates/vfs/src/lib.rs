@@ -235,6 +235,9 @@ plug_env!(@dynamic, { &mut VIRTUAL_SHELL_ENV.lock() }, vfs_shell);
 #[cfg(not(feature = "full-tools"))]
 plug_random!(StandardRandom, rustc_mock, llvm_mock, vfs_shell);
 
+#[cfg(feature = "full-tools")]
+plug_random!(StandardRandom, rustc_opt, llvm_opt, vfs_shell);
+
 #[cfg(not(feature = "full-tools"))]
 plug_poll!(WaitPoll, rustc_mock, llvm_mock, vfs_shell);
 
