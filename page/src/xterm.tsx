@@ -41,15 +41,15 @@ const toUint8Array = (data: any): Uint8Array => {
   return new Uint8Array();
 };
 
-const write_to_terminal = (session_id: number, data: any) => {
-  const terminal = terminals.get(session_id);
+const write_to_terminal = (sessionId: number, data: any) => {
+  const terminal = terminals.get(sessionId);
   if (terminal) {
     const bytes = toUint8Array(data);
     const decoded = new TextDecoder().decode(bytes);
     const fixed = decoded.replace(/\n/g, "\r\n");
     terminal.write(fixed);
 
-    if (session_id === 0) {
+    if (sessionId === 0) {
       out_buff += fixed;
     }
   }
@@ -66,10 +66,6 @@ export const SetupMyTerminal = (props: {
 
   const fit_addon = new FitAddon();
 
-  const resize_fn = new SharedObjectRef(props.ctx.resize_id).proxy<
-    (args: { sessionId: number, cols: number, rows: number }) => Promise<void>
-  >();
-
   createEffect(on(() => props.isActive, (active) => {
     if (active && xterm) {
       setTimeout(() => {
@@ -80,8 +76,8 @@ export const SetupMyTerminal = (props: {
   }));
 
   if (!shared_xterm) {
-    const terminal_handler = (session_id: number, data: Uint8Array) => {
-      write_to_terminal(session_id, data);
+    const terminal_handler = (args: { sessionId: number, data: Uint8Array }) => {
+      write_to_terminal(args.sessionId, args.data);
     };
 
     // @ts-ignore
@@ -110,6 +106,10 @@ export const SetupMyTerminal = (props: {
       rows: xterm?.rows ?? 24,
     };
   }, props.ctx.get_terminal_size_id);
+
+  const resize_fn = new SharedObjectRef(props.ctx.resize_id).proxy<
+    (args: { sessionId: number, cols: number, rows: number }) => Promise<void>
+  >();
 
   const input_char = new SharedObjectRef(props.ctx.input_char_id).proxy<
     (args: { sessionId: number, c: number }) => Promise<void>
@@ -147,11 +147,28 @@ export const SetupMyTerminal = (props: {
 
     const onPaste = (e: ClipboardEvent) => {
       const data = e.clipboardData?.getData("text");
+      console.log(`[UI] Paste event received for session ${props.sessionId}, length: ${data?.length}`);
       if (data) {
         input_string({ sessionId: props.sessionId, data }).catch(console.error);
       }
     };
     terminal.element?.addEventListener("paste", onPaste);
+
+    terminal.attachCustomKeyEventHandler((e) => {
+      if (e.type === "keydown" && (e.ctrlKey || e.metaKey) && e.key === "v") {
+        console.log(`[UI] Ctrl+V detected for session ${props.sessionId}`);
+        navigator.clipboard.readText().then((data) => {
+          console.log(`[UI] Clipboard content read: ${data?.length} chars`);
+          if (data) {
+            input_string({ sessionId: props.sessionId, data }).catch(console.error);
+          }
+        }).catch(console.error);
+        return false;
+      }
+      return true;
+    });
+
+    terminal.focus();
 
     return () => {
       terminals.delete(props.sessionId);
@@ -162,6 +179,7 @@ export const SetupMyTerminal = (props: {
   };
 
   const onData = (data: string) => {
+    console.log(`[UI] onData received for session ${props.sessionId}, length: ${data.length}, first char code: ${data.charCodeAt(0)}`);
     if (data.length > 1) {
       input_string({ sessionId: props.sessionId, data }).catch(console.error);
       return;

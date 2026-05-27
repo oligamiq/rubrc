@@ -423,6 +423,7 @@ pub enum SessionEventType {
     Interrupt = 2,
     CreateSession = 3,
     InputString = 4,
+    CloseSession = 5,
 }
 
 #[derive(Debug)]
@@ -432,6 +433,7 @@ pub enum SessionEvent {
     Interrupt,
     CreateSession,
     InputString(String),
+    CloseSession,
 }
 
 impl SessionEvent {
@@ -449,6 +451,7 @@ impl SessionEvent {
                 let s = String::from_utf8_lossy(slice).into_owned();
                 Some(Self::InputString(s))
             }
+            SessionEventType::CloseSession => Some(Self::CloseSession),
         }
     }
 }
@@ -462,9 +465,13 @@ static SESSIONS: LazyLock<DashMap<u32, SessionState>> = LazyLock::new(|| DashMap
 
 #[unsafe(no_mangle)]
 pub extern "C" fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
+    println!("[Shell] vfs_shell_dispatch: sid={}, ty={}, a1={}, a2={}", session_id, event_type, arg1, arg2);
     let event = match SessionEvent::from_raw(event_type, arg1, arg2) {
         Some(e) => e,
-        None => return,
+        None => {
+            println!("[Shell] Unknown event type: {}", event_type);
+            return;
+        }
     };
 
     if let SessionEvent::Resize(cols, rows) = event {
@@ -475,6 +482,7 @@ pub extern "C" fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32
     }
 
     if let SessionEvent::CreateSession = event {
+        println!("[Shell] Creating session {}", session_id);
         let (tx, rx) = mpsc::channel();
         let cancellation_token = wasibox_core::CancellationToken::new();
         let state = SessionState {
@@ -490,10 +498,18 @@ pub extern "C" fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32
 
     if let Some(session) = SESSIONS.get(&session_id) {
         if let SessionEvent::Interrupt = event {
+            println!("[Shell] Interrupting session {}", session_id);
             session.cancellation_token.cancel();
+        } else if let SessionEvent::CloseSession = event {
+            println!("[Shell] Closing session {}", session_id);
+            session.cancellation_token.cancel();
+            drop(session);
+            SESSIONS.remove(&session_id);
         } else {
             let _ = session.sender.send(event);
         }
+    } else {
+        println!("[Shell] Session {} not found", session_id);
     }
 }
 
@@ -532,6 +548,7 @@ fn run_session_loop(
     rx: mpsc::Receiver<SessionEvent>,
     cancellation_token: wasibox_core::CancellationToken,
 ) {
+    println!("[Shell] run_session_loop started for sid {}", session_id);
     unsafe { vfs_set_current_session_id(session_id) };
     CANCELLATION_TOKEN.with(|t| *t.borrow_mut() = Some(cancellation_token.clone()));
 
@@ -572,6 +589,7 @@ fn run_session_loop(
     print_prompt(&mut stdout);
 
     while let Ok(event) = rx.recv() {
+        println!("[Shell] Session {} received event: {:?}", session_id, event);
         match event {
             SessionEvent::InputChar(c) => {
                 process_input_char(
@@ -603,6 +621,10 @@ fn run_session_loop(
                 cancellation_token.cancel();
             }
             SessionEvent::CreateSession => unreachable!(),
+            SessionEvent::CloseSession => {
+                println!("[Shell] run_session_loop exiting for sid {}", session_id);
+                break;
+            }
         }
     }
 }
@@ -615,6 +637,7 @@ fn process_input_char(
     session_reg: &Arc<CommandRegistry>,
     session_id: u32,
 ) {
+    println!("[Shell] process_input_char: sid={}, char={}", session_id, c);
     if cancellation_token.is_cancelled() {
         cancellation_token.reset();
     }

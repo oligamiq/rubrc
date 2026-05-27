@@ -104,6 +104,7 @@ impl Guest for Wit {
     }
 
     fn dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
+        println!("[VFS] dispatch: sid={}, ty={}, a1={}, a2={}", session_id, event_type, arg1, arg2);
         if event_type == 1 {
             let mut env = VIRTUAL_SHELL_ENV.lock();
             env.env
@@ -115,11 +116,14 @@ impl Guest for Wit {
     }
 
     fn alloc_buf(len: u32) -> u32 {
-        unsafe { crate::shell::vfs_shell_alloc_buf(len) }
+        let layout = std::alloc::Layout::from_size_align(len as usize, 8).unwrap();
+        let ptr = unsafe { std::alloc::alloc(layout) };
+        ptr as u32
     }
 
     fn free_buf(ptr: u32, len: u32) {
-        unsafe { crate::shell::vfs_shell_free_buf(ptr, len) }
+        let layout = std::alloc::Layout::from_size_align(len as usize, 8).unwrap();
+        unsafe { std::alloc::dealloc(ptr as *mut u8, layout) };
     }
 }
 

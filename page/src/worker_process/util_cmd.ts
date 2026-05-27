@@ -26,13 +26,13 @@ globalThis.addEventListener("message", async (event) => {
   console.log("loading virtualized vfs component");
 
   const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
-    (session_id: number, data: Uint8Array) => Promise<void>
+    (args: { sessionId: number, data: Uint8Array }) => Promise<void>
   >();
   const waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
     set_end_of_exec: (_end_of_exec: boolean) => Promise<void>;
   }>();
   const download_by_url = new SharedObjectRef(ctx.download_by_url_id).proxy<
-    (url: string, name: string) => Promise<void>
+    (args: { url: string, name: string }) => Promise<void>
   >();
 
   const vfs_wasm_path = new URL("./vfs_bindings/vfs.core.wasm", import.meta.url).href;
@@ -67,7 +67,7 @@ globalThis.addEventListener("message", async (event) => {
     animal.get_share_memory(),
     (idx, unknown: any) => {
       if (unknown.name === "terminalWrite") {
-        terminal(unknown.args.session_id, unknown.args.data);
+        terminal({ sessionId: unknown.args.session_id, data: unknown.args.data });
       } else {
         animal.call_unknown_fn(idx, unknown);
       }
@@ -98,9 +98,10 @@ globalThis.addEventListener("message", async (event) => {
     new SharedObject(({ sessionId, c }: { sessionId: number, c: number }) => {
       (async () => {
         try {
+          console.log(`[Worker] input_char for session ${sessionId}, char code: ${c}`);
           vfs_root.dispatch(sessionId, 0, c, 0);
         } catch (e) {
-          await terminal(sessionId, new TextEncoder().encode(`Error: ${e}\r\n`));
+          await terminal({ sessionId, data: new TextEncoder().encode(`Error: ${e}\r\n`) });
         }
       })();
     }, ctx.input_char_id),
@@ -110,14 +111,17 @@ globalThis.addEventListener("message", async (event) => {
     new SharedObject(({ sessionId, data }: { sessionId: number, data: string }) => {
       (async () => {
         try {
+          console.log(`[Worker] input_string for session ${sessionId}, length: ${data.length}`);
           const bytes = new TextEncoder().encode(data);
           const ptr = vfs_root.allocBuf(bytes.length);
+          console.log(`[Worker] Allocated buffer at ${ptr}, copying ${bytes.length} bytes`);
           const view = new Uint8Array(animal.get_share_memory().memory.buffer);
           view.set(bytes, ptr);
           vfs_root.dispatch(sessionId, 4, ptr, bytes.length);
           vfs_root.freeBuf(ptr, bytes.length);
         } catch (e) {
-          await terminal(sessionId, new TextEncoder().encode(`Error: ${e}\r\n`));
+          console.error(`[Worker] Error in input_string: ${e}`);
+          await terminal({ sessionId, data: new TextEncoder().encode(`Error: ${e}\r\n`) });
         }
       })();
     }, ctx.input_string_id),
@@ -135,9 +139,18 @@ globalThis.addEventListener("message", async (event) => {
         try {
           vfs_root.dispatch(sessionId, 1, cols, rows);
         } catch (e) {
-          await terminal(sessionId, new TextEncoder().encode(`Error: ${e}\r\n`));
+          await terminal({ sessionId, data: new TextEncoder().encode(`Error: ${e}\r\n`) });
         }
       })();
     }, ctx.resize_id),
   );
+
+  shared.push(
+    new SharedObject(({ sessionId }: { sessionId: number }) => {
+      vfs_root.dispatch(sessionId, 5, 0, 0); // 5 is CloseSession
+    }, ctx.close_session_id),
+  );
+
+  const vfs_ready = new SharedObjectRef(ctx.vfs_ready_id).proxy<() => Promise<void>>();
+  vfs_ready().catch(console.error);
 });

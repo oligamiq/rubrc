@@ -5,7 +5,7 @@ import type { Ctx } from "./ctx";
 import { default_value, rust_file } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
-import { SharedObjectRef } from "@oligami/shared-object";
+import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 
 const Select = lazy(async () => {
   const selector = import("@thisbeyond/solid-select");
@@ -19,6 +19,12 @@ const Select = lazy(async () => {
 const MonacoEditor = lazy(() =>
   import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor })),
 );
+
+type Pane = {
+  id: number;
+  tabs: number[];
+  activeTab: number;
+};
 
 const App = (props: {
   ctx: Ctx;
@@ -34,13 +40,113 @@ const App = (props: {
   let load_additional_sysroot: (triple: string) => void;
 
   const [triple, setTriple] = createSignal("wasm32-wasip1");
-  const [terminalIds, setTerminalIds] = createSignal([0]);
-  const [activeTerminalId, setActiveTerminalId] = createSignal(0);
+  const [panes, setPanes] = createSignal<Pane[]>([{ id: 1, tabs: [0], activeTab: 0 }]);
+  const [nextPaneId, setNextPaneId] = createSignal(2);
+  const [nextSessionId, setNextSessionId] = createSignal(1);
+  const [draggedTab, setDraggedTab] = createSignal<{ paneId: number, sessionId: number } | null>(null);
+  const [isReady, setIsReady] = createSignal(false);
 
-  const addTerminal = () => {
-    const nextId = Math.max(...terminalIds()) + 1;
-    setTerminalIds([...terminalIds(), nextId]);
-    setActiveTerminalId(nextId);
+  let shared_ready: SharedObject | undefined;
+  if (!shared_ready) {
+    shared_ready = new SharedObject(() => {
+      setIsReady(true);
+    }, props.ctx.vfs_ready_id);
+  }
+
+  const close_session_fn = new SharedObjectRef(props.ctx.close_session_id).proxy<
+    (args: { sessionId: number }) => Promise<void>
+  >();
+
+  const addTerminalToPane = (paneId: number) => {
+    const newSessionId = nextSessionId();
+    setNextSessionId(newSessionId + 1);
+    setPanes(panes().map(p => {
+      if (p.id === paneId) {
+        return { ...p, tabs: [...p.tabs, newSessionId], activeTab: newSessionId };
+      }
+      return p;
+    }));
+  };
+
+  const splitPane = (paneId: number) => {
+    const newSessionId = nextSessionId();
+    setNextSessionId(newSessionId + 1);
+    const newPaneId = nextPaneId();
+    setNextPaneId(newPaneId + 1);
+    
+    const currentPanes = panes();
+    const paneIndex = currentPanes.findIndex(p => p.id === paneId);
+    if (paneIndex === -1) return;
+    
+    const newPanes = [...currentPanes];
+    newPanes.splice(paneIndex + 1, 0, { id: newPaneId, tabs: [newSessionId], activeTab: newSessionId });
+    setPanes(newPanes);
+  };
+
+  const removeTerminal = (e: Event, paneId: number, sessionId: number) => {
+    e.stopPropagation();
+    if (sessionId === 0) return; // Cannot close main session
+
+    close_session_fn({ sessionId }).catch(console.error);
+
+    setPanes(panes().map(p => {
+      if (p.id === paneId) {
+        const newTabs = p.tabs.filter(t => t !== sessionId);
+        const newActive = p.activeTab === sessionId 
+          ? (newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1) 
+          : p.activeTab;
+        return { ...p, tabs: newTabs, activeTab: newActive };
+      }
+      return p;
+    }).filter(p => p.tabs.length > 0 || p.id === panes()[0].id));
+  };
+
+  const setActiveTab = (paneId: number, sessionId: number) => {
+    setPanes(panes().map(p => p.id === paneId ? { ...p, activeTab: sessionId } : p));
+  };
+
+  const onDragStart = (e: DragEvent, paneId: number, sessionId: number) => {
+    setDraggedTab({ paneId, sessionId });
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+    }
+  };
+
+  const onDrop = (e: DragEvent, targetPaneId: number) => {
+    e.preventDefault();
+    const dragged = draggedTab();
+    if (!dragged) return;
+    if (dragged.paneId === targetPaneId) return;
+
+    setPanes(panes().map(p => {
+      if (p.id === dragged.paneId) {
+        const newTabs = p.tabs.filter(t => t !== dragged.sessionId);
+        const newActive = p.activeTab === dragged.sessionId 
+          ? (newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1) 
+          : p.activeTab;
+        return { ...p, tabs: newTabs, activeTab: newActive };
+      }
+      if (p.id === targetPaneId) {
+        return { ...p, tabs: [...p.tabs, dragged.sessionId], activeTab: dragged.sessionId };
+      }
+      return p;
+    }).filter(p => p.tabs.length > 0 || p.id === panes()[0].id));
+    
+    setDraggedTab(null);
+  };
+
+  const onDragOver = (e: DragEvent) => {
+    e.preventDefault();
+  };
+
+  const allSessionIds = () => {
+    const ids: number[] = [];
+    for (const p of panes()) {
+      for (const t of p.tabs) {
+        if (!ids.includes(t)) ids.push(t);
+      }
+    }
+    return ids;
   };
 
   return (
@@ -64,45 +170,109 @@ const App = (props: {
         />
       </Suspense>
 
-      <div class="flex bg-gray-800 border-t border-gray-700 overflow-x-auto">
-        <For each={terminalIds()}>
-          {(id) => (
-            <button
-              class={`px-4 py-2 text-sm transition-colors border-r border-gray-700 whitespace-nowrap ${
-                activeTerminalId() === id 
-                  ? "bg-gray-900 text-green-400 border-b-2 border-b-green-500" 
-                  : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-              }`}
-              onClick={() => setActiveTerminalId(id)}
-            >
-              Session {id}
-            </button>
-          )}
-        </For>
-        <button 
-          class="px-4 py-2 text-sm bg-green-800 text-white hover:bg-green-700 transition-colors whitespace-nowrap"
-          onClick={addTerminal}
-        >
-          + New Tab
-        </button>
-      </div>
+      <div class="flex-1 flex flex-col min-h-0 bg-black border-t border-gray-700">
+        <div class="flex">
+          <For each={panes()}>
+            {(pane, pIndex) => (
+              <div class={`flex-1 flex bg-gray-800 overflow-x-auto min-w-0 ${pIndex() > 0 ? 'border-l border-gray-700' : ''}`}
+                onDragOver={onDragOver}
+                onDrop={(e) => onDrop(e, pane.id)}
+              >
+                <For each={pane.tabs}>
+                  {(sessionId) => (
+                    <div
+                      draggable={true}
+                      onDragStart={(e) => onDragStart(e, pane.id, sessionId)}
+                      class={`flex items-center transition-colors border-r border-gray-700 whitespace-nowrap cursor-pointer ${
+                        pane.activeTab === sessionId 
+                          ? "bg-gray-900 border-b-2 border-b-green-500" 
+                          : "bg-gray-800 hover:bg-gray-700"
+                      }`}
+                      onClick={() => setActiveTab(pane.id, sessionId)}
+                    >
+                      <button
+                        class={`px-4 py-2 text-sm focus:outline-none ${
+                          pane.activeTab === sessionId ? "text-green-400" : "text-gray-400"
+                        }`}
+                      >
+                        Session {sessionId}
+                      </button>
+                      {sessionId !== 0 && (
+                        <button
+                          class="pr-3 text-gray-500 hover:text-red-400 focus:outline-none"
+                          onClick={(e) => removeTerminal(e, pane.id, sessionId)}
+                          title="Close Tab"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </For>
+                <button 
+                  class={`px-3 py-2 text-sm transition-colors whitespace-nowrap focus:outline-none ${
+                    isReady() 
+                      ? "text-gray-400 hover:text-white hover:bg-gray-700" 
+                      : "text-gray-600 cursor-not-allowed"
+                  }`}
+                  onClick={() => addTerminalToPane(pane.id)}
+                  disabled={!isReady()}
+                  title="New Tab"
+                >
+                  +
+                </button>
+                <div class="flex-1 min-w-[20px]"></div>
+                <button
+                  class={`px-3 py-2 text-sm transition-colors whitespace-nowrap focus:outline-none border-l border-gray-700 ${
+                    isReady() 
+                      ? "text-gray-400 hover:text-white hover:bg-gray-700" 
+                      : "text-gray-600 cursor-not-allowed"
+                  }`}
+                  onClick={() => splitPane(pane.id)}
+                  disabled={!isReady()}
+                  title="Split Pane Horizontally"
+                >
+                  ◫
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
 
-      <div class="flex-1 flex flex-col overflow-hidden bg-black">
-        <For each={terminalIds()}>
-          {(id, index) => (
-            <div 
-              class={activeTerminalId() === id ? "flex-1 flex flex-col min-h-0" : "hidden"}
-            >
-              <SetupMyTerminal 
-                ctx={props.ctx} 
-                sessionId={id}
-                isMain={index() === 0}
-                isActive={activeTerminalId() === id}
-                callback={index() === 0 ? props.callback : undefined} 
-              />
-            </div>
-          )}
-        </For>
+        <div 
+          class="flex-1 min-h-0 min-w-0 grid overflow-hidden" 
+          style={{ "grid-template-columns": `repeat(${panes().length}, minmax(0, 1fr))` }}
+        >
+          <For each={allSessionIds()}>
+            {(sessionId) => {
+               const paneIndex = () => panes().findIndex(p => p.tabs.includes(sessionId));
+               const isActive = () => {
+                 const pIdx = paneIndex();
+                 if (pIdx === -1) return false;
+                 return panes()[pIdx].activeTab === sessionId;
+               };
+
+               return (
+                 <div 
+                   class="relative w-full h-full min-w-0 min-h-0 overflow-hidden"
+                   style={{ 
+                     "grid-column": (paneIndex() + 1).toString(),
+                     "grid-row": "1",
+                     "display": isActive() ? "block" : "none"
+                   }}
+                 >
+                   <SetupMyTerminal 
+                     ctx={props.ctx} 
+                     sessionId={sessionId}
+                     isMain={sessionId === 0}
+                     isActive={isActive()}
+                     callback={sessionId === 0 ? props.callback : undefined} 
+                   />
+                 </div>
+               )
+            }}
+          </For>
+        </div>
       </div>
 
       <div class="flex items-center bg-gray-900 border-t border-gray-700">
