@@ -37,8 +37,8 @@ globalThis.onmessage = async (message) => {
 			worker_background_worker_url: "./worker_background_worker.ts",
             share_memory: {
                 memory: new WebAssembly.Memory({
-                    initial:60,
-                    maximum:49152,
+                    initial:61,
+                    maximum:49153,
                     shared:true,
                 }),
             },

@@ -45,4 +45,3 @@ export const load_sysroot_part = async (triple: string): Promise<Directory> => {
   console.groupEnd();
   return new Directory(dir);
 };
-
