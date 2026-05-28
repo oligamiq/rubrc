@@ -6,6 +6,9 @@ import { default_value, rust_file } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
+import { initialize } from "@codingame/monaco-vscode-api";
+
+await initialize();
 
 const Select = lazy(async () => {
   const selector = import("@thisbeyond/solid-select");
