@@ -6,6 +6,9 @@ wit_bindgen::generate!({
     world: "vfs-host",
 });
 
+const LSP_SESSION_ID: u32 = 0xFFFFFFFF;
+const EVENT_TYPE_LSP: u32 = 6;
+
 struct Wit;
 
 impl Guest for Wit {
@@ -104,7 +107,10 @@ impl Guest for Wit {
     }
 
     fn dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
-        println!("[VFS] dispatch: sid={}, ty={}, a1={}, a2={}", session_id, event_type, arg1, arg2);
+        println!(
+            "[VFS] dispatch: sid={}, ty={}, a1={}, a2={}",
+            session_id, event_type, arg1, arg2
+        );
         if event_type == 1 {
             let mut env = VIRTUAL_SHELL_ENV.lock();
             env.env

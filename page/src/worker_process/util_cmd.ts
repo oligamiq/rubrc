@@ -12,6 +12,8 @@ import worker_background_worker_url from "./vfs_bindings/worker_background_worke
 
 await set_fake_worker();
 
+const LSP_SESSION_ID = 0xFFFFFFFF;
+
 const shared: SharedObject[] = [];
 
 globalThis.addEventListener("message", async (event) => {
