@@ -30,6 +30,9 @@ globalThis.addEventListener("message", async (event) => {
   const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
     (args: { sessionId: number, data: Uint8Array }) => Promise<void>
   >();
+  const lsp = new SharedObjectRef(ctx.ls_id).proxy<
+    (args: { data: Uint8Array }) => Promise<void>
+  >();
   const waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
     set_end_of_exec: (_end_of_exec: boolean) => Promise<void>;
   }>();
@@ -69,7 +72,11 @@ globalThis.addEventListener("message", async (event) => {
     animal.get_share_memory(),
     (idx, unknown: any) => {
       if (unknown.name === "terminalWrite") {
-        terminal({ sessionId: unknown.args.session_id, data: unknown.args.data });
+        if (unknown.args.session_id === LSP_SESSION_ID) {
+          lsp({ data: unknown.args.data });
+        } else {
+          terminal({ sessionId: unknown.args.session_id, data: unknown.args.data });
+        }
       } else {
         animal.call_unknown_fn(idx, unknown);
       }
@@ -119,7 +126,9 @@ globalThis.addEventListener("message", async (event) => {
           console.log(`[Worker] Allocated buffer at ${ptr}, copying ${bytes.length} bytes`);
           const view = new Uint8Array(animal.get_share_memory().memory.buffer);
           view.set(bytes, ptr);
-          vfs_root.dispatch(sessionId, 4, ptr, bytes.length);
+
+          const eventType = sessionId === LSP_SESSION_ID ? 6 : 4; // 6 is EVENT_TYPE_LSP, 4 is InputString
+          vfs_root.dispatch(sessionId, eventType, ptr, bytes.length);
           vfs_root.freeBuf(ptr, bytes.length);
         } catch (e) {
           console.error(`[Worker] Error in input_string: ${e}`);
