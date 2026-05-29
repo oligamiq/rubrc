@@ -55,7 +55,7 @@ globalThis.addEventListener("message", async (event) => {
       worker_background_worker_url: new URL(worker_background_worker_url, import.meta.url).href,
       share_memory: {
         memory: new WebAssembly.Memory({
-          initial: 83,
+          initial: 127,
           maximum: 32775,
           shared: true,
         }),
