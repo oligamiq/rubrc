@@ -8,14 +8,6 @@ import { triples } from "./sysroot";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { createLspConnection } from "./lsp_bridge";
 import { MonacoLanguageClient } from "monaco-languageclient";
-import { initialize } from "@codingame/monaco-vscode-api";
-import "vscode/localExtensionHost";
-
-await initialize({
-  userConfiguration: {
-    default: "{\"editor.fontSize\": 14}"
-  }
-});
 
 const Select = lazy(async () => {
   const selector = import("@thisbeyond/solid-select");
@@ -41,17 +33,30 @@ const App = (props: {
   callback: (wasi_ref: WASIFarmRef) => void;
 }) => {
   const handleMount = (_monaco, _editor) => {
+    console.log("[App] Monaco Editor mounted. Starting LSP client...");
     const connection = createLspConnection(props.ctx);
+    console.log("[App] LSP connection created.");
     const languageClient = new MonacoLanguageClient({
       name: "Rust Language Client",
       clientOptions: {
-        documentSelector: ["rust"],
+        documentSelector: [{ scheme: "file", language: "rust" }],
+        initializationOptions: {
+          cargo: {
+            sysroot: "/sysroot",
+          },
+          procMacro: {
+            enable: false,
+          },
+        },
       },
-      connectionProvider: {
-        get: () => Promise.resolve(connection),
-      },
+      messageTransports: connection
     });
-    languageClient.start();
+    console.log("[App] Starting LanguageClient...");
+    languageClient.start().then(() => {
+      console.log("[App] LanguageClient started successfully.");
+    }).catch(e => {
+      console.error("[App] Failed to start LanguageClient:", e);
+    });
   };
   const handleEditorChange = (value) => {
     // Handle editor value change
@@ -183,6 +188,7 @@ const App = (props: {
       >
         <MonacoEditor
           language="rust"
+          path="/src/main.rs"
           value={default_value}
           height="30vh"
           onMount={handleMount}

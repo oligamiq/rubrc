@@ -1,6 +1,6 @@
 import { File } from "@bjorn3/browser_wasi_shim";
 
-export const default_value = `// /main.rs
+export const default_value = `// /src/main.rs
 fn main() {
     let first_time = std::time::SystemTime::now();
 

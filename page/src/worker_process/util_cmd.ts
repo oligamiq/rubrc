@@ -116,6 +116,7 @@ globalThis.addEventListener("message", async (event) => {
     }, ctx.input_char_id),
   );
 
+  console.log("[Worker] Registering input_string SharedObject with ID:", ctx.input_string_id);
   shared.push(
     new SharedObject(({ sessionId, data }: { sessionId: number, data: string }) => {
       (async () => {
@@ -128,6 +129,7 @@ globalThis.addEventListener("message", async (event) => {
           view.set(bytes, ptr);
 
           const eventType = sessionId === LSP_SESSION_ID ? 6 : 4; // 6 is EVENT_TYPE_LSP, 4 is InputString
+          console.log(`[Worker] Dispatching to VFS: session=${sessionId}, eventType=${eventType}, len=${bytes.length}`);
           vfs_root.dispatch(sessionId, eventType, ptr, bytes.length);
           vfs_root.freeBuf(ptr, bytes.length);
         } catch (e) {

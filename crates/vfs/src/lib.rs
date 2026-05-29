@@ -174,7 +174,11 @@ impl<'a> VirtualEnv<'a> for VirtualEnvState {
 pub static VIRTUAL_SHELL_ENV: std::sync::LazyLock<parking_lot::Mutex<VirtualEnvState>> =
     std::sync::LazyLock::new(|| {
         parking_lot::Mutex::new(VirtualEnvState {
-            env: vec!["HOME=~/".to_string()],
+            env: vec![
+                "HOME=~/".to_string(),
+                // "RUST_SRC_PATH=/sysroot/lib/rustlib".to_string(),
+                "SYSROOT=/sysroot".to_string(),
+            ],
         })
     });
 

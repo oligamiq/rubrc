@@ -11,11 +11,11 @@ export default defineConfig({
     For more info see https://github.com/thetarnav/solid-devtools/tree/main/packages/extension#readme
     */
     // devtools(),
-    importMetaUrlPlugin,
     solidPlugin(),
     tailwindcss(),
   ],
   optimizeDeps: {
+    exclude: ['brotli-dec-wasm'],
     esbuildOptions: {
       plugins: [
         importMetaUrlPlugin

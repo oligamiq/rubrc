@@ -2,12 +2,39 @@
 import "./index.css";
 import { render } from "solid-js/web";
 
-import App from "./App";
-import { gen_ctx } from "./ctx";
-import MainWorkerPath from "./worker_process/worker?worker&url";
-import { parser_setup } from "./cmd_parser";
-import "./monaco_worker";
-import { compile_and_run_setup } from "./compile_and_run";
+import { MonacoVscodeApiWrapper } from "monaco-languageclient/vscodeApiWrapper";
+import "vscode/localExtensionHost";
+import "@codingame/monaco-vscode-rust-default-extension";
+import "@codingame/monaco-vscode-theme-defaults-default-extension";
+
+console.log("[Index] Initializing MonacoVscodeApiWrapper...");
+const apiWrapper = new MonacoVscodeApiWrapper({
+  $type: "extended",
+  viewsConfig: { $type: "EditorService" },
+  userConfiguration: {
+    json: "{\"editor.fontSize\": 14}"
+  },
+  workspaceConfig: {
+    workspaceProvider: {
+      trusted: true,
+      workspace: {
+        workspaceUri: { scheme: "file", authority: "", path: "/" },
+      },
+      async open() {
+        return false;
+      },
+    },
+  },
+});
+await apiWrapper.start();
+console.log("[Index] MonacoVscodeApiWrapper started.");
+
+const { default: App } = await import("./App");
+const { gen_ctx } = await import("./ctx");
+const { default: MainWorkerPath } = await import("./worker_process/worker?worker&url");
+const { parser_setup } = await import("./cmd_parser");
+await import("./monaco_worker");
+const { compile_and_run_setup } = await import("./compile_and_run");
 
 const root = document.getElementById("root");
 

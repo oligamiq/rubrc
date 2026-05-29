@@ -277,7 +277,14 @@ const get_ref = (term, callback) => {
     "/",
     toMap([
       ["sysroot", new Directory([])],
-      ["main.rs", rust_file],
+      ["src", new Directory(toMap([
+        ["main.rs", rust_file],
+      ]))],
+      ["Cargo.toml", new File(new TextEncoder().encode(`[package]
+name = "main"
+version = "0.1.0"
+edition = "2021"
+`))],
     ]),
   );
 
