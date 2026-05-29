@@ -1,16 +1,16 @@
 use colored::*;
 use dashmap::DashMap;
+use std::cell::RefCell;
 use std::env;
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
 use std::sync::mpsc;
-use wasi_shell::{
-    handle_parallel, CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor,
-};
+use std::sync::{Arc, LazyLock, Mutex};
 use strum::FromRepr;
-use std::cell::RefCell;
+use wasi_shell::{
+    CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor, handle_parallel,
+};
 
 thread_local! {
     static CANCELLATION_TOKEN: RefCell<Option<wasibox_core::CancellationToken>> = RefCell::new(None);
@@ -144,7 +144,10 @@ pub unsafe extern "C" fn vfs_shell_free_buf(ptr: u32, len: u32) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn vfs_shell_write_stdout(id: u32, ptr: u32, len: u32) -> u32 {
     let is_cancelled = CANCELLATION_TOKEN.with(|t| {
-        t.borrow().as_ref().map(|ct| ct.is_cancelled()).unwrap_or(false)
+        t.borrow()
+            .as_ref()
+            .map(|ct| ct.is_cancelled())
+            .unwrap_or(false)
     });
     if is_cancelled {
         return 0;
@@ -166,7 +169,10 @@ pub unsafe extern "C" fn vfs_shell_write_stdout(id: u32, ptr: u32, len: u32) -> 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn vfs_shell_write_stderr(id: u32, ptr: u32, len: u32) -> u32 {
     let is_cancelled = CANCELLATION_TOKEN.with(|t| {
-        t.borrow().as_ref().map(|ct| ct.is_cancelled()).unwrap_or(false)
+        t.borrow()
+            .as_ref()
+            .map(|ct| ct.is_cancelled())
+            .unwrap_or(false)
     });
     if is_cancelled {
         return 0;
@@ -322,7 +328,8 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                             String::from_utf8_lossy(&name_buf),
                             progress,
                             format_size(speed as usize)
-                        ).unwrap();
+                        )
+                        .unwrap();
                         let _ = io.stdout.flush();
                     }
                 }
@@ -338,7 +345,8 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                     }
 
                     std::fs::write(&file_path, data_buf).unwrap_or_else(|e| {
-                        writeln!(io.stderr, "Failed to write sysroot file '{}': {}", name, e).unwrap();
+                        writeln!(io.stderr, "Failed to write sysroot file '{}': {}", name, e)
+                            .unwrap();
                     });
                 }
 
@@ -356,7 +364,8 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                     files_loaded,
                     format_size(total_bytes),
                     format_size(speed as usize)
-                ).unwrap();
+                )
+                .unwrap();
                 let _ = io.stdout.flush();
             } else {
                 writeln!(io.stderr, "Failed to decode sysroot file name").unwrap();
@@ -370,7 +379,8 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
             files_loaded,
             format_size(total_bytes),
             total_elapsed.as_secs_f64()
-        ).unwrap();
+        )
+        .unwrap();
         Ok(())
     });
 
@@ -465,7 +475,10 @@ static SESSIONS: LazyLock<DashMap<u32, SessionState>> = LazyLock::new(|| DashMap
 
 #[unsafe(no_mangle)]
 pub extern "C" fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
-    println!("[Shell] vfs_shell_dispatch: sid={}, ty={}, a1={}, a2={}", session_id, event_type, arg1, arg2);
+    println!(
+        "[Shell] vfs_shell_dispatch: sid={}, ty={}, a1={}, a2={}",
+        session_id, event_type, arg1, arg2
+    );
     let event = match SessionEvent::from_raw(event_type, arg1, arg2) {
         Some(e) => e,
         None => {
@@ -557,7 +570,11 @@ fn run_session_loop(
     let session_reg = create_session_registry(session_id);
 
     writeln!(stdout, "{}", "Welcome to WASI-Shell!".green().bold()).unwrap();
-    writeln!(stdout, "Type 'help' for available commands or 'exit' to quit.").unwrap();
+    writeln!(
+        stdout,
+        "Type 'help' for available commands or 'exit' to quit."
+    )
+    .unwrap();
 
     if session_id == 0 {
         let pre_lines = vec![
@@ -708,7 +725,7 @@ fn process_input_char(
 
 fn main() {
     let _ = LazyLock::force(&BUILTIN_REGISTRY);
-    // Keep the main thread alive if needed, but returning is fine for wasi-threads 
+    // Keep the main thread alive if needed, but returning is fine for wasi-threads
     // since background threads will keep running.
     // loop {
     //     std::thread::sleep(std::time::Duration::from_secs(3600));

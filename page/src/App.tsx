@@ -6,9 +6,16 @@ import { default_value, rust_file } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
+import { createLspConnection } from "./lsp_bridge";
+import { MonacoLanguageClient } from "monaco-languageclient";
 import { initialize } from "@codingame/monaco-vscode-api";
+import "vscode/localExtensionHost";
 
-await initialize();
+await initialize({
+  userConfiguration: {
+    default: "{\"editor.fontSize\": 14}"
+  }
+});
 
 const Select = lazy(async () => {
   const selector = import("@thisbeyond/solid-select");
@@ -34,7 +41,17 @@ const App = (props: {
   callback: (wasi_ref: WASIFarmRef) => void;
 }) => {
   const handleMount = (_monaco, _editor) => {
-    // Use monaco and editor instances here
+    const connection = createLspConnection(props.ctx);
+    const languageClient = new MonacoLanguageClient({
+      name: "Rust Language Client",
+      clientOptions: {
+        documentSelector: ["rust"],
+      },
+      connectionProvider: {
+        get: () => Promise.resolve(connection),
+      },
+    });
+    languageClient.start();
   };
   const handleEditorChange = (value) => {
     // Handle editor value change

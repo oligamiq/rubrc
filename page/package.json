@@ -11,11 +11,14 @@
     "dev": "vite",
     "build": "vite build",
     "serve": "vite preview",
-    "fmt": "biome format --write ."
+    "fmt": "biome format --write .",
+    "postinstall": "monaco-treemending"
   },
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "^0.4.2",
     "@codingame/monaco-vscode-api": "^33.0.9",
+    "@codingame/monaco-vscode-rust-default-extension": "^33.0.9",
+    "@codingame/monaco-vscode-theme-defaults-default-extension": "^33.0.9",
     "@oligami/browser_wasi_shim-threads": "^0.3.6",
     "@oligami/shared-object": "0.1.1",
     "@tailwindcss/vite": "^4.3.0",
@@ -29,5 +32,8 @@
     "solid-monaco": "^0.3.0",
     "tailwindcss": "^4.3.0",
     "uuid": "^13.0.2"
+  },
+  "devDependencies": {
+    "@codingame/esbuild-import-meta-url-plugin": "^1.0.3"
   }
 }
