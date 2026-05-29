@@ -8,6 +8,7 @@ wit_bindgen::generate!({
 
 const LSP_SESSION_ID: u32 = 0xFFFFFFFF;
 const EVENT_TYPE_LSP: u32 = 6;
+const EVENT_TYPE_WRITE_FILE: u32 = 7;
 
 static LSP_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -39,6 +40,8 @@ impl Guest for Wit {
             "\x1b[2K\r\x1b[32mThread Pool Initialized ({} threads)\x1b[0m",
             threads
         );
+
+        Self::flush_to_vfs();
 
         vfs_shell::_reset();
         vfs_shell::_start();
@@ -142,6 +145,40 @@ impl Guest for Wit {
             let mut stdin = lock.lock();
             stdin.extend_from_slice(data);
             cvar.notify_all();
+        } else if event_type == EVENT_TYPE_WRITE_FILE {
+            let ptr = arg1 as *const u8;
+            let len = arg2 as usize;
+            let data = unsafe { std::slice::from_raw_parts(ptr, len) };
+            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(data) {
+                if let (Some(path), Some(content)) = (
+                    json["path"].as_str(),
+                    json["content"].as_str(),
+                ) {
+                    println!("[VFS] Writing file to virtual FS: {}", path);
+                    let path = Path::new(path);
+                    let mut current_vfs_parent = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
+                    
+                    if let Some(parent) = path.parent() {
+                        for component in parent.components() {
+                            if let std::path::Component::Normal(c) = component {
+                                let name = c.to_string_lossy();
+                                current_vfs_parent = VIRTUAL_FILE_SYSTEM
+                                    .lfs
+                                    .add_dir(current_vfs_parent, &name)
+                                    .unwrap_or(current_vfs_parent);
+                            }
+                        }
+                    }
+
+                    if let Some(name) = path.file_name() {
+                        let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(
+                            current_vfs_parent,
+                            &name.to_string_lossy(),
+                            content.as_bytes().to_vec(),
+                        );
+                    }
+                }
+            }
         }
         unsafe { crate::shell::vfs_shell_dispatch(session_id, event_type, arg1, arg2) };
     }

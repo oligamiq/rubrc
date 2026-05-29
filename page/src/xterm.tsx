@@ -285,6 +285,16 @@ name = "main"
 version = "0.1.0"
 edition = "2021"
 `))],
+      ["rust-project.json", new File(new TextEncoder().encode(JSON.stringify({
+        sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
+        crates: [
+          {
+            root_module: "/src/main.rs",
+            edition: "2021",
+            deps: []
+          }
+        ]
+      })))],
     ]),
   );
 

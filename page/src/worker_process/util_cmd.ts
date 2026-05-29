@@ -128,7 +128,10 @@ globalThis.addEventListener("message", async (event) => {
           const view = new Uint8Array(animal.get_share_memory().memory.buffer);
           view.set(bytes, ptr);
 
-          const eventType = sessionId === LSP_SESSION_ID ? 6 : 4; // 6 is EVENT_TYPE_LSP, 4 is InputString
+          let eventType = sessionId === LSP_SESSION_ID ? 6 : 4; // 6 is EVENT_TYPE_LSP, 4 is InputString
+          if (sessionId === 0xEEEEEEEE) {
+            eventType = 7; // EVENT_TYPE_WRITE_FILE
+          }
           console.log(`[Worker] Dispatching to VFS: session=${sessionId}, eventType=${eventType}, len=${bytes.length}`);
           vfs_root.dispatch(sessionId, eventType, ptr, bytes.length);
           vfs_root.freeBuf(ptr, bytes.length);

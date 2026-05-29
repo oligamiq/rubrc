@@ -61,6 +61,19 @@ const App = (props: {
   const handleEditorChange = (value) => {
     // Handle editor value change
     rust_file.data = new TextEncoder().encode(value);
+    
+    // Sync to Rust VFS
+    const input_string = new SharedObjectRef(props.ctx.input_string_id).proxy<
+      (args: { sessionId: number, data: string }) => Promise<void>
+    >();
+    
+    // session_id 0 is fine for sync, but we need a specific way to trigger WRITE_FILE
+    // In util_cmd.ts, we'll handle a special sessionId or just add a new SharedObject
+    // For now, let's assume util_cmd.ts will be updated to handle a special sessionId for VFS SYNC
+    input_string({ 
+      sessionId: 0xEEEEEEEE, // Special ID for VFS Sync
+      data: JSON.stringify({ path: "/src/main.rs", content: value })
+    }).catch(console.error);
   };
   let load_additional_sysroot: (triple: string) => void;
 
