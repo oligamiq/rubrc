@@ -332,7 +332,7 @@ edition = "2021"
           // reset the download state
           download_name = "";
           download_chunks = [];
-        } else if (unknown.name === "sysrootStartFetch") {
+        } else if unknown.name === "sysrootStartFetch") {
           const triple = unknown.args.triple;
           sysroot_queue = [];
 
@@ -340,7 +340,11 @@ edition = "2021"
             const { fetch_compressed_stream } = await import("../../lib/src/brotli_stream");
             const { parseTar } = await import("../../lib/src/parse_tar");
 
-            const stream = await fetch_compressed_stream(`https://oligamiq.github.io/rust_wasm/v0.2.0/${triple}.tar.br`);
+            const url = triple === "rust-src" 
+              ? `https://oligamiq.github.io/rust_wasm/v0.2.0/rust-src.tar.br`
+              : `https://oligamiq.github.io/rust_wasm/v0.2.0/${triple}.tar.br`;
+
+            const stream = await fetch_compressed_stream(url);
             await parseTar(stream, (file) => {
               sysroot_queue.push({
                 name: new TextEncoder().encode(file.name),
@@ -349,10 +353,11 @@ edition = "2021"
               });
             });
           } catch (e) {
-            console.error("Failed to fetch sysroot", e);
+            console.error("Failed to fetch sysroot/src", e);
           }
           return {};
-        } else if (unknown.name === "sysrootGetNextFileMeta") {
+        }
+ else if (unknown.name === "sysrootGetNextFileMeta") {
           if (sysroot_queue.length > 0) {
             current_sysroot_file = sysroot_queue.shift()!;
             return {

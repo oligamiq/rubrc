@@ -259,7 +259,13 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
     reg.register("load_sysroot", move |args, io| {
         unsafe { vfs_set_current_session_id(sid) };
         let triple = args.get(1).map(|s| s.as_str()).unwrap_or("wasm32-wasip1");
-        writeln!(io.stdout, "Loading sysroot: {} ...", triple).unwrap();
+        let is_src = triple == "rust-src";
+        
+        if is_src {
+            writeln!(io.stdout, "Loading Rust source...").unwrap();
+        } else {
+            writeln!(io.stdout, "Loading sysroot: {} ...", triple).unwrap();
+        }
 
         unsafe {
             sysroot_start_fetch(triple.as_ptr() as i32, triple.len() as i32);
@@ -269,11 +275,16 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
         let mut total_bytes = 0;
         let start_time = std::time::Instant::now();
 
-        let sysroot_dir = std::path::Path::new("/sysroot/lib/rustlib")
-            .join(triple)
-            .join("lib");
-        if !sysroot_dir.exists() {
-            std::fs::create_dir_all(&sysroot_dir).unwrap_or_default();
+        let base_dir = if is_src {
+            PathBuf::from("/sysroot/lib/rustlib/src/rust/library")
+        } else {
+            Path::new("/sysroot/lib/rustlib")
+                .join(triple)
+                .join("lib")
+        };
+
+        if !base_dir.exists() {
+            std::fs::create_dir_all(&base_dir).unwrap_or_default();
         }
 
         loop {
@@ -336,7 +347,7 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
             }
 
             if let Ok(name) = String::from_utf8(name_buf) {
-                let file_path = sysroot_dir.join(&name);
+                let file_path = base_dir.join(&name);
                 if data_len == -1 {
                     std::fs::create_dir_all(&file_path).unwrap_or_default();
                 } else {
@@ -372,16 +383,35 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
             }
         }
         let total_elapsed = start_time.elapsed();
-        writeln!(
-            io.stdout,
-            "\nSysroot '{}' loaded successfully ({} files, {} total) in {:.1}s.",
-            triple,
-            files_loaded,
-            format_size(total_bytes),
-            total_elapsed.as_secs_f64()
-        )
-        .unwrap();
+        if is_src {
+            writeln!(
+                io.stdout,
+                "\nRust source loaded successfully ({} files, {} total) in {:.1}s.",
+                files_loaded,
+                format_size(total_bytes),
+                total_elapsed.as_secs_f64()
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                io.stdout,
+                "\nSysroot '{}' loaded successfully ({} files, {} total) in {:.1}s.",
+                triple,
+                files_loaded,
+                format_size(total_bytes),
+                total_elapsed.as_secs_f64()
+            )
+            .unwrap();
+        }
         Ok(())
+    });
+
+    let sid = session_id;
+    reg.register("load_src", move |_args, io| {
+        unsafe { vfs_set_current_session_id(sid) };
+        // Just call load_sysroot with "rust-src"
+        let registry = create_session_registry(sid);
+        registry.execute(&["load_sysroot".to_string(), "rust-src".to_string()], io)
     });
 
     let sid = session_id;
