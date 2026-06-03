@@ -2858,6 +2858,7 @@
         "npm:npm-watch@0.13",
         "npm:solid-devtools@~0.34.5",
         "npm:tailwindcss@^4.3.0",
+        "npm:tsx@^4.22.4",
         "npm:typescript@^5.9.3",
         "npm:unplugin-swc@^1.5.9",
         "npm:vite-plugin-dts@^4.5.4",

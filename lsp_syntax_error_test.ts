@@ -1,9 +1,10 @@
 import { File, OpenFile, WASI, PreopenDirectory, Directory } from "@bjorn3/browser_wasi_shim";
 import { WASIFarm, wait_async_polyfill } from "@oligami/browser_wasi_shim-threads";
-import pkg from "@oligami/shared-object";
-const { SharedObject, SharedObjectRef } = pkg;
+import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { gen_ctx } from "./page/src/ctx.ts";
+import { set_fake_worker } from "./page/src/worker_process/vfs_bindings/common.ts";
 
+await set_fake_worker();
 wait_async_polyfill();
 
 async function runLspIntegrationTest() {
@@ -14,7 +15,12 @@ async function runLspIntegrationTest() {
     const wasmPath = "./page/src/worker_process/vfs_bindings/vfs.core.wasm";
     
     console.log("[Test] Loading WASM...");
-    const fs = (await import("fs")).default;
+    let fs;
+    try {
+        fs = (await import("node:fs")).default;
+    } catch {
+        fs = (await import("fs")).default;
+    }
     const wasmBytes = fs.readFileSync(wasmPath);
     const wasmModule = await WebAssembly.compile(wasmBytes);
 
@@ -100,7 +106,7 @@ async function runLspIntegrationTest() {
                             uri: "file:///tmp/main.rs",
                             languageId: "rust",
                             version: 1,
-                            text: 'fn main() { let x: i32 = "hello"; }'
+                            text: 'fn main() { let x = ; }'
                         }
                     }
                 })
