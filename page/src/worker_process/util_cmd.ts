@@ -43,7 +43,7 @@ globalThis.addEventListener("message", async (event) => {
   const vfs_wasm_path = new URL("./vfs_bindings/vfs.core.wasm", import.meta.url).href;
   const vfs_wasm = await fetch(vfs_wasm_path).then(WebAssembly.compileStreaming);
 
-  const vfs_threads = Math.max(4, Math.floor(navigator.hardwareConcurrency / 2) - 3);
+  const vfs_threads = 8;
   const animal = new WASIFarmAnimal(
     wasi_refs,
     [], // args
@@ -72,7 +72,9 @@ globalThis.addEventListener("message", async (event) => {
     animal.get_share_memory(),
     (idx, unknown: any) => {
       if (unknown.name === "terminalWrite") {
+        console.log(`[Worker] VFS terminalWrite: session=${unknown.args.session_id}, len=${unknown.args.data.length}`);
         if (unknown.args.session_id === LSP_SESSION_ID) {
+          console.log("[Worker] Routing to LSP handler");
           lsp({ data: unknown.args.data });
         } else {
           terminal({ sessionId: unknown.args.session_id, data: unknown.args.data });

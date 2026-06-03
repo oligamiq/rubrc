@@ -332,7 +332,7 @@ edition = "2021"
           // reset the download state
           download_name = "";
           download_chunks = [];
-        } else if unknown.name === "sysrootStartFetch") {
+        } else if (unknown.name === "sysrootStartFetch") {
           const triple = unknown.args.triple;
           sysroot_queue = [];
 

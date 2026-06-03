@@ -21,9 +21,9 @@ impl Guest for Wit {
     fn init() {}
     fn main() {
         let threads = std::env::var("VFS_THREADS")
-            .unwrap_or_else(|_| "4".to_string())
+            .unwrap_or_else(|_| "8".to_string())
             .parse::<usize>()
-            .unwrap_or(4);
+            .unwrap_or(8);
 
         unsafe { THREAD_POOL.init() };
 
@@ -123,9 +123,12 @@ impl Guest for Wit {
         if session_id == LSP_SESSION_ID {
             if !LSP_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
                 if !LSP_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    eprintln!("[VFS] Starting LSP Service thread...");
                     std::thread::spawn(move || {
+                        eprintln!("[VFS] LSP thread started.");
                         crate::shell::vfs_set_current_session_id(LSP_SESSION_ID);
                         unsafe { lsp_opt::_start() };
+                        eprintln!("[VFS] LSP thread exited.");
                     });
                 }
             }
@@ -356,7 +359,7 @@ plug_poll!(WaitPoll, rustc_mock, llvm_mock, vfs_shell, lsp_opt);
 #[cfg(feature = "full-tools")]
 plug_poll!(WaitPoll, rustc_opt, llvm_opt, vfs_shell, lsp_opt);
 
-static THREAD_POOL: VirtualThreadPool<ThreadAccessor> = unsafe { VirtualThreadPool::new_const(1) };
+static THREAD_POOL: VirtualThreadPool<ThreadAccessor> = unsafe { VirtualThreadPool::new_const(8) };
 
 #[cfg(not(feature = "full-tools"))]
 plug_thread!({ &THREAD_POOL }, self, rustc_mock, vfs_shell, lsp_opt);

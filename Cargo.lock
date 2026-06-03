@@ -1005,6 +1005,7 @@ version = "0.1.0"
 dependencies = [
  "const_struct",
  "parking_lot",
+ "serde_json",
  "wasi_virt_layer",
  "wit-bindgen 0.57.1",
 ]

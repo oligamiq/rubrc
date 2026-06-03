@@ -11,7 +11,10 @@ let shared: SharedObject;
 
 const wasi_refs = [undefined];
 
+let util_worker_ref: Worker | undefined;
+
 globalThis.addEventListener("message", async (event) => {
+  console.log("[Worker] Received message:", event.data);
   if (event.data.ctx) {
     ctx = event.data.ctx;
 
@@ -40,7 +43,15 @@ globalThis.addEventListener("message", async (event) => {
     const { wasi_ref } = event.data;
     wasi_refs[0] = wasi_ref;
     if (wasi_refs.every((ref) => ref !== undefined)) {
-      setup_util_worker(wasi_refs, ctx);
+      util_worker_ref = setup_util_worker(wasi_refs, ctx);
+    }
+  } else if (util_worker_ref) {
+    console.log("[Worker] Forwarding message to util_worker");
+    // Forward the message and transfer any transferable objects
+    if (event.ports && event.ports.length > 0) {
+      util_worker_ref.postMessage(event.data, [...event.ports]);
+    } else {
+      util_worker_ref.postMessage(event.data);
     }
   }
 });
@@ -58,4 +69,5 @@ const setup_util_worker = (
     wasi_refs,
     ctx,
   });
+  return util_worker;
 };
