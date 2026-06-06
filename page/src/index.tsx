@@ -3,31 +3,38 @@ import "./index.css";
 import { render } from "solid-js/web";
 
 import { MonacoVscodeApiWrapper } from "monaco-languageclient/vscodeApiWrapper";
-import "vscode/localExtensionHost";
+
 import "@codingame/monaco-vscode-rust-default-extension";
 import "@codingame/monaco-vscode-theme-defaults-default-extension";
 
-console.log("[Index] Initializing MonacoVscodeApiWrapper...");
-const apiWrapper = new MonacoVscodeApiWrapper({
-  $type: "extended",
-  viewsConfig: { $type: "EditorService" },
-  userConfiguration: {
-    json: "{\"editor.fontSize\": 14}"
-  },
-  workspaceConfig: {
-    workspaceProvider: {
-      trusted: true,
-      workspace: {
-        workspaceUri: { scheme: "file", authority: "", path: "/" },
-      },
-      async open() {
-        return false;
+// @ts-ignore
+if (!window.__MONACO_VSCODE_INITIALIZED__) {
+  // @ts-ignore
+  window.__MONACO_VSCODE_INITIALIZED__ = true;
+  console.log("[Index] Initializing MonacoVscodeApiWrapper...");
+  const apiWrapper = new MonacoVscodeApiWrapper({
+    $type: "extended",
+    viewsConfig: { $type: "EditorService" },
+    userConfiguration: {
+      json: "{\"editor.fontSize\": 14}"
+    },
+    workspaceConfig: {
+      workspaceProvider: {
+        trusted: true,
+        workspace: {
+          workspaceUri: { scheme: "file", authority: "", path: "/" },
+        },
+        async open() {
+          return false;
+        },
       },
     },
-  },
-});
-await apiWrapper.start();
-console.log("[Index] MonacoVscodeApiWrapper started.");
+  });
+  await apiWrapper.start();
+  console.log("[Index] MonacoVscodeApiWrapper started.");
+} else {
+  console.log("[Index] MonacoVscodeApiWrapper already initialized.");
+}
 
 const { default: App } = await import("./App");
 const { gen_ctx } = await import("./ctx");
