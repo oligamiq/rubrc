@@ -180,6 +180,23 @@ export const SetupMyTerminal = (props: {
 
   const onData = (data: string) => {
     console.log(`[UI] onData received for session ${props.sessionId}, length: ${data.length}, first char code: ${data.charCodeAt(0)}`);
+    
+    // Map ANSI escape sequences to custom wasi-shell key codes
+    const keyMap: Record<string, number> = {
+      "\x1b[A": 1001, "\x1bOA": 1001, // Up
+      "\x1b[B": 1002, "\x1bOB": 1002, // Down
+      "\x1b[C": 1003, "\x1bOC": 1003, // Right
+      "\x1b[D": 1004, "\x1bOD": 1004, // Left
+      "\x1b[H": 1005, "\x1bOH": 1005, "\x1b[1~": 1005, // Home
+      "\x1b[F": 1006, "\x1bOF": 1006, "\x1b[4~": 1006, // End
+      "\x1b[3~": 1007 // Delete
+    };
+
+    if (keyMap[data]) {
+      input_char({ sessionId: props.sessionId, c: keyMap[data] }).catch(console.error);
+      return;
+    }
+
     if (data.length > 1) {
       input_string({ sessionId: props.sessionId, data }).catch(console.error);
       return;
