@@ -66,7 +66,7 @@ git commit -m "feat: implement Rust-side LSP stdio bridge"
 - Modify: `crates/vfs/src/lib.rs`
 
 - [ ] **Step 1: Import LSP WASM module**
-Add `import_wasm!(lsp_opt);` (gated by `full-tools` feature) in `crates/vfs/src/lib.rs`.
+Add `import_wasm!(lsp_opt);` in `crates/vfs/src/lib.rs`.
 
 - [ ] **Step 2: Plug LSP into virtualized layers**
 Update `plug_fs!`, `plug_env!`, `plug_random!`, `plug_poll!`, `plug_thread!`, and `plug_clock!` to include `lsp_opt`.

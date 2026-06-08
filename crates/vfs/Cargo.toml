@@ -8,7 +8,6 @@ crate-type = ["cdylib"]
 
 [features]
 default = []
-full-tools = []
 
 [dependencies]
 wasi_virt_layer = { version = "0.4.5", default-features = false, features = [

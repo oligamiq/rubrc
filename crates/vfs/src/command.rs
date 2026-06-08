@@ -19,22 +19,10 @@ impl<'a> VirtualArgs<'a> for VirtualArgsState {
 pub static VIRTUAL_ARGS: LazyLock<Mutex<VirtualArgsState>> =
     LazyLock::new(|| Mutex::new(VirtualArgsState { args: vec![] }));
 
-#[cfg(not(feature = "full-tools"))]
-pub fn set_rustc_mock_args(args: &[impl AsRef<str>]) {
-    VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect();
-}
-
-#[cfg(not(feature = "full-tools"))]
-pub fn set_llvm_mock_args(args: &[impl AsRef<str>]) {
-    VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect();
-}
-
-#[cfg(feature = "full-tools")]
 pub fn set_rustc_opt_args(args: &[impl AsRef<str>]) {
     VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect();
 }
 
-#[cfg(feature = "full-tools")]
 pub fn set_llvm_opt_args(args: &[impl AsRef<str>]) {
     VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect();
 }
@@ -47,10 +35,6 @@ pub fn set_vfs_shell_args(args: &[impl AsRef<str>]) {
     VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect();
 }
 
-#[cfg(not(feature = "full-tools"))]
-wasi_virt_layer::plug_args!(@dynamic, { &mut VIRTUAL_ARGS.lock() }, rustc_mock, llvm_mock, vfs_shell, lsp_opt);
-
-#[cfg(feature = "full-tools")]
 wasi_virt_layer::plug_args!(@dynamic, { &mut VIRTUAL_ARGS.lock() }, rustc_opt, llvm_opt, vfs_shell, lsp_opt);
 
 fn format_size(size: usize) -> String {
@@ -144,36 +128,16 @@ pub fn handle_command(args: Vec<String>) {
             }
         }
         "rustc" => {
-            #[cfg(not(feature = "full-tools"))]
-            {
-                set_rustc_mock_args(&args);
-                crate::rustc_mock::_reset();
-                crate::rustc_mock::_start();
-                crate::rustc_mock::_main();
-            }
-            #[cfg(feature = "full-tools")]
-            {
-                set_rustc_opt_args(&args);
-                crate::rustc_opt::_reset();
-                crate::rustc_opt::_start();
-                crate::rustc_opt::_main();
-            }
+            set_rustc_opt_args(&args);
+            crate::rustc_opt::_reset();
+            crate::rustc_opt::_start();
+            crate::rustc_opt::_main();
         }
         "clang" | "llvm" => {
-            #[cfg(not(feature = "full-tools"))]
-            {
-                set_llvm_mock_args(&args);
-                crate::llvm_mock::_reset();
-                crate::llvm_mock::_start();
-                crate::llvm_mock::_main();
-            }
-            #[cfg(feature = "full-tools")]
-            {
-                set_llvm_opt_args(&args);
-                crate::llvm_opt::_reset();
-                crate::llvm_opt::_start();
-                crate::llvm_opt::_main();
-            }
+            set_llvm_opt_args(&args);
+            crate::llvm_opt::_reset();
+            crate::llvm_opt::_start();
+            crate::llvm_opt::_main();
         }
         _ => {
             println!("Unknown command: {cmd}");

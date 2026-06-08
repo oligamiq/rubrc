@@ -46,17 +46,6 @@ impl Guest for Wit {
         vfs_shell::_reset();
         vfs_shell::_start();
         vfs_shell::_main();
-
-        // test print all help
-        // Self::run_command(vec!["ls".to_string(), "--help".to_string()]);
-        // Self::run_command(vec!["tree".to_string(), "--help".to_string()]);
-        // Self::run_command(vec!["echo LS_HELP && ls --help".to_string()]);
-
-        // #[cfg(not(feature = "full-tools"))]
-        // {
-        //     Self::run_command(vec!["rustc".to_string(), "--help".to_string()]);
-        //     Self::run_command(vec!["clang".to_string(), "--help".to_string()]);
-        // }
     }
 
     fn flush_to_vfs() {
@@ -334,21 +323,9 @@ pub static VIRTUAL_FILE_SYSTEM: std::sync::LazyLock<StandardDynamicFileSystem<LF
 
 import_wasm!(vfs_shell);
 import_wasm!(lsp_opt);
-
-#[cfg(not(feature = "full-tools"))]
-import_wasm!(rustc_mock);
-#[cfg(not(feature = "full-tools"))]
-import_wasm!(llvm_mock);
-
-#[cfg(feature = "full-tools")]
 import_wasm!(rustc_opt);
-#[cfg(feature = "full-tools")]
 import_wasm!(llvm_opt);
 
-#[cfg(not(feature = "full-tools"))]
-plug_fs!(&*VIRTUAL_FILE_SYSTEM, rustc_mock, llvm_mock, vfs_shell, lsp_opt);
-
-#[cfg(feature = "full-tools")]
 plug_fs!(&*VIRTUAL_FILE_SYSTEM, rustc_opt, llvm_opt, vfs_shell, lsp_opt);
 
 #[const_struct]
@@ -357,42 +334,20 @@ const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
     environ: &["HOME=~/"],
 };
 
-#[cfg(not(feature = "full-tools"))]
-plug_env!(@embedded, VirtualEnvTy, rustc_mock, llvm_mock);
-
 plug_env!(@dynamic, { &mut VIRTUAL_SHELL_ENV.lock() }, vfs_shell, lsp_opt);
 
 // plug_process!(StandardProcess, rustc_mock, llvm_mock);
 
-#[cfg(not(feature = "full-tools"))]
-plug_random!(StandardRandom, rustc_mock, llvm_mock, vfs_shell, lsp_opt);
-
-#[cfg(feature = "full-tools")]
 plug_random!(StandardRandom, rustc_opt, llvm_opt, vfs_shell, lsp_opt);
 
-#[cfg(not(feature = "full-tools"))]
-plug_poll!(WaitPoll, rustc_mock, llvm_mock, vfs_shell, lsp_opt);
-
-#[cfg(feature = "full-tools")]
 plug_poll!(WaitPoll, rustc_opt, llvm_opt, vfs_shell, lsp_opt);
 
 static THREAD_POOL: VirtualThreadPool<ThreadAccessor> = unsafe { VirtualThreadPool::new_const(8) };
 
-#[cfg(not(feature = "full-tools"))]
-plug_thread!({ &THREAD_POOL }, self, rustc_mock, vfs_shell, lsp_opt);
-
-#[cfg(feature = "full-tools")]
 plug_thread!({ &THREAD_POOL }, self, rustc_opt, vfs_shell, lsp_opt);
 
 plug_clock!(StandardClock, vfs_shell, lsp_opt);
-#[cfg(not(feature = "full-tools"))]
-plug_clock!(StandardClock, rustc_mock);
-#[cfg(not(feature = "full-tools"))]
-plug_clock!(StandardClock, llvm_mock);
-
-#[cfg(feature = "full-tools")]
 plug_clock!(StandardClock, rustc_opt);
-#[cfg(feature = "full-tools")]
 plug_clock!(StandardClock, llvm_opt);
 
 #[unsafe(no_mangle)]
