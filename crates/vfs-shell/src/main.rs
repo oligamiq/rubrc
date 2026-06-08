@@ -260,7 +260,7 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
         unsafe { vfs_set_current_session_id(sid) };
         let triple = args.get(1).map(|s| s.as_str()).unwrap_or("wasm32-wasip1");
         let is_src = triple == "rust-src";
-        
+
         if is_src {
             writeln!(io.stdout, "Loading Rust source...").unwrap();
         } else {
@@ -505,14 +505,14 @@ static SESSIONS: LazyLock<DashMap<u32, SessionState>> = LazyLock::new(|| DashMap
 
 #[unsafe(no_mangle)]
 pub extern "C" fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
-    println!(
-        "[Shell] vfs_shell_dispatch: sid={}, ty={}, a1={}, a2={}",
-        session_id, event_type, arg1, arg2
-    );
+    // println!(
+    //     "[Shell] vfs_shell_dispatch: sid={}, ty={}, a1={}, a2={}",
+    //     session_id, event_type, arg1, arg2
+    // );
     let event = match SessionEvent::from_raw(event_type, arg1, arg2) {
         Some(e) => e,
         None => {
-            println!("[Shell] Unknown event type: {}", event_type);
+            // println!("[Shell] Unknown event type: {}", event_type);
             return;
         }
     };
@@ -525,7 +525,7 @@ pub extern "C" fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32
     }
 
     if let SessionEvent::CreateSession = event {
-        println!("[Shell] Creating session {}", session_id);
+        // println!("[Shell] Creating session {}", session_id);
         let (tx, rx) = mpsc::channel();
         let cancellation_token = wasibox_core::CancellationToken::new();
         let state = SessionState {
@@ -541,10 +541,10 @@ pub extern "C" fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32
 
     if let Some(session) = SESSIONS.get(&session_id) {
         if let SessionEvent::Interrupt = event {
-            println!("[Shell] Interrupting session {}", session_id);
+            // println!("[Shell] Interrupting session {}", session_id);
             session.cancellation_token.cancel();
         } else if let SessionEvent::CloseSession = event {
-            println!("[Shell] Closing session {}", session_id);
+            // println!("[Shell] Closing session {}", session_id);
             session.cancellation_token.cancel();
             drop(session);
             SESSIONS.remove(&session_id);
@@ -552,7 +552,7 @@ pub extern "C" fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32
             let _ = session.sender.send(event);
         }
     } else {
-        println!("[Shell] Session {} not found", session_id);
+        // println!("[Shell] Session {} not found", session_id);
     }
 }
 
@@ -591,7 +591,7 @@ fn run_session_loop(
     rx: mpsc::Receiver<SessionEvent>,
     cancellation_token: wasibox_core::CancellationToken,
 ) {
-    println!("[Shell] run_session_loop started for sid {}", session_id);
+    // println!("[Shell] run_session_loop started for sid {}", session_id);
     unsafe { vfs_set_current_session_id(session_id) };
     CANCELLATION_TOKEN.with(|t| *t.borrow_mut() = Some(cancellation_token.clone()));
 
@@ -636,7 +636,7 @@ fn run_session_loop(
     print_prompt(&mut stdout);
 
     while let Ok(event) = rx.recv() {
-        println!("[Shell] Session {} received event: {:?}", session_id, event);
+        // println!("[Shell] Session {} received event: {:?}", session_id, event);
         match event {
             SessionEvent::InputChar(c) => {
                 process_input_char(
@@ -669,7 +669,7 @@ fn run_session_loop(
             }
             SessionEvent::CreateSession => unreachable!(),
             SessionEvent::CloseSession => {
-                println!("[Shell] run_session_loop exiting for sid {}", session_id);
+                // println!("[Shell] run_session_loop exiting for sid {}", session_id);
                 break;
             }
         }
@@ -684,7 +684,7 @@ fn process_input_char(
     session_reg: &Arc<CommandRegistry>,
     session_id: u32,
 ) {
-    println!("[Shell] process_input_char: sid={}, char={}", session_id, c);
+    // println!("[Shell] process_input_char: sid={}, char={}", session_id, c);
     if cancellation_token.is_cancelled() {
         cancellation_token.reset();
     }

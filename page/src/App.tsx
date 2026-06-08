@@ -44,8 +44,18 @@ const App = (props: {
           cargo: {
             sysroot: "/sysroot",
           },
+          linkedProjects: ["/rust-project.json"],
           procMacro: {
             enable: false,
+          },
+          checkOnSave: {
+            enable: false,
+          },
+          diagnostics: {
+            enable: true,
+            experimental: {
+              enable: true,
+            },
           },
         },
       },

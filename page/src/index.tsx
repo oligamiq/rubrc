@@ -4,7 +4,6 @@ import { render } from "solid-js/web";
 
 import { MonacoVscodeApiWrapper } from "monaco-languageclient/vscodeApiWrapper";
 
-import "@codingame/monaco-vscode-rust-default-extension";
 import "@codingame/monaco-vscode-theme-defaults-default-extension";
 
 // @ts-ignore

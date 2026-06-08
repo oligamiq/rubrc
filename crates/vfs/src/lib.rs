@@ -9,8 +9,8 @@ wit_bindgen::generate!({
 const LSP_SESSION_ID: u32 = 0xFFFFFFFF;
 const EVENT_TYPE_LSP: u32 = 6;
 const EVENT_TYPE_WRITE_FILE: u32 = 7;
-
-static LSP_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static LSP_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static THREAD_SESSIONS: std::sync::LazyLock<dashmap::DashMap<std::thread::ThreadId, u32>> = std::sync::LazyLock::new(|| dashmap::DashMap::new());
 
 static LSP_STDIN: std::sync::LazyLock<(parking_lot::Mutex<Vec<u8>>, parking_lot::Condvar)> =
     std::sync::LazyLock::new(|| (parking_lot::Mutex::new(Vec::new()), parking_lot::Condvar::new()));
@@ -36,7 +36,7 @@ impl Guest for Wit {
             THREAD_POOL.set_capacity(i);
             THREAD_POOL.flush_capacity().wait();
         }
-        println!(
+        eprintln!(
             "\x1b[2K\r\x1b[32mThread Pool Initialized ({} threads)\x1b[0m",
             threads
         );
@@ -115,20 +115,14 @@ impl Guest for Wit {
     }
 
     fn dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
-        println!(
-            "[VFS] dispatch: sid={}, ty={}, a1={}, a2={}",
-            session_id, event_type, arg1, arg2
-        );
 
         if session_id == LSP_SESSION_ID {
-            if !LSP_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
-                if !LSP_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                    eprintln!("[VFS] Starting LSP Service thread...");
+            if !crate::LSP_STARTED.load(std::sync::atomic::Ordering::SeqCst) {
+                if !crate::LSP_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                     std::thread::spawn(move || {
-                        eprintln!("[VFS] LSP thread started.");
                         crate::shell::vfs_set_current_session_id(LSP_SESSION_ID);
+                        crate::command::set_lsp_opt_args(&["rust-analyzer"]);
                         unsafe { lsp_opt::_start() };
-                        eprintln!("[VFS] LSP thread exited.");
                     });
                 }
             }
@@ -148,6 +142,7 @@ impl Guest for Wit {
             let mut stdin = lock.lock();
             stdin.extend_from_slice(data);
             cvar.notify_all();
+            return;
         } else if event_type == EVENT_TYPE_WRITE_FILE {
             let ptr = arg1 as *const u8;
             let len = arg2 as usize;
@@ -157,7 +152,6 @@ impl Guest for Wit {
                     json["path"].as_str(),
                     json["content"].as_str(),
                 ) {
-                    println!("[VFS] Writing file to virtual FS: {}", path);
                     let path = Path::new(path);
                     let mut current_vfs_parent = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
                     
@@ -182,6 +176,7 @@ impl Guest for Wit {
                     }
                 }
             }
+            return;
         }
         unsafe { crate::shell::vfs_shell_dispatch(session_id, event_type, arg1, arg2) };
     }
@@ -251,7 +246,29 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
                 );
                 Ok(buf.len())
             } else {
-                wasi_virt_layer::wasi::file::stdio::DefaultStdIO::write(buf)
+                let mut is_lsp = false;
+                let current_thread = std::thread::current().id();
+
+                if buf.starts_with(b"Content-Length: ") || buf.starts_with(b"{\"jsonrpc\"") {
+                    crate::THREAD_SESSIONS.insert(current_thread, LSP_SESSION_ID);
+                }
+
+                if let Some(sid) = crate::THREAD_SESSIONS.get(&current_thread) {
+                    if *sid == LSP_SESSION_ID {
+                        is_lsp = true;
+                    }
+                }
+
+                if is_lsp {
+                    crate::vfs::host::bridge::Terminal::terminal_write(
+                        LSP_SESSION_ID,
+                        buf.as_ptr() as i32,
+                        buf.len() as i32,
+                    );
+                    Ok(buf.len())
+                } else {
+                    wasi_virt_layer::wasi::file::stdio::DefaultStdIO::write(buf)
+                }
             }
         }
     }
@@ -282,7 +299,7 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
     }
     fn read(buf: &mut [u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
         let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
-        if session_id == LSP_SESSION_ID {
+        if session_id == LSP_SESSION_ID || (session_id == 0 && crate::LSP_STARTED.load(std::sync::atomic::Ordering::SeqCst)) {
             let (lock, cvar) = &*LSP_STDIN;
             let mut stdin = lock.lock();
             while stdin.is_empty() {

@@ -24,3 +24,4 @@ wit-bindgen = { version = "0.57.1", default-features = false, features = [
   "macros",
   "std",
 ] }
+dashmap = "6.2.1"

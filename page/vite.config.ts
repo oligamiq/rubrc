@@ -31,6 +31,9 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
+    // If use debug mode, not minify.
+    minify: process.env.NODE_ENV === "production" ? true : false
+    // produce sourcemaps for debug builds
   },
   worker: {
     format: "es",

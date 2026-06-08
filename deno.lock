@@ -2884,6 +2884,7 @@
             "npm:@codingame/monaco-vscode-api@^25.1.2",
             "npm:@codingame/monaco-vscode-base-service-override@^25.1.2",
             "npm:@codingame/monaco-vscode-configuration-service-override@^25.1.2",
+            "npm:@codingame/monaco-vscode-editor-api@^25.1.2",
             "npm:@codingame/monaco-vscode-editor-service-override@^25.1.2",
             "npm:@codingame/monaco-vscode-files-service-override@^25.1.2",
             "npm:@codingame/monaco-vscode-host-service-override@^25.1.2",

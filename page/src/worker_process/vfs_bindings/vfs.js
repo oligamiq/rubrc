@@ -2927,6 +2927,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       throw err;
     }
     
+    Downloader._isHostProvided = true;
     
     if (Terminal=== undefined) {
       const err = new Error("unexpectedly undefined instance import 'Terminal', was 'Terminal' available at instantiation?");
@@ -2934,6 +2935,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       throw err;
     }
     
+    Terminal._isHostProvided = true;
     const { Wasip1 } = imports['wasip1-vfs:host/virtual-file-system-wasip1-core'];
     
     if (Wasip1=== undefined) {
@@ -2942,6 +2944,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       throw err;
     }
     
+    Wasip1._isHostProvided = true;
     const { Wasip1Threads } = imports['wasip1-vfs:host/virtual-file-system-wasip1-threads-import'];
     
     if (Wasip1Threads=== undefined) {
@@ -2950,6 +2953,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       throw err;
     }
     
+    Wasip1Threads._isHostProvided = true;
     let gen = (function* _initGenerator () {
       
       const _trampoline0 = function(arg0, arg1, arg2) {

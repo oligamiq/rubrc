@@ -23,7 +23,6 @@
     "@codingame/monaco-vscode-host-service-override": "^25.1.2",
     "@codingame/monaco-vscode-languages-service-override": "^25.1.2",
     "@codingame/monaco-vscode-model-service-override": "^25.1.2",
-    "@codingame/monaco-vscode-rust-default-extension": "^25.1.2",
     "@codingame/monaco-vscode-theme-defaults-default-extension": "^25.1.2",
     "@oligami/browser_wasi_shim-threads": "^0.3.6",
     "@oligami/shared-object": "0.1.1",

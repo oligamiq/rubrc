@@ -1010,6 +1010,7 @@ name = "vfs"
 version = "0.1.0"
 dependencies = [
  "const_struct",
+ "dashmap 6.2.1",
  "parking_lot",
  "serde_json",
  "wasi_virt_layer",
