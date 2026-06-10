@@ -2,7 +2,7 @@ use colored::*;
 use dashmap::DashMap;
 use std::cell::RefCell;
 use std::env;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
@@ -586,15 +586,89 @@ fn print_prompt(writer: &mut dyn Write) {
     writer.flush().unwrap();
 }
 
+struct CommandStdin {
+    rx: Arc<Mutex<mpsc::Receiver<SessionEvent>>>,
+    cancellation_token: wasibox_core::CancellationToken,
+    buffer: Vec<u8>,
+}
+
+impl Read for CommandStdin {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            if self.cancellation_token.is_cancelled() {
+                return Ok(0);
+            }
+            if !self.buffer.is_empty() {
+                let len = std::cmp::min(buf.len(), self.buffer.len());
+                buf[..len].copy_from_slice(&self.buffer[..len]);
+                self.buffer.drain(..len);
+                return Ok(len);
+            }
+
+            let event = {
+                let rx = self.rx.lock().unwrap();
+                match rx.recv() {
+                    Ok(e) => e,
+                    Err(_) => return Ok(0),
+                }
+            };
+
+            match event {
+                SessionEvent::InputChar(c) => {
+                    if let Some(ch) = char::from_u32(c) {
+                        let mut b = [0; 4];
+                        let result = ch.encode_utf8(&mut b);
+                        let bytes = result.as_bytes();
+                        let len = std::cmp::min(buf.len(), bytes.len());
+                        buf[..len].copy_from_slice(&bytes[..len]);
+                        if len < bytes.len() {
+                            self.buffer.extend_from_slice(&bytes[len..]);
+                        }
+                        return Ok(len);
+                    } else {
+                        buf[0] = c as u8;
+                        return Ok(1);
+                    }
+                }
+                SessionEvent::InputString(s) => {
+                    let bytes = s.into_bytes();
+                    if bytes.is_empty() {
+                        continue;
+                    }
+                    let len = std::cmp::min(buf.len(), bytes.len());
+                    buf[..len].copy_from_slice(&bytes[..len]);
+                    if len < bytes.len() {
+                        self.buffer.extend_from_slice(&bytes[len..]);
+                    }
+                    return Ok(len);
+                }
+                SessionEvent::Interrupt => {
+                    self.cancellation_token.cancel();
+                    return Ok(0);
+                }
+                SessionEvent::CloseSession => {
+                    return Ok(0);
+                }
+                SessionEvent::Resize(_, _) => {
+                    continue;
+                }
+                SessionEvent::CreateSession => {
+                    continue;
+                }
+            }
+        }
+    }
+}
+
 fn run_session_loop(
     session_id: u32,
     rx: mpsc::Receiver<SessionEvent>,
     cancellation_token: wasibox_core::CancellationToken,
 ) {
-    // println!("[Shell] run_session_loop started for sid {}", session_id);
     unsafe { vfs_set_current_session_id(session_id) };
     CANCELLATION_TOKEN.with(|t| *t.borrow_mut() = Some(cancellation_token.clone()));
 
+    let rx_arc = Arc::new(Mutex::new(rx));
     let mut line_reader = LineEditor::new(20);
     let mut stdout = SessionStdout::new(session_id);
     let session_reg = create_session_registry(session_id);
@@ -618,9 +692,16 @@ fn run_session_loop(
 
         for line in pre_lines {
             writeln!(stdout, "{}", line).unwrap();
+            
+            let cmd_stdin = CommandStdin {
+                rx: Arc::clone(&rx_arc),
+                cancellation_token: cancellation_token.clone(),
+                buffer: Vec::new(),
+            };
+
             let results = handle_parallel(
                 vec![line.to_string()],
-                Box::new(io::stdin()),
+                Box::new(cmd_stdin),
                 Box::new(SessionStdout::new(session_id)),
                 Arc::clone(&session_reg),
                 cancellation_token.clone(),
@@ -635,8 +716,15 @@ fn run_session_loop(
 
     print_prompt(&mut stdout);
 
-    while let Ok(event) = rx.recv() {
-        // println!("[Shell] Session {} received event: {:?}", session_id, event);
+    loop {
+        let event = {
+            let rx = rx_arc.lock().unwrap();
+            match rx.recv() {
+                Ok(e) => e,
+                Err(_) => break,
+            }
+        };
+
         match event {
             SessionEvent::InputChar(c) => {
                 process_input_char(
@@ -646,6 +734,7 @@ fn run_session_loop(
                     &mut stdout,
                     &session_reg,
                     session_id,
+                    &rx_arc,
                 );
             }
             SessionEvent::InputString(s) => {
@@ -657,19 +746,16 @@ fn run_session_loop(
                         &mut stdout,
                         &session_reg,
                         session_id,
+                        &rx_arc,
                     );
                 }
             }
-            SessionEvent::Resize(_cols, _rows) => {
-                // Resize event logic is handled before dispatching
-                // See `vfs_shell_dispatch` in vfs
-            }
+            SessionEvent::Resize(_cols, _rows) => {}
             SessionEvent::Interrupt => {
                 cancellation_token.cancel();
             }
             SessionEvent::CreateSession => unreachable!(),
             SessionEvent::CloseSession => {
-                // println!("[Shell] run_session_loop exiting for sid {}", session_id);
                 break;
             }
         }
@@ -682,9 +768,9 @@ fn process_input_char(
     cancellation_token: &wasibox_core::CancellationToken,
     stdout: &mut SessionStdout,
     session_reg: &Arc<CommandRegistry>,
-    session_id: u32,
+    _session_id: u32,
+    rx_arc: &Arc<Mutex<mpsc::Receiver<SessionEvent>>>,
 ) {
-    // println!("[Shell] process_input_char: sid={}, char={}", session_id, c);
     if cancellation_token.is_cancelled() {
         cancellation_token.reset();
     }
@@ -731,9 +817,16 @@ fn process_input_char(
         }
 
         cancellation_token.reset();
+        
+        let cmd_stdin = CommandStdin {
+            rx: Arc::clone(rx_arc),
+            cancellation_token: cancellation_token.clone(),
+            buffer: Vec::new(),
+        };
+
         let results = handle_parallel(
             vec![trimmed.to_string()],
-            Box::new(io::stdin()),
+            Box::new(cmd_stdin),
             Box::new(stdout.clone()),
             Arc::clone(session_reg),
             cancellation_token.clone(),

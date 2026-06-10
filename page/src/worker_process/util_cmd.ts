@@ -40,8 +40,122 @@ globalThis.addEventListener("message", async (event) => {
     (args: { url: string, name: string }) => Promise<void>
   >();
 
+async function getCachedWasm(key: string): Promise<WebAssembly.Module | null> {
+  if (typeof indexedDB === "undefined") return null;
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open("wasm_cache", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("modules");
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("modules")) {
+          resolve(null);
+          return;
+        }
+        try {
+          const tx = db.transaction("modules", "readonly");
+          const store = tx.objectStore("modules");
+          const getReq = store.get(key);
+          getReq.onsuccess = () => resolve(getReq.result || null);
+          getReq.onerror = () => resolve(null);
+        } catch (e) {
+          resolve(null);
+        }
+      };
+      req.onerror = () => resolve(null);
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+async function cacheWasm(key: string, module: WebAssembly.Module): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open("wasm_cache", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("modules");
+      req.onsuccess = () => {
+        const db = req.result;
+        try {
+          const tx = db.transaction("modules", "readwrite");
+          const store = tx.objectStore("modules");
+          store.put(module, key);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+        } catch (e) {
+          resolve();
+        }
+      };
+      req.onerror = () => resolve();
+    } catch (e) {
+      resolve();
+    }
+  });
+}
+
   const vfs_wasm_path = new URL("./vfs_bindings/vfs.core.wasm", import.meta.url).href;
-  const vfs_wasm = await fetch(vfs_wasm_path).then(WebAssembly.compileStreaming);
+  let vfs_wasm: WebAssembly.Module | null = null;
+  let response: Response | null = null;
+
+  try {
+    response = await fetch(vfs_wasm_path);
+    const etag = response.headers.get("etag") || response.headers.get("last-modified") || "unknown";
+    const cacheKey = `${vfs_wasm_path}?etag=${etag}`;
+    vfs_wasm = await getCachedWasm(cacheKey);
+
+    if (vfs_wasm) {
+      await terminal({ sessionId: 0, data: new TextEncoder().encode(`[VFS] Loaded compiled Wasm from local cache.\r\n`) });
+      response.body?.cancel(); // Cancel download to save bandwidth
+    } else {
+      const contentLength = response.headers.get("Content-Length");
+      const total = parseInt(contentLength || "0", 10);
+      let loaded = 0;
+
+      const reader = response.body?.getReader();
+      const stream = new ReadableStream({
+        async start(controller) {
+          if (!reader) {
+            controller.close();
+            return;
+          }
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              loaded += value.byteLength;
+              let progressMsg = `\r\x1b[K[VFS] Fetching and streaming compilation: ${(loaded / 1024 / 1024).toFixed(2)} MB`;
+              if (total > 0) {
+                const percent = Math.round((loaded / total) * 100);
+                progressMsg += ` / ${(total / 1024 / 1024).toFixed(2)} MB (${percent}%)`;
+              }
+              await terminal({ sessionId: 0, data: new TextEncoder().encode(progressMsg) });
+              controller.enqueue(value);
+            }
+            await terminal({ sessionId: 0, data: new TextEncoder().encode(`\r\n[VFS] Finalizing compilation...\r\n`) });
+          } catch (e) {
+            controller.error(e);
+          } finally {
+            controller.close();
+          }
+        }
+      });
+
+      vfs_wasm = await WebAssembly.compileStreaming(new Response(stream, {
+        headers: response.headers,
+        status: response.status,
+        statusText: response.statusText
+      }));
+      
+      // Cache it for next time
+      await cacheWasm(cacheKey, vfs_wasm);
+      await terminal({ sessionId: 0, data: new TextEncoder().encode(`[VFS] Wasm ready and cached.\r\n`) });
+    }
+  } catch (err) {
+    await terminal({ sessionId: 0, data: new TextEncoder().encode(`\r\n[VFS] Error loading Wasm: ${err}\r\n`) });
+    throw err;
+  }
+
 
   const vfs_threads = 8;
   const animal = new WASIFarmAnimal(
