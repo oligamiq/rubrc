@@ -143,6 +143,46 @@ export const custom_instantiate = async (
               args: { session_id, data },
             });
           }
+        },
+        Lsp: {
+          hostRunCargo: (req_ptr: number, req_len: number, out_stdout_ptr: number, out_stdout_len: number, out_stderr_ptr: number, out_stderr_len: number, out_status: number): number => {
+            const view = new Uint8Array(memory.memory.buffer, req_ptr, req_len);
+            const req = new TextDecoder().decode(view);
+            const res = call_unknown_fn(0, {
+              name: "hostRunCargo",
+              args: { req },
+            }) as { stdout: unknown, stderr: unknown, status: number };
+            const stdoutBytes = _toUint8Array(res.stdout);
+            const stderrBytes = _toUint8Array(res.stderr);
+
+            let stdout_ptr = 0;
+            let stderr_ptr = 0;
+
+            if (stdoutBytes.length > 0) {
+              stdout_ptr = root.allocBuf(stdoutBytes.length);
+              const view8 = new Uint8Array(memory.memory.buffer);
+              view8.set(stdoutBytes, stdout_ptr);
+            }
+            if (stderrBytes.length > 0) {
+              stderr_ptr = root.allocBuf(stderrBytes.length);
+              const view8 = new Uint8Array(memory.memory.buffer);
+              view8.set(stderrBytes, stderr_ptr);
+            }
+
+            const view32 = new Int32Array(memory.memory.buffer);
+            view32[out_stdout_ptr / 4] = stdout_ptr;
+            view32[out_stdout_len / 4] = stdoutBytes.length;
+            view32[out_stderr_ptr / 4] = stderr_ptr;
+            view32[out_stderr_len / 4] = stderrBytes.length;
+            view32[out_status / 4] = res.status;
+
+            return 0; // success
+          },
+          hostFreeMemory: (ptr: number, len: number) => {
+             if (ptr !== 0) {
+               root.freeBuf(ptr, len);
+             }
+          }
         }
       },
 		} as ImportObject,

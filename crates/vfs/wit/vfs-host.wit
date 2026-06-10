@@ -16,6 +16,11 @@ interface bridge {
   resource terminal {
     terminal-write: static func(session-id: u32, data-ptr: s32, data-len: s32);
   }
+
+  resource lsp {
+    host-run-cargo: static func(req-ptr: s32, req-len: s32, out-stdout-ptr: s32, out-stdout-len: s32, out-stderr-ptr: s32, out-stderr-len: s32, out-status: s32) -> s32;
+    host-free-memory: static func(ptr: s32, len: s32);
+  }
 }
 
 world vfs-host {

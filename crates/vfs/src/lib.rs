@@ -399,3 +399,51 @@ pub extern "C" fn terminal_write(session_id: u32, vfs_shell_data_ptr: i32, data_
     let data = vfs_shell::get_array(vfs_shell_data_ptr as *const u8, data_len as usize);
     crate::vfs::host::bridge::Terminal::terminal_write(session_id, data.as_ptr() as i32, data_len);
 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn host_run_cargo(
+    req_ptr: i32,
+    req_len: i32,
+    out_stdout_ptr: i32,
+    out_stdout_len: i32,
+    out_stderr_ptr: i32,
+    out_stderr_len: i32,
+    out_status: i32,
+) -> i32 {
+    let req_data = lsp_opt::get_array(req_ptr as *const u8, req_len as usize);
+    let mut out_stdout_ptr_val = 0i32;
+    let mut out_stdout_len_val = 0i32;
+    let mut out_stderr_ptr_val = 0i32;
+    let mut out_stderr_len_val = 0i32;
+    let mut out_status_val = 0i32;
+
+    // Use a temporary buffer inside vfs to pass the string to the host? 
+    // The host bridge takes (s32, s32). It will read from the VFS memory (or rather, the main memory of the component).
+    // Wait! The Component Model bindings `crate::vfs::host::bridge::Lsp::host_run_cargo` expects `req_ptr` and `req_len` to be pointers in THIS component's memory, NOT lsp_opt's memory!
+    // So we must copy the request from lsp_opt to a local Vec, and pass that to the host.
+    let mut local_req = vec![0u8; req_len as usize];
+    local_req.copy_from_slice(&req_data);
+
+    let result = crate::vfs::host::bridge::Lsp::host_run_cargo(
+        local_req.as_ptr() as i32,
+        req_len,
+        &mut out_stdout_ptr_val as *mut _ as i32,
+        &mut out_stdout_len_val as *mut _ as i32,
+        &mut out_stderr_ptr_val as *mut _ as i32,
+        &mut out_stderr_len_val as *mut _ as i32,
+        &mut out_status_val as *mut _ as i32,
+    );
+
+    lsp_opt::memcpy(out_stdout_ptr as *mut u8, &out_stdout_ptr_val.to_ne_bytes());
+    lsp_opt::memcpy(out_stdout_len as *mut u8, &out_stdout_len_val.to_ne_bytes());
+    lsp_opt::memcpy(out_stderr_ptr as *mut u8, &out_stderr_ptr_val.to_ne_bytes());
+    lsp_opt::memcpy(out_stderr_len as *mut u8, &out_stderr_len_val.to_ne_bytes());
+    lsp_opt::memcpy(out_status as *mut u8, &out_status_val.to_ne_bytes());
+
+    result
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn host_free_memory(ptr: i32, len: i32) {
+    crate::vfs::host::bridge::Lsp::host_free_memory(ptr, len);
+}
