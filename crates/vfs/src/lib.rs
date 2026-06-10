@@ -143,7 +143,7 @@ impl Guest for Wit {
                 ) {
                     let path = Path::new(path);
                     let mut current_vfs_parent = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
-                    
+
                     if let Some(parent) = path.parent() {
                         for component in parent.components() {
                             if let std::path::Component::Normal(c) = component {
@@ -334,7 +334,7 @@ const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
     environ: &["HOME=~/"],
 };
 
-plug_env!(@dynamic, { &mut VIRTUAL_SHELL_ENV.lock() }, vfs_shell, lsp_opt);
+plug_env!(@dynamic, { &mut VIRTUAL_SHELL_ENV.lock() }, vfs_shell, lsp_opt, rustc_opt, llvm_opt);
 
 // plug_process!(StandardProcess, rustc_mock, llvm_mock);
 
@@ -344,7 +344,7 @@ plug_poll!(WaitPoll, rustc_opt, llvm_opt, vfs_shell, lsp_opt);
 
 static THREAD_POOL: VirtualThreadPool<ThreadAccessor> = unsafe { VirtualThreadPool::new_const(8) };
 
-plug_thread!({ &THREAD_POOL }, self, rustc_opt, vfs_shell, lsp_opt);
+plug_thread!({ &THREAD_POOL }, self, rustc_opt, vfs_shell, lsp_opt, llvm_opt);
 
 plug_clock!(StandardClock, vfs_shell, lsp_opt);
 plug_clock!(StandardClock, rustc_opt);
