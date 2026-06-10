@@ -48,15 +48,28 @@ export const get_brotli_decompress_stream = async (): Promise<
 export const fetch_compressed_stream = async (
   url: string | URL | globalThis.Request,
 ): Promise<ReadableStream<Uint8Array>> => {
-  const compressed_stream = await fetch(url);
-  if (!compressed_stream.ok) {
+  let response: Response | undefined;
+
+  if ("caches" in globalThis) {
+    const cache = await caches.open("rubrc-assets-v1");
+    response = await cache.match(url);
+
+    if (!response) {
+      response = await fetch(url);
+      if (response.ok) {
+        await cache.put(url, response.clone());
+      }
+    }
+  } else {
+    response = await fetch(url);
+  }
+
+  if (!response.ok) {
     throw new Error("Failed to fetch wasm");
   }
-  if (!compressed_stream.body) {
+  if (!response.body) {
     throw new Error("No body in response");
   }
 
-  return compressed_stream.body.pipeThrough(
-    await get_brotli_decompress_stream(),
-  );
+  return response.body.pipeThrough(await get_brotli_decompress_stream());
 };
