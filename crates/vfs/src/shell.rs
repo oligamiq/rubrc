@@ -52,7 +52,9 @@ pub extern "C" fn vfs_execute_command(context_id: u32) -> i32 {
 
     // 3. Execute command with context_id for stdout/stderr routing
     CURRENT_CONTEXT_ID.with(|id| id.set(Some(context_id)));
+    crate::debug_trace(&format!("command:start {}", args_vec.join(" ")));
     crate::command::handle_command(args_vec);
+    crate::debug_trace("command:return");
     CURRENT_CONTEXT_ID.with(|id| id.set(None));
     0
 }

@@ -16,6 +16,9 @@ export interface Root {
   dispatch(sessionId: number, eventType: number, arg1: number, arg2: number): void,
   allocBuf(len: number): number,
   freeBuf(ptr: number, len: number): void,
+  debugSetTerminalCapture(enabled: boolean): void,
+  debugTerminalOutputLen(): number,
+  debugReadTerminalOutput(ptr: number, len: number): number,
   init(): void,
   main(): void,
 }

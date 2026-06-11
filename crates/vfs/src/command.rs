@@ -19,6 +19,8 @@ impl<'a> VirtualArgs<'a> for VirtualArgsState {
 pub static VIRTUAL_ARGS: LazyLock<Mutex<VirtualArgsState>> =
     LazyLock::new(|| Mutex::new(VirtualArgsState { args: vec![] }));
 
+const DEFAULT_RUSTC_SYSROOT: &str = "/sysroot";
+
 pub fn set_rustc_opt_args(args: &[impl AsRef<str>]) {
     VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect();
 }
@@ -128,12 +130,25 @@ pub fn handle_command(args: Vec<String>) {
             }
         }
         "rustc" => {
+            let mut args = args;
+            if !args
+                .iter()
+                .skip(1)
+                .any(|arg| arg == "--sysroot" || arg.starts_with("--sysroot="))
+            {
+                args.push("--sysroot".to_string());
+                args.push(DEFAULT_RUSTC_SYSROOT.to_string());
+            }
             set_rustc_opt_args(&args);
+            crate::debug_trace("rustc:_reset:enter");
             crate::rustc_opt::_reset();
+            crate::debug_trace("rustc:_reset:return");
+            crate::debug_trace("rustc:_start:enter");
             crate::rustc_opt::_start();
-            println!("VFS: Survived rustc_opt::_start!");
+            crate::debug_trace("rustc:_start:return");
+            crate::debug_trace("rustc:_main:enter");
             crate::rustc_opt::_main();
-            println!("VFS: Survived rustc_opt::_main!");
+            crate::debug_trace("rustc:_main:return");
         }
         "clang" | "llvm" => {
             set_llvm_opt_args(&args);

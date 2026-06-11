@@ -5648,6 +5648,188 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
+      let exports0DebugSetTerminalCapture;
+
+      function debugSetTerminalCapture(arg0) {
+        _debugLog('[iface="debug-set-terminal-capture", function="debug-set-terminal-capture"][Instruction::CallWasm] enter', {
+          funcName: 'debug-set-terminal-capture',
+          paramCount: 1,
+          async: false,
+          postReturn: false,
+        });
+        const hostProvided = false;
+
+        const [task, _wasm_call_currentTaskID] = createNewCurrentTask({
+          componentIdx: 0,
+          isAsync: false,
+          isManualAsync: false,
+          entryFnName: 'exports0DebugSetTerminalCapture',
+          getCallbackFn: () => null,
+          callbackFnName: null,
+          errHandling: 'none',
+          callingWasmExport: true,
+        });
+
+        const started = task.enterSync();
+
+        if (null!== null) {
+          task.setReturnMemoryIdx(null);
+          task.setReturnMemory(() => null());
+        }
+
+
+        let ret;
+
+        try {
+          _withGlobalCurrentTaskMeta({
+            taskID: task.id(),
+            componentIdx: task.componentIdx(),
+            fn: () => exports0DebugSetTerminalCapture(arg0 ? 1 : 0),
+          });
+        } catch (err) {
+
+          _debugLog('[Instruction::CallWasm] error during sync call', {
+            taskID: task.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+
+        }
+
+        _debugLog('[iface="debug-set-terminal-capture", function="debug-set-terminal-capture"][Instruction::Return]', {
+          funcName: 'debug-set-terminal-capture',
+          paramCount: 0,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([ret]);
+        task.exit();
+      }
+      let exports0DebugTerminalOutputLen;
+
+      function debugTerminalOutputLen() {
+        _debugLog('[iface="debug-terminal-output-len", function="debug-terminal-output-len"][Instruction::CallWasm] enter', {
+          funcName: 'debug-terminal-output-len',
+          paramCount: 0,
+          async: false,
+          postReturn: false,
+        });
+        const hostProvided = false;
+
+        const [task, _wasm_call_currentTaskID] = createNewCurrentTask({
+          componentIdx: 0,
+          isAsync: false,
+          isManualAsync: false,
+          entryFnName: 'exports0DebugTerminalOutputLen',
+          getCallbackFn: () => null,
+          callbackFnName: null,
+          errHandling: 'none',
+          callingWasmExport: true,
+        });
+
+        const started = task.enterSync();
+
+        if (null!== null) {
+          task.setReturnMemoryIdx(null);
+          task.setReturnMemory(() => null());
+        }
+
+
+        let ret;
+
+        try {
+          ret =   _withGlobalCurrentTaskMeta({
+            taskID: task.id(),
+            componentIdx: task.componentIdx(),
+            fn: () => exports0DebugTerminalOutputLen(),
+          });
+        } catch (err) {
+
+          _debugLog('[Instruction::CallWasm] error during sync call', {
+            taskID: task.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+
+        }
+
+        _debugLog('[iface="debug-terminal-output-len", function="debug-terminal-output-len"][Instruction::Return]', {
+          funcName: 'debug-terminal-output-len',
+          paramCount: 1,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([ret >>> 0]);
+        task.exit();
+        return ret >>> 0;
+      }
+      let exports0DebugReadTerminalOutput;
+
+      function debugReadTerminalOutput(arg0, arg1) {
+        _debugLog('[iface="debug-read-terminal-output", function="debug-read-terminal-output"][Instruction::CallWasm] enter', {
+          funcName: 'debug-read-terminal-output',
+          paramCount: 2,
+          async: false,
+          postReturn: false,
+        });
+        const hostProvided = false;
+
+        const [task, _wasm_call_currentTaskID] = createNewCurrentTask({
+          componentIdx: 0,
+          isAsync: false,
+          isManualAsync: false,
+          entryFnName: 'exports0DebugReadTerminalOutput',
+          getCallbackFn: () => null,
+          callbackFnName: null,
+          errHandling: 'none',
+          callingWasmExport: true,
+        });
+
+        const started = task.enterSync();
+
+        if (null!== null) {
+          task.setReturnMemoryIdx(null);
+          task.setReturnMemory(() => null());
+        }
+
+
+        let ret;
+
+        try {
+          ret =   _withGlobalCurrentTaskMeta({
+            taskID: task.id(),
+            componentIdx: task.componentIdx(),
+            fn: () => exports0DebugReadTerminalOutput(toUint32(arg0), toUint32(arg1)),
+          });
+        } catch (err) {
+
+          _debugLog('[Instruction::CallWasm] error during sync call', {
+            taskID: task.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+
+        }
+
+        _debugLog('[iface="debug-read-terminal-output", function="debug-read-terminal-output"][Instruction::Return]', {
+          funcName: 'debug-read-terminal-output',
+          paramCount: 1,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([ret >>> 0]);
+        task.exit();
+        return ret >>> 0;
+      }
       let exports0Init;
       
       function init() {
@@ -7059,6 +7241,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       exports0Dispatch = exports0.dispatch;
       exports0AllocBuf = exports0['alloc-buf'];
       exports0FreeBuf = exports0['free-buf'];
+      exports0DebugSetTerminalCapture = exports0['debug-set-terminal-capture'];
+      exports0DebugTerminalOutputLen = exports0['debug-terminal-output-len'];
+      exports0DebugReadTerminalOutput = exports0['debug-read-terminal-output'];
       exports0Init = exports0.init;
       exports0Main = exports0.main;
       virtualFileSystemWasip1ThreadsExportWasiThreadStart = exports0['wasip1-vfs:host/virtual-file-system-wasip1-threads-export#wasi-thread-start'];
@@ -7067,7 +7252,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         
       };
       
-      return { virtualFileSystemWasip1ThreadsExport, allocBuf, dispatch, flushFromVfs, flushToVfs, freeBuf, init, main, 'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': virtualFileSystemWasip1ThreadsExport,  };
+      return { virtualFileSystemWasip1ThreadsExport, allocBuf, debugReadTerminalOutput, debugSetTerminalCapture, debugTerminalOutputLen, dispatch, flushFromVfs, flushToVfs, freeBuf, init, main, 'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': virtualFileSystemWasip1ThreadsExport,  };
     })();
     let promise, resolve, reject;
     function runNext (value) {
