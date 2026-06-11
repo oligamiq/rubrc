@@ -14,6 +14,15 @@ export class Downloader {
   static sysrootReadFileChunk(dataPtr: number, chunkLen: number): void;
 }
 
+export class Lsp {
+  /**
+   * This type does not have a public constructor.
+   */
+  private constructor();
+  static hostRunCargo(reqPtr: number, reqLen: number, outStdoutPtr: number, outStdoutLen: number, outStderrPtr: number, outStderrLen: number, outStatus: number): number;
+  static hostFreeMemory(ptr: number, len: number): void;
+}
+
 export class Terminal {
   /**
    * This type does not have a public constructor.

@@ -40,59 +40,59 @@ globalThis.addEventListener("message", async (event) => {
     (args: { url: string, name: string }) => Promise<void>
   >();
 
-async function getCachedWasm(key: string): Promise<WebAssembly.Module | null> {
-  if (typeof indexedDB === "undefined") return null;
-  return new Promise((resolve) => {
-    try {
-      const req = indexedDB.open("wasm_cache", 1);
-      req.onupgradeneeded = () => req.result.createObjectStore("modules");
-      req.onsuccess = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains("modules")) {
-          resolve(null);
-          return;
-        }
-        try {
-          const tx = db.transaction("modules", "readonly");
-          const store = tx.objectStore("modules");
-          const getReq = store.get(key);
-          getReq.onsuccess = () => resolve(getReq.result || null);
-          getReq.onerror = () => resolve(null);
-        } catch (e) {
-          resolve(null);
-        }
-      };
-      req.onerror = () => resolve(null);
-    } catch (e) {
-      resolve(null);
-    }
-  });
-}
+  async function getCachedWasm(key: string): Promise<WebAssembly.Module | null> {
+    if (typeof indexedDB === "undefined") return null;
+    return new Promise((resolve) => {
+      try {
+        const req = indexedDB.open("wasm_cache", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("modules");
+        req.onsuccess = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains("modules")) {
+            resolve(null);
+            return;
+          }
+          try {
+            const tx = db.transaction("modules", "readonly");
+            const store = tx.objectStore("modules");
+            const getReq = store.get(key);
+            getReq.onsuccess = () => resolve(getReq.result || null);
+            getReq.onerror = () => resolve(null);
+          } catch (e) {
+            resolve(null);
+          }
+        };
+        req.onerror = () => resolve(null);
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  }
 
-async function cacheWasm(key: string, module: WebAssembly.Module): Promise<void> {
-  if (typeof indexedDB === "undefined") return;
-  return new Promise((resolve) => {
-    try {
-      const req = indexedDB.open("wasm_cache", 1);
-      req.onupgradeneeded = () => req.result.createObjectStore("modules");
-      req.onsuccess = () => {
-        const db = req.result;
-        try {
-          const tx = db.transaction("modules", "readwrite");
-          const store = tx.objectStore("modules");
-          store.put(module, key);
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => resolve();
-        } catch (e) {
-          resolve();
-        }
-      };
-      req.onerror = () => resolve();
-    } catch (e) {
-      resolve();
-    }
-  });
-}
+  async function cacheWasm(key: string, module: WebAssembly.Module): Promise<void> {
+    if (typeof indexedDB === "undefined") return;
+    return new Promise((resolve) => {
+      try {
+        const req = indexedDB.open("wasm_cache", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("modules");
+        req.onsuccess = () => {
+          const db = req.result;
+          try {
+            const tx = db.transaction("modules", "readwrite");
+            const store = tx.objectStore("modules");
+            store.put(module, key);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => resolve();
+          } catch (e) {
+            resolve();
+          }
+        };
+        req.onerror = () => resolve();
+      } catch (e) {
+        resolve();
+      }
+    });
+  }
 
   const vfs_wasm_path = new URL("./vfs_bindings/vfs.core.wasm", import.meta.url).href;
   let vfs_wasm: WebAssembly.Module | null = null;
@@ -146,7 +146,7 @@ async function cacheWasm(key: string, module: WebAssembly.Module): Promise<void>
         status: response.status,
         statusText: response.statusText
       }));
-      
+
       // Cache it for next time
       await cacheWasm(cacheKey, vfs_wasm);
       await terminal({ sessionId: 0, data: new TextEncoder().encode(`[VFS] Wasm ready and cached.\r\n`) });
@@ -169,7 +169,7 @@ async function cacheWasm(key: string, module: WebAssembly.Module): Promise<void>
       worker_background_worker_url: new URL(worker_background_worker_url, import.meta.url).href,
       share_memory: {
         memory: new WebAssembly.Memory({
-          initial: 982,
+          initial: 984,
           maximum: 32775,
           shared: true,
         }),
@@ -194,7 +194,7 @@ async function cacheWasm(key: string, module: WebAssembly.Module): Promise<void>
           terminal({ sessionId: unknown.args.session_id, data: unknown.args.data });
         }
       } else {
-        animal.call_unknown_fn(idx, unknown);
+        return animal.call_unknown_fn(idx, unknown);
       }
     },
   );

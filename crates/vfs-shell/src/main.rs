@@ -311,7 +311,7 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                 data_buf = vec![0u8; data_len as usize];
                 let mut remaining = data_len as usize;
                 let mut offset = 0;
-                let chunk_size = 512 * 1024;
+                let chunk_size = 50 * 1024 * 1024;
                 while remaining > 0 {
                     let to_read = std::cmp::min(remaining, chunk_size);
                     unsafe {

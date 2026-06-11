@@ -43,6 +43,10 @@ impl Guest for Wit {
 
         Self::flush_to_vfs();
 
+        println!("VFS: Calling rustc_opt::_start()");
+        crate::rustc_opt::_start();
+        println!("VFS: Survived rustc_opt::_start() ! Unreachable was CAUGHT.");
+
         vfs_shell::_reset();
         vfs_shell::_start();
         vfs_shell::_main();

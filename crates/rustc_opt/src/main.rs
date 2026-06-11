@@ -1,5 +1,4 @@
 fn main() {
-  std::thread::spawn(|| {
-    println!("Hello from a thread!");
-  });
+    println!("rustc_opt: before panic");
+    panic!("This is a test panic in rustc_opt");
 }

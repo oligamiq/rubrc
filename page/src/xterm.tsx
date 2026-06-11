@@ -180,7 +180,7 @@ export const SetupMyTerminal = (props: {
 
   const onData = (data: string) => {
     console.log(`[UI] onData received for session ${props.sessionId}, length: ${data.length}, first char code: ${data.charCodeAt(0)}`);
-    
+
     // Map ANSI escape sequences to custom wasi-shell key codes
     const keyMap: Record<string, number> = {
       "\x1b[A": 1001, "\x1bOA": 1001, // Up
@@ -327,6 +327,7 @@ edition = "2021"
     new XtermStderr(term),
     [root_dir],
     {
+      allocator_size: 100 * 1024 * 1024, // 100MB
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
       unknown_fn: async (unknown: any) => {
         if (unknown.name === "downloadFileStart") {
@@ -357,7 +358,7 @@ edition = "2021"
             const { fetch_compressed_stream } = await import("../../lib/src/brotli_stream");
             const { parseTar } = await import("../../lib/src/parse_tar");
 
-            const url = triple === "rust-src" 
+            const url = triple === "rust-src"
               ? `https://oligamiq.github.io/rust_wasm/v0.2.0/rust-src.tar.br`
               : `https://oligamiq.github.io/rust_wasm/v0.2.0/${triple}.tar.br`;
 
@@ -374,7 +375,7 @@ edition = "2021"
           }
           return {};
         }
- else if (unknown.name === "sysrootGetNextFileMeta") {
+        else if (unknown.name === "sysrootGetNextFileMeta") {
           if (sysroot_queue.length > 0) {
             current_sysroot_file = sysroot_queue.shift()!;
             return {
@@ -388,7 +389,7 @@ edition = "2021"
           }
         } else if (unknown.name === "sysrootReadFileName") {
           if (current_sysroot_file?.name) {
-            return { name: current_sysroot_file.name };
+            return { name: Array.from(current_sysroot_file.name) };
           }
           throw new Error("No current sysroot file to read name from");
         } else if (unknown.name === "sysrootReadFileChunk") {
@@ -396,9 +397,9 @@ edition = "2021"
             const chunk_len = unknown.args.chunk_len as number;
             const chunk = current_sysroot_file.data.slice(0, chunk_len);
             current_sysroot_file.data = current_sysroot_file.data.slice(chunk_len);
-            return { chunk };
+            return { chunk: Array.from(chunk) };
           }
-          return { chunk: new Uint8Array() };
+          return { chunk: [] };
         } else if (unknown.name === "terminalWrite") {
           const { session_id, data } = unknown.args;
           write_to_terminal(session_id, data);

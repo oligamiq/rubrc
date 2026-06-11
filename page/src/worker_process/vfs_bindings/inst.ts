@@ -83,7 +83,7 @@ export const custom_instantiate = async (
             console.log("Download file chunk", { data_len });
             call_unknown_fn(0, {
               name: "downloadFileChunk",
-              args: { data },
+              args: { data: Array.from(data) },
             });
           },
           downloadFileEnd: () => {
@@ -140,7 +140,7 @@ export const custom_instantiate = async (
             const data = new Uint8Array(view); // copy
             call_unknown_fn(0, {
               name: "terminalWrite",
-              args: { session_id, data },
+              args: { session_id, data: Array.from(data) },
             });
           }
         },

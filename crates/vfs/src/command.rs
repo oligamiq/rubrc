@@ -92,7 +92,7 @@ pub fn handle_command(args: Vec<String>) {
                         filename.as_bytes().as_ptr() as usize as i32,
                         filename.len() as u32 as i32,
                     );
-                    for chunk in data.chunks(512 * 1024) {
+                    for chunk in data.chunks(50 * 1024 * 1024) {
                         Downloader::download_file_chunk(
                             chunk.as_ptr() as usize as i32,
                             chunk.len() as u32 as i32,
@@ -131,7 +131,9 @@ pub fn handle_command(args: Vec<String>) {
             set_rustc_opt_args(&args);
             crate::rustc_opt::_reset();
             crate::rustc_opt::_start();
+            println!("VFS: Survived rustc_opt::_start!");
             crate::rustc_opt::_main();
+            println!("VFS: Survived rustc_opt::_main!");
         }
         "clang" | "llvm" => {
             set_llvm_opt_args(&args);
