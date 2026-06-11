@@ -985,16 +985,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "test_wvl_vfs"
-version = "0.1.0"
-dependencies = [
- "const_struct",
- "parking_lot",
- "wasi_virt_layer",
- "wit-bindgen 0.57.1",
-]
-
-[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
