@@ -3,3 +3,4 @@
 **/target
 .antigravitycli
 page/src/worker_process/vfs_bindings/vfs.core.wasm
+/test_workspace_rustc/sysroot/
