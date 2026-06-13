@@ -3087,7 +3087,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -3166,7 +3166,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -3246,7 +3246,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -3325,7 +3325,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -3404,7 +3404,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -3483,7 +3483,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -3562,7 +3562,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -3641,7 +3641,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -3720,7 +3720,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -3800,7 +3800,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -3880,7 +3880,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -3960,7 +3960,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4040,7 +4040,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4120,7 +4120,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4200,7 +4200,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4280,7 +4280,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4360,7 +4360,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4440,7 +4440,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4520,7 +4520,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4600,7 +4600,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4680,7 +4680,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4760,7 +4760,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4840,7 +4840,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -4920,7 +4920,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -5000,7 +5000,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -5080,7 +5080,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);
@@ -5160,7 +5160,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: undefined,
+            subtaskID: currentSubtask?.id(),
             err,
           });
           task.setErrored(err);

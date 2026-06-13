@@ -195,20 +195,48 @@ impl Guest for Wit {
                         for component in parent.components() {
                             if let std::path::Component::Normal(c) = component {
                                 let name = c.to_string_lossy();
-                                current_vfs_parent = VIRTUAL_FILE_SYSTEM
-                                    .lfs
-                                    .add_dir(current_vfs_parent, &name)
-                                    .unwrap_or(current_vfs_parent);
+                                let mut existing_id = None;
+                                if let Ok(entries) = VIRTUAL_FILE_SYSTEM.lfs.read_dir(current_vfs_parent) {
+                                    for (entry_name, id) in entries {
+                                        if entry_name == name {
+                                            existing_id = Some(id);
+                                            break;
+                                        }
+                                    }
+                                }
+                                if let Some(id) = existing_id {
+                                    current_vfs_parent = id;
+                                } else {
+                                    current_vfs_parent = VIRTUAL_FILE_SYSTEM
+                                        .lfs
+                                        .add_dir(current_vfs_parent, &name)
+                                        .unwrap_or(current_vfs_parent);
+                                }
                             }
                         }
                     }
 
                     if let Some(name) = path.file_name() {
-                        let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(
-                            current_vfs_parent,
-                            &name.to_string_lossy(),
-                            content.as_bytes().to_vec(),
-                        );
+                        let name_str = name.to_string_lossy();
+                        let mut file_inode = None;
+                        if let Ok(entries) = VIRTUAL_FILE_SYSTEM.lfs.read_dir(current_vfs_parent) {
+                            for (entry_name, id) in entries {
+                                if entry_name == name_str {
+                                    file_inode = Some(id);
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if let Some(id) = file_inode {
+                            let _ = VIRTUAL_FILE_SYSTEM.lfs.write_file(id, content.as_bytes().to_vec());
+                        } else {
+                            let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(
+                                current_vfs_parent,
+                                &name_str,
+                                content.as_bytes().to_vec(),
+                            );
+                        }
                     }
                 }
             }

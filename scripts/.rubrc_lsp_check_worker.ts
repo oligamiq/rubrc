@@ -81,17 +81,6 @@ globalThis.onmessage = async (event) => {
         return animal.call_unknown_fn(index, message);
       },
     );
-    const rawExports = root.rawExports as Record<string, unknown>;
-    console.log("[raw export sample]", Object.keys(rawExports).slice(0, 30));
-    const memoryExports = Object.keys(rawExports).filter((key) =>
-      key.includes("memory_grow_global_alt")
-    );
-    console.log("[memory offset exports]", memoryExports);
-    for (const key of memoryExports) {
-      if (key.includes("get_no_wait")) {
-        console.log("[memory offset]", key, (rawExports[key] as () => number)());
-      }
-    }
 
     animal.start(root);
     const virtualThreadIdCounter = new Uint32Array(sharedMemory.buffer, 1084028, 1);
