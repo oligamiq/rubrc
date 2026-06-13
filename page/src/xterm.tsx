@@ -145,25 +145,14 @@ export const SetupMyTerminal = (props: {
     };
     window.addEventListener("resize", onWindowResize);
 
-    const onPaste = (e: ClipboardEvent) => {
-      const data = e.clipboardData?.getData("text");
-      console.log(`[UI] Paste event received for session ${props.sessionId}, length: ${data?.length}`);
-      if (data) {
-        input_string({ sessionId: props.sessionId, data }).catch(console.error);
-      }
-    };
-    terminal.element?.addEventListener("paste", onPaste);
-
     terminal.attachCustomKeyEventHandler((e) => {
-      if (e.type === "keydown" && (e.ctrlKey || e.metaKey) && e.key === "v") {
-        console.log(`[UI] Ctrl+V detected for session ${props.sessionId}`);
-        navigator.clipboard.readText().then((data) => {
-          console.log(`[UI] Clipboard content read: ${data?.length} chars`);
-          if (data) {
-            input_string({ sessionId: props.sessionId, data }).catch(console.error);
-          }
-        }).catch(console.error);
+      if (e.type === "keydown" && (e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "v" || e.code === "KeyV")) {
         return false;
+      }
+      if (e.type === "keydown" && (e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "c" || e.code === "KeyC")) {
+        if (terminal.hasSelection()) {
+          return false;
+        }
       }
       return true;
     });
@@ -173,7 +162,6 @@ export const SetupMyTerminal = (props: {
     return () => {
       terminals.delete(props.sessionId);
       window.removeEventListener("resize", onWindowResize);
-      terminal.element?.removeEventListener("paste", onPaste);
       console.log(`Terminal ${props.sessionId} unmounted.`);
     };
   };
