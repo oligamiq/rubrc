@@ -79,9 +79,12 @@ impl<'a> KeyEventHandler for TerminalEchoHandler<'a> {
 // Cross-Wasm ABI: scalar-only interface (no raw pointer passing)
 // ============================================================
 
-// IoPtr wraps a raw pointer to IoContext as usize (scalar).
-// The pointer is always in vfs-shell's own memory space.
-struct IoPtr(usize);
+// The IoContext pointer is always in vfs-shell's own memory space. stderr is
+// routed directly to the session terminal to avoid re-entering VFS fd_write.
+struct IoPtr {
+    io: usize,
+    session_id: u32,
+}
 unsafe impl Send for IoPtr {}
 unsafe impl Sync for IoPtr {}
 
@@ -154,7 +157,7 @@ pub unsafe extern "C" fn vfs_shell_write_stdout(id: u32, ptr: u32, len: u32) -> 
     }
     if let Some(entry) = IO_REGISTRY.get(&id) {
         if let Ok(guard) = entry.value().lock() {
-            let io = unsafe { &mut *(guard.0 as *mut IoContext) };
+            let io = unsafe { &mut *(guard.io as *mut IoContext) };
             let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, len as usize) };
             if let Ok(written) = io.stdout.write(slice) {
                 return written as u32;
@@ -179,11 +182,8 @@ pub unsafe extern "C" fn vfs_shell_write_stderr(id: u32, ptr: u32, len: u32) -> 
     }
     if let Some(entry) = IO_REGISTRY.get(&id) {
         if let Ok(guard) = entry.value().lock() {
-            let io = unsafe { &mut *(guard.0 as *mut IoContext) };
-            let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, len as usize) };
-            if let Ok(written) = io.stderr.write(slice) {
-                return written as u32;
-            }
+            unsafe { terminal_write(guard.session_id, ptr as i32, len as i32) };
+            return len;
         }
     }
     0
@@ -278,9 +278,7 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
         let base_dir = if is_src {
             PathBuf::from("/sysroot/lib/rustlib/src/rust/library")
         } else {
-            Path::new("/sysroot/lib/rustlib")
-                .join(triple)
-                .join("lib")
+            Path::new("/sysroot/lib/rustlib").join(triple).join("lib")
         };
 
         if !base_dir.exists() {
@@ -439,7 +437,13 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
         *CMD_ARGS.lock().unwrap() = args_str.into_bytes();
 
         // Register IoContext with Mutex for thread-safe writes
-        IO_REGISTRY.insert(context_id, Mutex::new(IoPtr(io as *mut _ as usize)));
+        IO_REGISTRY.insert(
+            context_id,
+            Mutex::new(IoPtr {
+                io: io as *mut _ as usize,
+                session_id: sid,
+            }),
+        );
 
         // Call into vfs — scalar only, no pointer crossing Wasm boundary
         let status = unsafe { vfs_execute_command(context_id) };
@@ -692,7 +696,7 @@ fn run_session_loop(
 
         for line in pre_lines {
             writeln!(stdout, "{}", line).unwrap();
-            
+
             let cmd_stdin = CommandStdin {
                 rx: Arc::clone(&rx_arc),
                 cancellation_token: cancellation_token.clone(),
@@ -817,7 +821,7 @@ fn process_input_char(
         }
 
         cancellation_token.reset();
-        
+
         let cmd_stdin = CommandStdin {
             rx: Arc::clone(rx_arc),
             cancellation_token: cancellation_token.clone(),

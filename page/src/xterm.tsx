@@ -302,6 +302,9 @@ name = "main"
 version = "0.1.0"
 edition = "2021"
 `))],
+      [".cargo", new Directory(toMap([
+        ["config.toml", new File(new Uint8Array())],
+      ]))],
       ["rust-project.json", new File(new TextEncoder().encode(JSON.stringify({
         sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
         crates: [

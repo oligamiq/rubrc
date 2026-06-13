@@ -5,7 +5,6 @@
     "npm:@bjorn3/browser_wasi_shim@~0.4.2": "0.4.2",
     "npm:@oligami/shared-object@0.1.1": "0.1.1",
     "npm:@swc/cli@~0.7.10": "0.7.10_@swc+core@1.15.33",
-    "npm:@swc/core@^1.15.33": "1.15.33",
     "npm:@thisbeyond/solid-select@~0.15.1": "0.15.1_solid-js@1.9.12",
     "npm:@types/tar-stream@^3.1.4": "3.1.4",
     "npm:@xterm/addon-fit@0.10": "0.10.0_@xterm+xterm@5.5.0",
@@ -17,7 +16,6 @@
     "npm:nanotar@~0.2.1": "0.2.1",
     "npm:npm-watch@0.13": "0.13.0",
     "npm:solid-devtools@~0.34.5": "0.34.5_solid-js@1.9.12_vite@7.3.2",
-    "npm:solid-js@^1.9.12": "1.9.12",
     "npm:solid-monaco@0.3": "0.3.0_monaco-editor@0.48.0_solid-js@1.9.12",
     "npm:typescript@^5.9.3": "5.9.3",
     "npm:unplugin-swc@^1.5.9": "1.5.9_@swc+core@1.15.33",
@@ -2850,8 +2848,9 @@
     "packageJson": {
       "dependencies": [
         "npm:@biomejs/biome@2.3.5",
+        "npm:@oligami/browser_wasi_shim-threads@~0.3.7",
         "npm:@swc/cli@~0.7.10",
-        "npm:@swc/core@^1.15.33",
+        "npm:@swc/core@^1.15.41",
         "npm:@types/tar-stream@^3.1.4",
         "npm:autoprefixer@^10.5.0",
         "npm:better-typescript-lib@^2.12.0",
@@ -2863,7 +2862,7 @@
         "npm:unplugin-swc@^1.5.9",
         "npm:vite-plugin-dts@^4.5.4",
         "npm:vite-plugin-solid@^2.11.12",
-        "npm:vite@^7.3.3"
+        "npm:vite@^7.3.5"
       ]
     },
     "members": {
@@ -2891,7 +2890,7 @@
             "npm:@codingame/monaco-vscode-languages-service-override@^25.1.2",
             "npm:@codingame/monaco-vscode-model-service-override@^25.1.2",
             "npm:@codingame/monaco-vscode-theme-defaults-default-extension@^25.1.2",
-            "npm:@oligami/browser_wasi_shim-threads@~0.3.6",
+            "npm:@oligami/browser_wasi_shim-threads@~0.3.7",
             "npm:@oligami/shared-object@0.1.1",
             "npm:@tailwindcss/vite@^4.3.0",
             "npm:@thisbeyond/solid-select@~0.15.1",
@@ -2900,7 +2899,7 @@
             "npm:@xterm/xterm@^5.5.0",
             "npm:monaco-languageclient@^10.7.0",
             "npm:nanotar@~0.2.1",
-            "npm:solid-js@^1.9.12",
+            "npm:solid-js@^1.9.13",
             "npm:solid-monaco@0.3",
             "npm:tailwindcss@^4.3.0",
             "npm:uuid@^13.0.2"

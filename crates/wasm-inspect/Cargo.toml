@@ -1,0 +1,8 @@
+[package]
+name = "rubrc-wasm-inspect"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+wasmparser = "0.251.0"

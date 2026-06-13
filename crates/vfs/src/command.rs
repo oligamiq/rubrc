@@ -33,11 +33,23 @@ pub fn set_lsp_opt_args(args: &[impl AsRef<str>]) {
     VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect();
 }
 
+pub fn set_cargo_opt_args(args: &[impl AsRef<str>]) {
+    VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect();
+}
+
 pub fn set_vfs_shell_args(args: &[impl AsRef<str>]) {
     VIRTUAL_ARGS.lock().args = args.iter().map(|s| s.as_ref().to_string()).collect();
 }
 
-wasi_virt_layer::plug_args!(@dynamic, { &mut VIRTUAL_ARGS.lock() }, rustc_opt, llvm_opt, vfs_shell, lsp_opt);
+wasi_virt_layer::plug_args!(
+    @dynamic,
+    { &mut VIRTUAL_ARGS.lock() },
+    rustc_opt,
+    llvm_opt,
+    vfs_shell,
+    lsp_opt,
+    cargo_opt
+);
 
 fn format_size(size: usize) -> String {
     if size < 1024 {
@@ -155,6 +167,18 @@ pub fn handle_command(args: Vec<String>) {
             crate::llvm_opt::_reset();
             crate::llvm_opt::_start();
             crate::llvm_opt::_main();
+        }
+        "cargo" => {
+            set_cargo_opt_args(&args);
+            crate::run_cargo();
+        }
+        "rust-analyzer" => {
+            if crate::LSP_STARTED.load(std::sync::atomic::Ordering::SeqCst) {
+                println!("rust-analyzer is already running for the Web editor");
+                return;
+            }
+            set_lsp_opt_args(&args);
+            crate::lsp_opt::_start();
         }
         _ => {
             println!("Unknown command: {cmd}");

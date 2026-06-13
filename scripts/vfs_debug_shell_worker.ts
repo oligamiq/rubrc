@@ -46,7 +46,7 @@ globalThis.onmessage = async (event) => {
         ).href,
         share_memory: {
           memory: new WebAssembly.Memory({
-            initial: 984,
+            initial: 1031,
             maximum: 32775,
             shared: true,
           }),

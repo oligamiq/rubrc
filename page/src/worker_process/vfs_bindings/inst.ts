@@ -107,19 +107,21 @@ export const custom_instantiate = async (
               name: "sysrootGetNextFileMeta",
               args: {},
             }) as { has_file: boolean | number, name_len?: number, data_len?: number };
+            console.log("sysrootGetNextFileMeta returned", res);
             const view32 = new Int32Array(memory.memory.buffer);
 
-            if (res.has_file === 1 || res.has_file === true) {
+            if (res && (res.has_file === 1 || res.has_file === true)) {
               view32[name_len_ptr / 4] = res.name_len!;
               view32[data_len_ptr / 4] = res.data_len!;
             }
-            return res.has_file ? 1 : 0;
+            return (res && res.has_file) ? 1 : 0;
           },
           sysrootReadFileName: (name_ptr: number): void => {
             const res = call_unknown_fn(0, {
               name: "sysrootReadFileName",
               args: {},
             }) as { name: unknown };
+            if (!res) return;
             const name_bytes = _toUint8Array(res.name);
             const view8 = new Uint8Array(memory.memory.buffer);
             view8.set(name_bytes, name_ptr);
@@ -129,6 +131,7 @@ export const custom_instantiate = async (
               name: "sysrootReadFileChunk",
               args: { chunk_len },
             }) as { chunk: unknown };
+            if (!res) return;
             const chunk_bytes = _toUint8Array(res.chunk);
             const view8 = new Uint8Array(memory.memory.buffer);
             view8.set(chunk_bytes, data_ptr);

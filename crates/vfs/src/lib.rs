@@ -1,7 +1,8 @@
 use const_struct::*;
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::DirectThreadPool};
 
 wit_bindgen::generate!({
     world: "vfs-host",
@@ -26,6 +27,54 @@ static DEBUG_TERMINAL_CAPTURE: AtomicBool = AtomicBool::new(false);
 static DEBUG_TERMINAL_OUTPUT: std::sync::LazyLock<parking_lot::Mutex<Vec<u8>>> =
     std::sync::LazyLock::new(|| parking_lot::Mutex::new(Vec::new()));
 
+#[derive(Default)]
+struct CargoOutput {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+thread_local! {
+    static CARGO_OUTPUT: RefCell<Option<CargoOutput>> = const { RefCell::new(None) };
+}
+
+static CARGO_RUN_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+static CARGO_STARTED: AtomicBool = AtomicBool::new(false);
+pub(crate) static CARGO_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
+static RUSTC_STARTED: AtomicBool = AtomicBool::new(false);
+pub(crate) static RUSTC_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
+
+pub(crate) fn run_cargo() {
+    CARGO_EXIT_STATUS.store(0, Ordering::SeqCst);
+    if !CARGO_STARTED.swap(true, Ordering::SeqCst) {
+        cargo_opt::_start();
+    }
+    cargo_opt::_main();
+}
+
+fn run_rustc() {
+    RUSTC_EXIT_STATUS.store(0, Ordering::SeqCst);
+    if RUSTC_STARTED.swap(true, Ordering::SeqCst) {
+        rustc_opt::_main();
+    } else {
+        rustc_opt::_start();
+    }
+}
+
+fn capture_cargo_output(stderr: bool, buf: &[u8]) -> bool {
+    CARGO_OUTPUT.with(|output| {
+        let mut output = output.borrow_mut();
+        let Some(output) = output.as_mut() else {
+            return false;
+        };
+        if stderr {
+            output.stderr.extend_from_slice(buf);
+        } else {
+            output.stdout.extend_from_slice(buf);
+        }
+        true
+    })
+}
+
 pub(crate) fn debug_trace(message: &str) {
     if DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
         let mut output = DEBUG_TERMINAL_OUTPUT.lock();
@@ -40,27 +89,6 @@ struct Wit;
 impl Guest for Wit {
     fn init() {}
     fn main() {
-        let threads = std::env::var("VFS_THREADS")
-            .unwrap_or_else(|_| "8".to_string())
-            .parse::<usize>()
-            .unwrap_or(8);
-
-        unsafe { THREAD_POOL.init() };
-
-        for i in 1..=threads {
-            print!(
-                "\x1b[2K\r\x1b[36mInitializing Thread Pool: {}/{} ...\x1b[0m",
-                i, threads
-            );
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-            THREAD_POOL.set_capacity(i);
-            THREAD_POOL.flush_capacity().wait();
-        }
-        eprintln!(
-            "\x1b[2K\r\x1b[32mThread Pool Initialized ({} threads)\x1b[0m",
-            threads
-        );
-
         Self::flush_to_vfs();
 
         vfs_shell::_reset();
@@ -252,6 +280,10 @@ pub struct ShellVirtualStdIO;
 
 impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
     fn write(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        if capture_cargo_output(false, buf) {
+            return Ok(buf.len());
+        }
+
         let id = crate::shell::CURRENT_CONTEXT_ID
             .with(|id| id.get())
             .unwrap_or(0);
@@ -303,6 +335,10 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
         }
     }
     fn ewrite(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        if capture_cargo_output(true, buf) {
+            return Ok(buf.len());
+        }
+
         let id = crate::shell::CURRENT_CONTEXT_ID
             .with(|id| id.get())
             .unwrap_or(0);
@@ -368,13 +404,15 @@ import_wasm!(vfs_shell);
 import_wasm!(lsp_opt);
 import_wasm!(rustc_opt);
 import_wasm!(llvm_opt);
+import_wasm!(cargo_opt);
 
 plug_fs!(
     &*VIRTUAL_FILE_SYSTEM,
     rustc_opt,
     llvm_opt,
     vfs_shell,
-    lsp_opt
+    lsp_opt,
+    cargo_opt
 );
 
 #[const_struct]
@@ -383,18 +421,32 @@ const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
     environ: &["HOME=~/"],
 };
 
-plug_env!(@dynamic, { &mut VIRTUAL_SHELL_ENV.lock() }, vfs_shell, lsp_opt, rustc_opt, llvm_opt);
+plug_env!(
+    @dynamic,
+    { &mut VIRTUAL_SHELL_ENV.lock() },
+    vfs_shell,
+    lsp_opt,
+    rustc_opt,
+    llvm_opt,
+    cargo_opt
+);
 
 // plug_process!(StandardProcess, rustc_mock, llvm_mock);
 
-plug_random!(StandardRandom, rustc_opt, llvm_opt, vfs_shell, lsp_opt);
+plug_random!(
+    StandardRandom,
+    rustc_opt,
+    llvm_opt,
+    vfs_shell,
+    lsp_opt,
+    cargo_opt
+);
 
-plug_poll!(WaitPoll, rustc_opt, llvm_opt, vfs_shell, lsp_opt);
-
-static THREAD_POOL: VirtualThreadPool<ThreadAccessor> = unsafe { VirtualThreadPool::new_const(8) };
+plug_poll!(WaitPoll, rustc_opt, llvm_opt, vfs_shell, lsp_opt, cargo_opt);
+plug_sched!(DefaultSched, cargo_opt);
 
 plug_thread!(
-    { &THREAD_POOL },
+    { DirectThreadPool::<ThreadAccessor>::new_const() },
     self,
     rustc_opt,
     vfs_shell,
@@ -402,9 +454,186 @@ plug_thread!(
     llvm_opt
 );
 
-plug_clock!(StandardClock, vfs_shell, lsp_opt);
+plug_clock!(StandardClock, vfs_shell, lsp_opt, cargo_opt);
 plug_clock!(StandardClock, rustc_opt);
 plug_clock!(StandardClock, llvm_opt);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn __wasip1_vfs_cargo_opt_sock_accept(
+    _fd: i32,
+    _fdflags: i32,
+    _socket_fd_ptr: i32,
+) -> i32 {
+    52
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn __wasip1_vfs_cargo_opt_sock_shutdown(_fd: i32, _how: i32) -> i32 {
+    52
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wasi_ext_fetch(
+    _method_ptr: i32,
+    _method_len: i32,
+    _url_ptr: i32,
+    _url_len: i32,
+    _headers_ptr: i32,
+    _headers_len: i32,
+    _body_ptr: i32,
+    _body_len: i32,
+    _out_status: i32,
+    _out_resp_ptr: i32,
+    _out_resp_len: i32,
+) -> i32 {
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wasi_ext_git_clone(
+    _url_ptr: i32,
+    _url_len: i32,
+    _dest_ptr: i32,
+    _dest_len: i32,
+) -> i32 {
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wasi_ext_git_fetch(_path_ptr: i32, _path_len: i32) -> i32 {
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wasi_ext_spawn(
+    program_ptr: i32,
+    program_len: i32,
+    args_ptr: i32,
+    args_len: i32,
+    env_ptr: i32,
+    env_len: i32,
+    cwd_ptr: i32,
+    cwd_len: i32,
+    out_exit_code: i32,
+    out_stdout_ptr: i32,
+    out_stdout_len: i32,
+    out_stderr_ptr: i32,
+    out_stderr_len: i32,
+) -> i32 {
+    let program = cargo_opt::get_array(program_ptr as *const u8, program_len as usize);
+    let program = String::from_utf8_lossy(&program).into_owned();
+    let args = cargo_opt::get_array(args_ptr as *const u8, args_len as usize);
+    let env = cargo_opt::get_array(env_ptr as *const u8, env_len as usize);
+    let cwd = cargo_opt::get_array(cwd_ptr as *const u8, cwd_len as usize);
+
+    let mut argv = vec![program.clone()];
+    argv.extend(
+        args.split(|byte| *byte == 0)
+            .filter(|arg| !arg.is_empty())
+            .map(|arg| String::from_utf8_lossy(arg).into_owned()),
+    );
+
+    let old_env = {
+        let mut virtual_env = VIRTUAL_SHELL_ENV.lock();
+        let old = virtual_env.env.clone();
+        for entry in env
+            .split(|byte| *byte == 0)
+            .filter(|entry| !entry.is_empty())
+        {
+            let entry = String::from_utf8_lossy(entry);
+            let Some((key, _)) = entry.split_once('=') else {
+                continue;
+            };
+            virtual_env
+                .env
+                .retain(|current| !current.starts_with(&format!("{key}=")));
+            virtual_env.env.push(entry.into_owned());
+        }
+        old
+    };
+    let old_cwd = std::env::current_dir().ok();
+    if !cwd.is_empty() {
+        let _ = std::env::set_current_dir(String::from_utf8_lossy(&cwd).as_ref());
+    }
+
+    let outer_output = CARGO_OUTPUT.with(|output| output.borrow_mut().take());
+    CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
+
+    let program_name = Path::new(&program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&program);
+    let status = if program_name == "rustc" {
+        command::set_rustc_opt_args(&argv);
+        run_rustc();
+        RUSTC_EXIT_STATUS.load(Ordering::SeqCst)
+    } else {
+        let message = format!("unsupported child process: {program}");
+        CARGO_OUTPUT.with(|output| {
+            if let Some(output) = output.borrow_mut().as_mut() {
+                output.stderr.extend_from_slice(message.as_bytes());
+            }
+        });
+        127
+    };
+
+    let child_output = CARGO_OUTPUT
+        .with(|output| output.borrow_mut().take())
+        .unwrap_or_default();
+    CARGO_OUTPUT.with(|output| *output.borrow_mut() = outer_output);
+
+    if let Some(old_cwd) = old_cwd {
+        let _ = std::env::set_current_dir(old_cwd);
+    }
+    VIRTUAL_SHELL_ENV.lock().env = old_env;
+
+    write_cargo_owned_spawn_result(
+        child_output.stdout,
+        child_output.stderr,
+        status,
+        out_exit_code,
+        out_stdout_ptr,
+        out_stdout_len,
+        out_stderr_ptr,
+        out_stderr_len,
+    );
+    0
+}
+
+#[cfg(target_os = "wasi")]
+#[link(wasm_import_module = "wasip1_vfs_cargo_opt")]
+unsafe extern "C" {
+    fn wasi_ext_allocate(size: usize) -> *mut u8;
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_cargo_owned_spawn_result(
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    status: i32,
+    out_exit_code: i32,
+    out_stdout_ptr: i32,
+    out_stdout_len: i32,
+    out_stderr_ptr: i32,
+    out_stderr_len: i32,
+) {
+    fn copy_to_cargo(data: &[u8]) -> (i32, i32) {
+        if data.is_empty() {
+            return (0, 0);
+        }
+        let ptr = unsafe { wasi_ext_allocate(data.len()) };
+        cargo_opt::memcpy(ptr, data);
+        (ptr as i32, data.len() as i32)
+    }
+
+    let (stdout_ptr, stdout_len) = copy_to_cargo(&stdout);
+    let (stderr_ptr, stderr_len) = copy_to_cargo(&stderr);
+    cargo_opt::memcpy(out_exit_code as *mut u8, &status.to_ne_bytes());
+    cargo_opt::memcpy(out_stdout_ptr as *mut u8, &stdout_ptr.to_ne_bytes());
+    cargo_opt::memcpy(out_stdout_len as *mut u8, &stdout_len.to_ne_bytes());
+    cargo_opt::memcpy(out_stderr_ptr as *mut u8, &stderr_ptr.to_ne_bytes());
+    cargo_opt::memcpy(out_stderr_len as *mut u8, &stderr_len.to_ne_bytes());
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn sysroot_start_fetch(vfs_shell_triple_ptr: i32, triple_len: i32) {
@@ -471,39 +700,127 @@ pub extern "C" fn host_run_cargo(
     out_status: i32,
 ) -> i32 {
     let req_data = lsp_opt::get_array(req_ptr as *const u8, req_len as usize);
-    let mut out_stdout_ptr_val = 0i32;
-    let mut out_stdout_len_val = 0i32;
-    let mut out_stderr_ptr_val = 0i32;
-    let mut out_stderr_len_val = 0i32;
-    let mut out_status_val = 0i32;
+    let request: serde_json::Value = match serde_json::from_slice(&req_data) {
+        Ok(request) => request,
+        Err(error) => {
+            let stderr = format!("invalid cargo request: {error}");
+            write_cargo_result(
+                Vec::new(),
+                stderr.into_bytes(),
+                1,
+                out_stdout_ptr,
+                out_stdout_len,
+                out_stderr_ptr,
+                out_stderr_len,
+                out_status,
+            );
+            return 0;
+        }
+    };
 
-    // Use a temporary buffer inside vfs to pass the string to the host?
-    // The host bridge takes (s32, s32). It will read from the VFS memory (or rather, the main memory of the component).
-    // Wait! The Component Model bindings `crate::vfs::host::bridge::Lsp::host_run_cargo` expects `req_ptr` and `req_len` to be pointers in THIS component's memory, NOT lsp_opt's memory!
-    // So we must copy the request from lsp_opt to a local Vec, and pass that to the host.
-    let mut local_req = vec![0u8; req_len as usize];
-    local_req.copy_from_slice(&req_data);
+    let Some(args) = request.get("args").and_then(serde_json::Value::as_array) else {
+        write_cargo_result(
+            Vec::new(),
+            b"cargo request is missing args".to_vec(),
+            1,
+            out_stdout_ptr,
+            out_stdout_len,
+            out_stderr_ptr,
+            out_stderr_len,
+            out_status,
+        );
+        return 0;
+    };
+    let args = args
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
 
-    let result = crate::vfs::host::bridge::Lsp::host_run_cargo(
-        local_req.as_ptr() as i32,
-        req_len,
-        &mut out_stdout_ptr_val as *mut _ as i32,
-        &mut out_stdout_len_val as *mut _ as i32,
-        &mut out_stderr_ptr_val as *mut _ as i32,
-        &mut out_stderr_len_val as *mut _ as i32,
-        &mut out_status_val as *mut _ as i32,
+    let _run_guard = CARGO_RUN_LOCK.lock();
+    let old_env = {
+        let mut env = VIRTUAL_SHELL_ENV.lock();
+        let old = env.env.clone();
+        if let Some(envs) = request.get("envs").and_then(serde_json::Value::as_object) {
+            for (key, value) in envs {
+                let Some(value) = value.as_str() else {
+                    continue;
+                };
+                env.env
+                    .retain(|entry| !entry.starts_with(&format!("{key}=")));
+                env.env.push(format!("{key}={value}"));
+            }
+        }
+        old
+    };
+    let old_cwd = std::env::current_dir().ok();
+    if let Some(cwd) = request.get("cwd").and_then(serde_json::Value::as_str) {
+        let _ = std::env::set_current_dir(cwd);
+    }
+
+    command::set_cargo_opt_args(&args);
+    CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
+    run_cargo();
+    let output = CARGO_OUTPUT
+        .with(|output| output.borrow_mut().take())
+        .unwrap_or_default();
+    let status = CARGO_EXIT_STATUS.load(Ordering::SeqCst);
+
+    if let Some(old_cwd) = old_cwd {
+        let _ = std::env::set_current_dir(old_cwd);
+    }
+    VIRTUAL_SHELL_ENV.lock().env = old_env;
+
+    write_cargo_result(
+        output.stdout,
+        output.stderr,
+        status,
+        out_stdout_ptr,
+        out_stdout_len,
+        out_stderr_ptr,
+        out_stderr_len,
+        out_status,
     );
-
-    lsp_opt::memcpy(out_stdout_ptr as *mut u8, &out_stdout_ptr_val.to_ne_bytes());
-    lsp_opt::memcpy(out_stdout_len as *mut u8, &out_stdout_len_val.to_ne_bytes());
-    lsp_opt::memcpy(out_stderr_ptr as *mut u8, &out_stderr_ptr_val.to_ne_bytes());
-    lsp_opt::memcpy(out_stderr_len as *mut u8, &out_stderr_len_val.to_ne_bytes());
-    lsp_opt::memcpy(out_status as *mut u8, &out_status_val.to_ne_bytes());
-
-    result
+    0
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn host_free_memory(ptr: i32, len: i32) {
-    crate::vfs::host::bridge::Lsp::host_free_memory(ptr, len);
+    if ptr == 0 || len <= 0 {
+        return;
+    }
+    let slice = std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize);
+    unsafe {
+        drop(Box::from_raw(slice));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_cargo_result(
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    status: i32,
+    out_stdout_ptr: i32,
+    out_stdout_len: i32,
+    out_stderr_ptr: i32,
+    out_stderr_len: i32,
+    out_status: i32,
+) {
+    fn into_raw(data: Vec<u8>) -> (i32, i32) {
+        if data.is_empty() {
+            return (0, 0);
+        }
+        let data = data.into_boxed_slice();
+        let len = data.len() as i32;
+        let ptr = Box::into_raw(data) as *mut u8 as i32;
+        (ptr, len)
+    }
+
+    let (stdout_ptr, stdout_len) = into_raw(stdout);
+    let (stderr_ptr, stderr_len) = into_raw(stderr);
+    lsp_opt::memcpy(out_stdout_ptr as *mut u8, &stdout_ptr.to_ne_bytes());
+    lsp_opt::memcpy(out_stdout_len as *mut u8, &stdout_len.to_ne_bytes());
+    lsp_opt::memcpy(out_stderr_ptr as *mut u8, &stderr_ptr.to_ne_bytes());
+    lsp_opt::memcpy(out_stderr_len as *mut u8, &stderr_len.to_ne_bytes());
+    lsp_opt::memcpy(out_status as *mut u8, &status.to_ne_bytes());
 }
