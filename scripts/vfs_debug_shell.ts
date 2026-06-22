@@ -1,9 +1,33 @@
 import { ConsoleStdout, File, OpenFile } from "@bjorn3/browser_wasi_shim";
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
+import {
+  buildRepeatedCommands,
+  computeWorkerWatchdogMs,
+  parsePositiveInt,
+} from "./vfs_debug_config.ts";
 
 const command = Deno.args.length === 0 ? ["rustc"] : Deno.args;
-const timeoutMs = Number(Deno.env.get("VFS_DEBUG_TIMEOUT_MS") ?? "15000");
-const threads = Number(Deno.env.get("VFS_DEBUG_THREADS") ?? "2");
+const timeoutMs = parsePositiveInt(
+  Deno.env.get("VFS_DEBUG_TIMEOUT_MS"),
+  15000,
+  "VFS_DEBUG_TIMEOUT_MS",
+);
+const threads = parsePositiveInt(
+  Deno.env.get("VFS_DEBUG_THREADS"),
+  2,
+  "VFS_DEBUG_THREADS",
+);
+const runs = parsePositiveInt(
+  Deno.env.get("VFS_DEBUG_RUNS"),
+  1,
+  "VFS_DEBUG_RUNS",
+);
+const workerWatchdogMs = computeWorkerWatchdogMs({
+  commandTimeoutMs: timeoutMs,
+  runs,
+  perRunMultiplier: 1,
+  graceMs: 60000,
+});
 
 const farm = new WASIFarm(
   new OpenFile(new File([])),
@@ -30,9 +54,9 @@ const result = await new Promise<
       resolve({
         ok: false,
         output: "",
-        error: `debug worker did not respond within ${timeoutMs}ms`,
+        error: `debug worker did not respond within ${workerWatchdogMs}ms`,
       });
-    }, timeoutMs + 60000);
+    }, workerWatchdogMs);
 
     worker.onmessage = (event) => {
       clearTimeout(timer);
@@ -44,7 +68,7 @@ const result = await new Promise<
     };
     worker.postMessage({
       wasiRef: farm.get_ref(),
-      command,
+      commands: buildRepeatedCommands(command, runs),
       threads,
       timeoutMs,
     });

@@ -18,45 +18,49 @@ async function fetchCompile(url) {
 }
 
 globalThis.onmessage = async (message) => {
-	const { wasi_ref } = message.data;
+    try {
+        const { wasi_ref } = message.data;
 
-	const wasm_path = "./vfs.core.wasm";
-	const wasm = await fetchCompile(wasm_path);
+        const wasm_path = "./vfs.core.wasm";
+        const wasm = await fetchCompile(wasm_path);
 
-	const args = ["bin", "arg1", "arg2"];
-	const env = ["FOO=bar"];
+        const args = ["bin", "arg1", "arg2"];
+        const env = ["FOO=bar"];
 
-	const wasi = new WASIFarmAnimal(
-		wasi_ref,
-		args, // args
-		env, // env
-		{
-			can_thread_spawn: true,
-			thread_spawn_worker_url: "./thread_spawn.ts",
-			thread_spawn_wasm: wasm,
-			worker_background_worker_url: "./worker_background_worker.ts",
-            share_memory: {
-                memory: new WebAssembly.Memory({
-                    initial:1031,
+        const wasi = new WASIFarmAnimal(
+            wasi_ref,
+            args, // args
+            env, // env
+            {
+                can_thread_spawn: true,
+                thread_spawn_worker_url: "./thread_spawn.ts",
+                thread_spawn_wasm: wasm,
+                worker_background_worker_url: "./worker_background_worker.ts",
+                share_memory: {
+                    memory: new WebAssembly.Memory({
+                    initial:1032,
                     maximum:65536,
                     shared:true,
                 }),
+                },
             },
-        },
-	);
+        );
 
-	await wasi.wait_worker_background_worker();
+        await wasi.wait_worker_background_worker();
 
-	const root = await custom_instantiate(
-		wasm,
-		wasi.wasiImport,
-		wasi.wasiThreadImport,
-		wasi.get_share_memory(),
-	);
+        const root = await custom_instantiate(
+            wasm,
+            wasi.wasiImport,
+            wasi.wasiThreadImport,
+            wasi.get_share_memory(),
+        );
 
-	// biome-ignore lint/suspicious/noExplicitAny: <explanation>
-	wasi.start(root as any);
+        // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        wasi.start(root as any);
 
-    globalThis.process?.exit(0);
-    globalThis.Deno?.exit(0);
+        globalThis.postMessage({ type: 'exit', code: 0 });
+    } catch (e) {
+        console.error("Worker caught error:", e);
+        globalThis.postMessage({ type: 'exit', code: 1 });
+    }
 };

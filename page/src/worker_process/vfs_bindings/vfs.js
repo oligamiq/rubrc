@@ -27,8 +27,13 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
   const CURRENT_TASK_META = {};
   
   function _getGlobalCurrentTaskMeta(componentIdx) {
+    if (componentIdx === null || componentIdx === undefined) {
+      throw new Error("missing/invalid component idx");
+    }
     const v = CURRENT_TASK_META[componentIdx];
-    if (v === undefined || v === null) { return undefined; }
+    if (v === undefined || v === null) {
+      return undefined;
+    }
     return { ...v };
   }
   
@@ -95,7 +100,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
     const { taskID, componentIdx } = args;
     
     const meta = CURRENT_TASK_META[componentIdx];
-    if (!meta) { throw new Error(`missing current task meta for component idx [${componentIdx}]n`); }
+    if (!meta) { throw new Error(`missing current task meta for component idx [${componentIdx}]`); }
     
     if (meta.taskID !== taskID) {
       throw new Error(`task ID [${meta.taskID}] != requested ID [${taskID}]`);
@@ -1185,91 +1190,66 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
     
     const ERR_CTX_TABLES = {};
     
-    function toInt32(val) {
+    function contextGet(ctx) {
+      const { componentIdx, slot } = ctx;
+      if (componentIdx === undefined) { throw new TypeError("missing component idx"); }
+      if (slot === undefined) { throw new TypeError("missing slot"); }
       
-      return val >> 0;
-    }
-    
-    
-    function toUint32(val) {
-      
-      return val >>> 0;
-    }
-    
-    
-    function getCurrentTask(componentIdx, taskID) {
-      let usedGlobal = false;
-      if (componentIdx === undefined || componentIdx === null) {
-        throw new Error('missing component idx'); // TODO(fix)
-        // componentIdx = ASYNC_CURRENT_COMPONENT_IDXS.at(-1);
-        // usedGlobal = true;
+      const currentTaskMeta = _getGlobalCurrentTaskMeta(componentIdx);
+      if (!currentTaskMeta) {
+        throw new Error(`missing/incomplete global current task meta for component idx [${componentIdx}] during context set`);
       }
+      const taskID = currentTaskMeta.taskID;
       
-      const taskMetas = ASYNC_TASKS_BY_COMPONENT_IDX.get(componentIdx);
-      if (taskMetas === undefined || taskMetas.length === 0) { return undefined; }
+      const taskMeta = getCurrentTask(componentIdx, taskID);
+      if (!taskMeta) { throw new Error('failed to retrieve current task'); }
       
-      if (taskID) {
-        return taskMetas.find(meta => meta.task.id() === taskID);
-      }
+      let task = taskMeta.task;
+      if (!task) { throw new Error('invalid/missing current task in metadata while getting context'); }
       
-      const taskMeta = taskMetas[taskMetas.length - 1];
-      if (!taskMeta || !taskMeta.task) { return undefined; }
-      
-      return taskMeta;
-    }
-    
-    function createNewCurrentTask(args) {
-      _debugLog('[createNewCurrentTask()] args', args);
-      const {
-        componentIdx,
-        isAsync,
-        isManualAsync,
-        entryFnName,
-        parentSubtaskID,
-        callbackFnName,
-        getCallbackFn,
-        getParamsFn,
-        stringEncoding,
-        errHandling,
-        getCalleeParamsFn,
-        resultPtr,
-        callingWasmExport,
-      } = args;
-      if (componentIdx === undefined || componentIdx === null) {
-        throw new Error('missing/invalid component instance index while starting task');
-      }
-      let taskMetas = ASYNC_TASKS_BY_COMPONENT_IDX.get(componentIdx);
-      const callbackFn = getCallbackFn ? getCallbackFn() : null;
-      
-      const newTask = new AsyncTask({
-        componentIdx,
-        isAsync,
-        isManualAsync,
-        entryFnName,
-        callbackFn,
-        callbackFnName,
-        stringEncoding,
-        getCalleeParamsFn,
-        resultPtr,
-        errHandling,
+      _debugLog('[contextGet()] args', {
+        slot,
+        storage: task.storage,
+        taskID: task.id(),
+        componentIdx: task.componentIdx(),
       });
       
-      const newTaskID = newTask.id();
-      const newTaskMeta = { id: newTaskID, componentIdx, task: newTask };
+      if (slot < 0 || slot >= task.storage.length) { throw new Error('invalid slot for current task'); }
       
-      // NOTE: do not track host tasks
-      ASYNC_CURRENT_TASK_IDS.push(newTaskID);
-      ASYNC_CURRENT_COMPONENT_IDXS.push(componentIdx);
-      
-      if (!taskMetas) {
-        taskMetas = [newTaskMeta];
-        ASYNC_TASKS_BY_COMPONENT_IDX.set(componentIdx, [newTaskMeta]);
-      } else {
-        taskMetas.push(newTaskMeta);
-      }
-      
-      return [newTask, newTaskID];
+      return task.storage[slot];
     }
+    
+    
+    function contextSet(ctx, value) {
+      const { componentIdx, slot } = ctx;
+      if (componentIdx === undefined) { throw new TypeError("missing component idx"); }
+      if (slot === undefined) { throw new TypeError("missing slot"); }
+      if (!(_typeCheckValidI32(value))) { throw new Error('invalid value for context set (not valid i32)'); }
+      
+      const currentTaskMeta = _getGlobalCurrentTaskMeta(componentIdx);
+      if (!currentTaskMeta) {
+        throw new Error(`missing/incomplete global current task meta for component idx [${componentIdx}] during context set`);
+      }
+      const taskID = currentTaskMeta.taskID;
+      
+      const taskMeta = getCurrentTask(componentIdx, taskID);
+      if (!taskMeta) { throw new Error('failed to retrieve current task'); }
+      
+      let task = taskMeta.task;
+      if (!task) { throw new Error('invalid/missing current task in metadata while setting context'); }
+      
+      _debugLog('[contextSet()] args', {
+        slot,
+        value,
+        storage: task.storage,
+        taskID: task.id(),
+        componentIdx: task.componentIdx(),
+      });
+      
+      if (slot < 0 || slot >= task.storage.length) { throw new Error('invalid slot for current task'); }
+      task.storage[slot] = value;
+    }
+    
     const ASYNC_TASKS_BY_COMPONENT_IDX = new Map();
     
     class AsyncTask {
@@ -1958,6 +1938,102 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       this.#subtasks = this.#subtasks.filter(t => t !== subtask);
       return subtask;
     }
+  }
+  
+  const ASYNC_EVENT_CODE = {
+    NONE: 0,
+    SUBTASK: 1,
+    STREAM_READ: 2,
+    STREAM_WRITE: 3,
+    FUTURE_READ: 4,
+    FUTURE_WRITE: 5,
+    TASK_CANCELLED: 6,
+  };
+  
+  function getCurrentTask(componentIdx, taskID) {
+    let usedGlobal = false;
+    if (componentIdx === undefined || componentIdx === null) {
+      throw new Error('missing component idx'); // TODO(fix)
+      // componentIdx = ASYNC_CURRENT_COMPONENT_IDXS.at(-1);
+      // usedGlobal = true;
+    }
+    
+    const taskMetas = ASYNC_TASKS_BY_COMPONENT_IDX.get(componentIdx);
+    if (taskMetas === undefined || taskMetas.length === 0) { return undefined; }
+    
+    if (taskID) {
+      return taskMetas.find(meta => meta.task.id() === taskID);
+    }
+    
+    const taskMeta = taskMetas[taskMetas.length - 1];
+    if (!taskMeta || !taskMeta.task) { return undefined; }
+    
+    return taskMeta;
+  }
+  
+  function toInt32(val) {
+    
+    return val >> 0;
+  }
+  
+  
+  function toUint32(val) {
+    
+    return val >>> 0;
+  }
+  
+  
+  function createNewCurrentTask(args) {
+    _debugLog('[createNewCurrentTask()] args', args);
+    const {
+      componentIdx,
+      isAsync,
+      isManualAsync,
+      entryFnName,
+      parentSubtaskID,
+      callbackFnName,
+      getCallbackFn,
+      getParamsFn,
+      stringEncoding,
+      errHandling,
+      getCalleeParamsFn,
+      resultPtr,
+      callingWasmExport,
+    } = args;
+    if (componentIdx === undefined || componentIdx === null) {
+      throw new Error('missing/invalid component instance index while starting task');
+    }
+    let taskMetas = ASYNC_TASKS_BY_COMPONENT_IDX.get(componentIdx);
+    const callbackFn = getCallbackFn ? getCallbackFn() : null;
+    
+    const newTask = new AsyncTask({
+      componentIdx,
+      isAsync,
+      isManualAsync,
+      entryFnName,
+      callbackFn,
+      callbackFnName,
+      stringEncoding,
+      getCalleeParamsFn,
+      resultPtr,
+      errHandling,
+    });
+    
+    const newTaskID = newTask.id();
+    const newTaskMeta = { id: newTaskID, componentIdx, task: newTask };
+    
+    // NOTE: do not track host tasks
+    ASYNC_CURRENT_TASK_IDS.push(newTaskID);
+    ASYNC_CURRENT_COMPONENT_IDXS.push(componentIdx);
+    
+    if (!taskMetas) {
+      taskMetas = [newTaskMeta];
+      ASYNC_TASKS_BY_COMPONENT_IDX.set(componentIdx, [newTaskMeta]);
+    } else {
+      taskMetas.push(newTaskMeta);
+    }
+    
+    return [newTask, newTaskID];
   }
   
   function _lowerImportBackwardsCompat(args) {
@@ -3663,86 +3739,6 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       _trampoline7.fnName = 'vfs:host/bridge#Downloader.downloadFileEnd';
       
       const _trampoline8 = function(arg0, arg1, arg2, arg3) {
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"] [Instruction::CallInterface] (sync, @ enter)');
-        const hostProvided = true;
-        
-        let parentTask;
-        let task;
-        let subtask;
-        
-        const createTask = () => {
-          const results = createNewCurrentTask({
-            componentIdx: -1,
-            isAsync: false,
-            entryFnName: 'Wasip1.fdReadImport',
-            getCallbackFn: () => null,
-            callbackFnName: null,
-            errHandling: 'none',
-            callingWasmExport: false,
-          });
-          task = results[0];
-        };
-        
-        taskCreation: {
-          parentTask = getCurrentTask(
-          0,
-          _getGlobalCurrentTaskMeta(0)?.taskID,
-          )?.task;
-          
-          if (!parentTask) {
-            createTask();
-            break taskCreation;
-          }
-          
-          createTask();
-          
-          if (hostProvided) {
-            subtask = parentTask.getLatestSubtask();
-            if (!subtask) {
-              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
-            }
-            task.setParentSubtask(subtask);
-          }
-        }
-        
-        const started = task.enterSync();
-        
-        let ret;
-        
-        try {
-          ret = _withGlobalCurrentTaskMeta({
-            componentIdx: task.componentIdx(),
-            taskID: task.id(),
-            fn: () => Wasip1.fdReadImport(arg0, arg1, arg2, arg3),
-          })
-          ;
-        } catch (err) {
-          
-          _debugLog('[Instruction::CallInterface] error during sync call', {
-            taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
-            err,
-          });
-          task.setErrored(err);
-          task.reject(err);
-          task.exit();
-          throw err;
-          
-        }
-        
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"][Instruction::Return]', {
-          funcName: '[static]wasip1.fd-read-import',
-          paramCount: 1,
-          async: false,
-          postReturn: false
-        });
-        task.resolve([toInt32(ret)]);
-        task.exit();
-        return toInt32(ret);
-      }
-      _trampoline8.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdReadImport';
-      
-      const _trampoline9 = function(arg0, arg1, arg2, arg3) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-write-import"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
         
@@ -3820,7 +3816,87 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline9.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdWriteImport';
+      _trampoline8.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdWriteImport';
+      
+      const _trampoline9 = function(arg0, arg1, arg2, arg3) {
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"] [Instruction::CallInterface] (sync, @ enter)');
+        const hostProvided = true;
+        
+        let parentTask;
+        let task;
+        let subtask;
+        
+        const createTask = () => {
+          const results = createNewCurrentTask({
+            componentIdx: -1,
+            isAsync: false,
+            entryFnName: 'Wasip1.fdReadImport',
+            getCallbackFn: () => null,
+            callbackFnName: null,
+            errHandling: 'none',
+            callingWasmExport: false,
+          });
+          task = results[0];
+        };
+        
+        taskCreation: {
+          parentTask = getCurrentTask(
+          0,
+          _getGlobalCurrentTaskMeta(0)?.taskID,
+          )?.task;
+          
+          if (!parentTask) {
+            createTask();
+            break taskCreation;
+          }
+          
+          createTask();
+          
+          if (hostProvided) {
+            subtask = parentTask.getLatestSubtask();
+            if (!subtask) {
+              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
+            }
+            task.setParentSubtask(subtask);
+          }
+        }
+        
+        const started = task.enterSync();
+        
+        let ret;
+        
+        try {
+          ret = _withGlobalCurrentTaskMeta({
+            componentIdx: task.componentIdx(),
+            taskID: task.id(),
+            fn: () => Wasip1.fdReadImport(arg0, arg1, arg2, arg3),
+          })
+          ;
+        } catch (err) {
+          
+          _debugLog('[Instruction::CallInterface] error during sync call', {
+            taskID: task.id(),
+            subtaskID: currentSubtask?.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"][Instruction::Return]', {
+          funcName: '[static]wasip1.fd-read-import',
+          paramCount: 1,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([toInt32(ret)]);
+        task.exit();
+        return toInt32(ret);
+      }
+      _trampoline9.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdReadImport';
       
       const _trampoline10 = function(arg0) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-threads-import", function="[static]wasip1-threads.thread-spawn-import"] [Instruction::CallInterface] (sync, @ enter)');
@@ -6972,9 +7048,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           '[static]wasip1.fd-filestat-get-import': trampoline19,
           '[static]wasip1.fd-prestat-dir-name-import': trampoline21,
           '[static]wasip1.fd-prestat-get-import': trampoline20,
-          '[static]wasip1.fd-read-import': trampoline8,
+          '[static]wasip1.fd-read-import': trampoline9,
           '[static]wasip1.fd-readdir-import': trampoline22,
-          '[static]wasip1.fd-write-import': trampoline9,
+          '[static]wasip1.fd-write-import': trampoline8,
           '[static]wasip1.path-create-directory-import': trampoline23,
           '[static]wasip1.path-filestat-get-import': trampoline24,
           '[static]wasip1.path-open-import': trampoline25,

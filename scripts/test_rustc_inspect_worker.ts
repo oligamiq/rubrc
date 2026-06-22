@@ -16,18 +16,14 @@ async function compile(filename: string): Promise<WebAssembly.Module> {
   );
 }
 
-globalThis.onmessage = async (event) => {
-  const {
-    wasiRef,
-    command,
-    threads,
-    timeoutMs,
-    sourceCode,
-  } = event.data;
-  let output = "";
+function hasReturnedToPrompt(output: string): boolean {
+  const returnIndex = output.indexOf("[vfs-debug] command:return");
+  return returnIndex !== -1 && output.indexOf(" $ ", returnIndex) !== -1;
+}
 
-  let sysroot_queue: any[] = [];
-  let current_sysroot_file: any = null;
+globalThis.onmessage = async (event) => {
+  const { wasiRef, commands, threads, timeoutMs, sourceCode } = event.data;
+  let output = "";
 
   try {
     const wasm = await compile("vfs.core.wasm");
@@ -45,7 +41,7 @@ globalThis.onmessage = async (event) => {
         ).href,
         share_memory: {
           memory: new WebAssembly.Memory({
-            initial: 1031,
+            initial: 1032,
             maximum: 32775,
             shared: true,
           }),
@@ -59,7 +55,7 @@ globalThis.onmessage = async (event) => {
       animal.wasiImport,
       animal.wasiThreadImport,
       animal.get_share_memory(),
-      (_index, unknown: { name?: string, args?: any }) => {
+      (_index, unknown: { name?: string; args?: any }) => {
         // Just return dummy data for sysroot fetch since we preopen it
         if (unknown.name === "sysrootStartFetch") {
           return {};
@@ -101,8 +97,8 @@ globalThis.onmessage = async (event) => {
     const sessionId = 1;
     root.dispatch(sessionId, 3, 0, 0);
 
-    const promptDeadline = Date.now() + timeoutMs;
-    while (Date.now() < promptDeadline && !output.includes(" $ ")) {
+    const promptDeadline = performance.now() + timeoutMs;
+    while (performance.now() < promptDeadline && !output.includes(" $ ")) {
       output += drainOutput();
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -111,38 +107,47 @@ globalThis.onmessage = async (event) => {
     }
 
     // Insert the source file using EVENT_TYPE_WRITE_FILE (7)
-    const writeReq = JSON.stringify({ path: "/src/main.rs", content: sourceCode });
+    const writeReq = JSON.stringify({
+      path: "/src/main.rs",
+      content: sourceCode,
+    });
     const writeBytes = new TextEncoder().encode(writeReq);
     const writePtr = root.allocBuf(writeBytes.length);
     new Uint8Array(memory.buffer).set(writeBytes, writePtr);
-    root.dispatch(0xEEEEEEEE, 7, writePtr, writeBytes.length);
+    root.dispatch(0xeeeeeeee, 7, writePtr, writeBytes.length);
     root.freeBuf(writePtr, writeBytes.length);
 
-    // Now run rustc sequentially
-    const commandsToRun = [
-      command.join(" ")
-    ];
-
-    for (const cmd of commandsToRun) {
-      output += `\nRunning: ${cmd}\n`;
+    for (let index = 0; index < commands.length; index++) {
+      const cmd = commands[index].join(" ");
+      let runOutput = "";
+      output += `\n[vfs-debug-driver] run:${
+        index + 1
+      }/${commands.length}:enter ${cmd}\n`;
       for (const character of `${cmd}\r`) {
         root.dispatch(sessionId, 0, character.codePointAt(0) ?? 0, 0);
       }
 
-      const deadline = Date.now() + timeoutMs * 2;
+      const deadline = performance.now() + timeoutMs * 2;
       let cmdDone = false;
-      while (Date.now() < deadline) {
-        output += drainOutput();
-        if (output.includes("[vfs-debug] command:return")) {
+      while (performance.now() < deadline) {
+        const chunk = drainOutput();
+        output += chunk;
+        runOutput += chunk;
+        if (hasReturnedToPrompt(runOutput)) {
           cmdDone = true;
-          // Clear the [vfs-debug] markers from output if we want, or leave them
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       if (!cmdDone) {
-        throw new Error(`Command timed out: ${cmd}`);
+        output += drainOutput();
+        throw new Error(
+          `Command timed out on run ${index + 1}/${commands.length}: ${cmd}`,
+        );
       }
+      output += `[vfs-debug-driver] run:${
+        index + 1
+      }/${commands.length}:return ${cmd}\n`;
     }
 
     root.dispatch(sessionId, 5, 0, 0);
@@ -153,7 +158,7 @@ globalThis.onmessage = async (event) => {
       ok: false,
       output,
       error: error instanceof Error
-        ? error.stack ?? error.message
+        ? (error.stack ?? error.message)
         : String(error),
     });
   }

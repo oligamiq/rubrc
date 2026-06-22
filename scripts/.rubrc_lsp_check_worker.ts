@@ -8,7 +8,7 @@ const bindingsDir = new URL(
   "../page/src/worker_process/vfs_bindings/",
   import.meta.url,
 );
-const LSP_SESSION_ID = 0xFFFF_FFFF;
+const LSP_SESSION_ID = 0xffff_ffff;
 
 globalThis.addEventListener("error", (event) => {
   console.error("[worker error]", event.error ?? event.message);
@@ -38,7 +38,7 @@ globalThis.onmessage = async (event) => {
         ).href,
         share_memory: {
           memory: new WebAssembly.Memory({
-            initial: 1031,
+            initial: 1032,
             maximum: 32775,
             shared: true,
           }),
@@ -83,13 +83,25 @@ globalThis.onmessage = async (event) => {
     );
 
     animal.start(root);
-    const virtualThreadIdCounter = new Uint32Array(sharedMemory.buffer, 1084028, 1);
+    const virtualThreadIdCounter = new Uint32Array(
+      sharedMemory.buffer,
+      1084028,
+      1,
+    );
     console.log("[virtual thread id counter]", virtualThreadIdCounter[0]);
     Atomics.store(virtualThreadIdCounter, 0, 1000);
-    const virtualThreadPoolMax = new Uint32Array(sharedMemory.buffer, 1083752, 1);
+    const virtualThreadPoolMax = new Uint32Array(
+      sharedMemory.buffer,
+      1083752,
+      1,
+    );
     console.log("[virtual thread pool max]", virtualThreadPoolMax[0]);
     Atomics.store(virtualThreadPoolMax, 0, 100);
-    const virtualThreadPoolCount = new Uint32Array(sharedMemory.buffer, 1083756, 1);
+    const virtualThreadPoolCount = new Uint32Array(
+      sharedMemory.buffer,
+      1083756,
+      1,
+    );
     console.log("[virtual thread pool count]", virtualThreadPoolCount[0]);
     Atomics.store(virtualThreadPoolCount, 0, 100);
 
@@ -123,7 +135,8 @@ globalThis.onmessage = async (event) => {
         (stackPointer & 3) !== 0 ||
         tlsBase !== stackPointer + 24 ||
         stackPointer >= sharedMemory.buffer.byteLength
-      ) continue;
+      )
+        continue;
       const moduleBase = address - stackPointer;
       if (moduleBase < 0 || (moduleBase & 0xffff) !== 0) continue;
       threadArgs.push({
@@ -162,7 +175,8 @@ globalThis.onmessage = async (event) => {
   } catch (error) {
     globalThis.postMessage({
       ok: false,
-      detail: error instanceof Error ? error.stack ?? error.message : String(error),
+      detail:
+        error instanceof Error ? (error.stack ?? error.message) : String(error),
     });
   }
 };

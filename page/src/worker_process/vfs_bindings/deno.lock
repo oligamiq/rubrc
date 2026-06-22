@@ -2,7 +2,7 @@
   "version": "5",
   "specifiers": {
     "npm:@bjorn3/browser_wasi_shim@0.4": "0.4.2",
-    "npm:@oligami/browser_wasi_shim-threads@0.3": "0.3.6_@bjorn3+browser_wasi_shim@0.4.2",
+    "npm:@oligami/browser_wasi_shim-threads@0.3": "0.3.7_@bjorn3+browser_wasi_shim@0.4.2",
     "npm:@xterm/xterm@^5.5.0": "5.5.0",
     "npm:ts-node@^10.9.2": "10.9.2_@types+node@25.9.1_typescript@6.0.3",
     "npm:vite@8": "8.0.14_@types+node@25.9.1",
@@ -58,8 +58,8 @@
         "@tybys/wasm-util"
       ]
     },
-    "@oligami/browser_wasi_shim-threads@0.3.6_@bjorn3+browser_wasi_shim@0.4.2": {
-      "integrity": "sha512-BVCyyXyI1AE7vp1kjmSNYxnPZFL+uqCqYBfgFWb7Qb5K16psbndo1nASXBj0tLTu/iKvwITChq+WBLlFJWwEVA==",
+    "@oligami/browser_wasi_shim-threads@0.3.7_@bjorn3+browser_wasi_shim@0.4.2": {
+      "integrity": "sha512-UKKPxtcaKOVTquQ8TUGVnqUBYCWq8lWvs9KQoC24SKdRODoN+S/Af6mR5VWJyOlG3lYKcaze7DnTYCYTM/f4tA==",
       "dependencies": [
         "@bjorn3/browser_wasi_shim"
       ]

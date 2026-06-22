@@ -61,6 +61,16 @@ if (!isNode) {
 	worker.postMessage({
 		wasi_ref: farm.get_ref(),
 	});
+
+	worker.onmessage = (e) => {
+		if (e.data.type === 'exit') {
+			if (globalThis.process?.exit) {
+				globalThis.process.exit(e.data.code);
+			} else if (globalThis.Deno?.exit) {
+				globalThis.Deno.exit(e.data.code);
+			}
+		}
+	};
 } else {
 	farm = new WASIFarm(
 		new OpenFile(new File([])), // stdin
@@ -74,4 +84,42 @@ if (!isNode) {
 	worker.postMessage({
         wasi_ref: farm.get_ref(),
 	});
+
+	if (typeof worker.on === "function") {
+		worker.on("error", (err: any) => {
+			console.error("Worker error:", err);
+			if (globalThis.process?.exit) {
+				globalThis.process.exit(1);
+			} else if (globalThis.Deno?.exit) {
+				globalThis.Deno.exit(1);
+			}
+		});
+		worker.on("message", (e: any) => {
+			if (e && e.type === 'exit') {
+				if (globalThis.process?.exit) {
+					globalThis.process.exit(e.code);
+				} else if (globalThis.Deno?.exit) {
+					globalThis.Deno.exit(e.code);
+				}
+			}
+		});
+	} else {
+		worker.onerror = (err: any) => {
+			console.error("Worker error:", err);
+			if (globalThis.process?.exit) {
+				globalThis.process.exit(1);
+			} else if (globalThis.Deno?.exit) {
+				globalThis.Deno.exit(1);
+			}
+		};
+		worker.onmessage = (e: any) => {
+			if (e.data && e.data.type === 'exit') {
+				if (globalThis.process?.exit) {
+					globalThis.process.exit(e.data.code);
+				} else if (globalThis.Deno?.exit) {
+					globalThis.Deno.exit(e.data.code);
+				}
+			}
+		};
+	}
 }

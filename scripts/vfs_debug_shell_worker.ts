@@ -16,15 +16,20 @@ async function compile(filename: string): Promise<WebAssembly.Module> {
   );
 }
 
+function hasReturnedToPrompt(output: string): boolean {
+  const returnIndex = output.indexOf("[vfs-debug] command:return");
+  return returnIndex !== -1 && output.indexOf(" $ ", returnIndex) !== -1;
+}
+
 globalThis.onmessage = async (event) => {
   const {
     wasiRef,
-    command,
+    commands,
     threads,
     timeoutMs,
   }: {
     wasiRef: unknown;
-    command: string[];
+    commands: string[][];
     threads: number;
     timeoutMs: number;
   } = event.data;
@@ -46,7 +51,7 @@ globalThis.onmessage = async (event) => {
         ).href,
         share_memory: {
           memory: new WebAssembly.Memory({
-            initial: 1031,
+            initial: 1032,
             maximum: 32775,
             shared: true,
           }),
@@ -61,9 +66,21 @@ globalThis.onmessage = async (event) => {
       animal.wasiThreadImport,
       animal.get_share_memory(),
       (_index, message: { name?: string }) => {
-        throw new Error(
-          `unexpected host callback: ${message?.name ?? "unknown"}`,
-        );
+        if (message.name === "terminalWrite") {
+          return {};
+        } else if (message.name === "sysrootStartFetch") {
+          return {};
+        } else if (message.name === "sysrootGetNextFileMeta") {
+          return { has_file: false, name_len: 0, data_len: 0 };
+        } else if (message.name === "sysrootReadFileName") {
+          return { name: [] };
+        } else if (message.name === "sysrootReadFileChunk") {
+          return { chunk: [] };
+        } else {
+          throw new Error(
+            `unexpected host callback: ${message?.name ?? "unknown"}`,
+          );
+        }
       },
     );
 
@@ -91,8 +108,8 @@ globalThis.onmessage = async (event) => {
     const sessionId = 1;
     root.dispatch(sessionId, 3, 0, 0);
 
-    const promptDeadline = Date.now() + timeoutMs;
-    while (Date.now() < promptDeadline && !output.includes(" $ ")) {
+    const promptDeadline = performance.now() + timeoutMs;
+    while (performance.now() < promptDeadline && !output.includes(" $ ")) {
       output += drainOutput();
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -100,34 +117,53 @@ globalThis.onmessage = async (event) => {
       throw new Error(`initial shell prompt timed out after ${timeoutMs}ms`);
     }
 
-    for (const character of `${command.join(" ")}\r`) {
-      root.dispatch(sessionId, 0, character.codePointAt(0) ?? 0, 0);
-    }
+    for (let index = 0; index < commands.length; index++) {
+      const command = commands[index].join(" ");
+      let runOutput = "";
+      output += `\n[vfs-debug-driver] run:${
+        index + 1
+      }/${commands.length}:enter ${command}\n`;
 
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      output += drainOutput();
-      if (output.includes("[vfs-debug] command:return")) {
-        root.dispatch(sessionId, 5, 0, 0);
-        root.debugSetTerminalCapture(false);
-        globalThis.postMessage({ ok: true, output });
-        return;
+      for (const character of `${command}\r`) {
+        root.dispatch(sessionId, 0, character.codePointAt(0) ?? 0, 0);
       }
-      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      const deadline = performance.now() + timeoutMs;
+      let cmdDone = false;
+      while (performance.now() < deadline) {
+        const chunk = drainOutput();
+        output += chunk;
+        runOutput += chunk;
+        if (hasReturnedToPrompt(runOutput)) {
+          cmdDone = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+
+      if (!cmdDone) {
+        output += drainOutput();
+        throw new Error(
+          `command timed out after ${timeoutMs}ms on run ${
+            index + 1
+          }/${commands.length}: ${command}`,
+        );
+      }
+
+      output += `[vfs-debug-driver] run:${
+        index + 1
+      }/${commands.length}:return ${command}\n`;
     }
 
-    output += drainOutput();
-    globalThis.postMessage({
-      ok: false,
-      output,
-      error: `command timed out after ${timeoutMs}ms`,
-    });
+    root.dispatch(sessionId, 5, 0, 0);
+    root.debugSetTerminalCapture(false);
+    globalThis.postMessage({ ok: true, output });
   } catch (error) {
     globalThis.postMessage({
       ok: false,
       output,
       error: error instanceof Error
-        ? error.stack ?? error.message
+        ? (error.stack ?? error.message)
         : String(error),
     });
   }
