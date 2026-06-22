@@ -238,6 +238,16 @@ globalThis.addEventListener("message", async (event) => {
       (async () => {
         try {
           console.log(`[Worker] input_string for session ${sessionId}, length: ${data.length}`);
+          if (sessionId !== LSP_SESSION_ID && sessionId !== 0xEEEEEEEE) {
+            for (const char of data) {
+              const codePoint = char.codePointAt(0);
+              if (codePoint !== undefined) {
+                vfs_root.dispatch(sessionId, 0, codePoint, 0);
+              }
+            }
+            return;
+          }
+
           const bytes = new TextEncoder().encode(data);
           const ptr = vfs_root.allocBuf(bytes.length);
           console.log(`[Worker] Allocated buffer at ${ptr}, copying ${bytes.length} bytes`);
