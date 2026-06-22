@@ -174,13 +174,13 @@ export const SetupMyTerminal = (props: {
 
     // Map ANSI escape sequences to custom wasi-shell key codes
     const keyMap: Record<string, number> = {
-      "\x1b[A": 1001, "\x1bOA": 1001, // Up
-      "\x1b[B": 1002, "\x1bOB": 1002, // Down
-      "\x1b[C": 1003, "\x1bOC": 1003, // Right
-      "\x1b[D": 1004, "\x1bOD": 1004, // Left
-      "\x1b[H": 1005, "\x1bOH": 1005, "\x1b[1~": 1005, // Home
-      "\x1b[F": 1006, "\x1bOF": 1006, "\x1b[4~": 1006, // End
-      "\x1b[3~": 1007 // Delete
+      "\x1b[A": 0x110001, "\x1bOA": 0x110001, // Up
+      "\x1b[B": 0x110002, "\x1bOB": 0x110002, // Down
+      "\x1b[C": 0x110003, "\x1bOC": 0x110003, // Right
+      "\x1b[D": 0x110004, "\x1bOD": 0x110004, // Left
+      "\x1b[H": 0x110005, "\x1bOH": 0x110005, "\x1b[1~": 0x110005, // Home
+      "\x1b[F": 0x110006, "\x1bOF": 0x110006, "\x1b[4~": 0x110006, // End
+      "\x1b[3~": 0x110007 // Delete
     };
 
     if (keyMap[data]) {
@@ -194,11 +194,18 @@ export const SetupMyTerminal = (props: {
     }
 
     for (let i = 0; i < data.length; i++) {
-      if (data.charCodeAt(i) === 3) {
+      const codePoint = data.codePointAt(i);
+      if (codePoint === undefined) {
+        continue;
+      }
+      if (codePoint === 3) {
         interrupt_fn({ sessionId: props.sessionId }).catch(console.error);
         continue;
       }
-      input_char({ sessionId: props.sessionId, c: data.charCodeAt(i) }).catch(console.error);
+      input_char({ sessionId: props.sessionId, c: codePoint }).catch(console.error);
+      if (codePoint > 0xffff) {
+        i++;
+      }
     }
   };
 

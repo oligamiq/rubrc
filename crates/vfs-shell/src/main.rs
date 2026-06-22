@@ -8,8 +8,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, LazyLock, Mutex};
 use strum::FromRepr;
+use unicode_width::UnicodeWidthStr;
 use wasi_shell::{
-    CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor, handle_parallel,
+    handle_parallel, CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor,
 };
 
 thread_local! {
@@ -32,6 +33,23 @@ fn normalize_path_logical(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+// ============================================================
+// Special key code → ANSI escape sequence translation
+// ============================================================
+
+fn special_key_bytes(c: u32) -> Option<&'static [u8]> {
+    match c {
+        0x110001 => Some(b"\x1b[A"),
+        0x110002 => Some(b"\x1b[B"),
+        0x110003 => Some(b"\x1b[C"),
+        0x110004 => Some(b"\x1b[D"),
+        0x110005 => Some(b"\x1b[H"),
+        0x110006 => Some(b"\x1b[F"),
+        0x110007 => Some(b"\x1b[3~"),
+        _ => None,
+    }
 }
 
 // ============================================================
@@ -62,10 +80,10 @@ impl<'a> KeyEventHandler for TerminalEchoHandler<'a> {
                 write!(self.writer, "{c}").unwrap();
             }
             KeyEvent::Right => {
-                write!(self.writer, "\x1b[1C").unwrap();
+                self.needs_redraw = true;
             }
             KeyEvent::Left => {
-                write!(self.writer, "\x1b[1D").unwrap();
+                self.needs_redraw = true;
             }
             _ => {
                 self.needs_redraw = true;
@@ -630,8 +648,15 @@ impl Read for CommandStdin {
                         }
                         return Ok(len);
                     } else {
-                        buf[0] = c as u8;
-                        return Ok(1);
+                        if let Some(bytes) = special_key_bytes(c) {
+                            let len = std::cmp::min(buf.len(), bytes.len());
+                            buf[..len].copy_from_slice(&bytes[..len]);
+                            if len < bytes.len() {
+                                self.buffer.extend_from_slice(&bytes[len..]);
+                            }
+                            return Ok(len);
+                        }
+                        continue;
                     }
                 }
                 SessionEvent::InputString(s) => {
@@ -779,7 +804,7 @@ fn process_input_char(
         cancellation_token.reset();
     }
 
-    let len_before = line_reader.buffer().chars().count();
+    let len_before = line_reader.buffer().len();
     let mut handler = TerminalEchoHandler {
         needs_redraw: false,
         writer: stdout,
@@ -794,20 +819,25 @@ fn process_input_char(
         write!(stdout, "\x1b[K").unwrap();
 
         let pos = line_reader.cursor_pos();
-        let len = buffer.chars().count();
-        if pos < len {
-            write!(stdout, "\x1b[{}D", len - pos).unwrap();
+        if pos < buffer.len() {
+            let suffix_width = UnicodeWidthStr::width(&buffer[pos..]);
+            if suffix_width > 0 {
+                write!(stdout, "\x1b[{}D", suffix_width).unwrap();
+            }
         }
         stdout.flush().unwrap();
     } else {
         let pos_after = line_reader.cursor_pos();
-        let len_after = line_reader.buffer().chars().count();
+        let len_after = line_reader.buffer().len();
         if len_after > len_before && pos_after < len_after {
             let buffer = line_reader.buffer();
-            let rest: String = buffer.chars().skip(pos_after).collect();
+            let rest = &buffer[pos_after..];
             if !rest.is_empty() {
                 write!(stdout, "{}", rest).unwrap();
-                write!(stdout, "\x1b[{}D", rest.chars().count()).unwrap();
+                let rest_width = UnicodeWidthStr::width(rest);
+                if rest_width > 0 {
+                    write!(stdout, "\x1b[{}D", rest_width).unwrap();
+                }
                 stdout.flush().unwrap();
             }
         }

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../src/worker_process/util_cmd.ts", import.meta.url), "utf8");
+const xtermSource = readFileSync(new URL("../src/xterm.tsx", import.meta.url), "utf8");
 
 const handlerStart = source.indexOf("new SharedObject(({ sessionId, data }: { sessionId: number, data: string }) =>");
 if (handlerStart === -1) {
@@ -48,4 +49,16 @@ if (!normalBranch.includes("vfs_root.dispatch(sessionId, 0, codePoint, 0)")) {
 
 if (!normalBranch.includes("return;")) {
   throw new Error("Normal WebShell input_string must return before pointer-based dispatch");
+}
+
+if (!xtermSource.includes("0x110001")) {
+  throw new Error("Special key codes must be above the Unicode scalar range");
+}
+
+if (!xtermSource.includes("data.codePointAt(i)")) {
+  throw new Error("Single-character xterm input must use codePointAt for Unicode input");
+}
+
+if (!xtermSource.includes("codePoint > 0xffff")) {
+  throw new Error("Single-character xterm input must skip low surrogates after non-BMP code points");
 }
