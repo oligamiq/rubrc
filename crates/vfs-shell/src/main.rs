@@ -261,17 +261,47 @@ fn format_size(size: usize) -> String {
 static BUILTIN_REGISTRY: LazyLock<Arc<CommandRegistry>> =
     LazyLock::new(|| Arc::new(CommandRegistry::with_builtins()));
 
+const VFS_COMMANDS: &[&str] = &["cargo", "clang", "download", "llvm", "rust-analyzer", "rustc"];
+const SESSION_COMMANDS: &[&str] = &["load_src", "load_sysroot"];
+
+fn print_available_commands(io: &mut IoContext) {
+    writeln!(io.stdout, "{}", "Available Commands:".yellow().bold()).unwrap();
+
+    let mut builtins: Vec<&str> = BUILTIN_REGISTRY.command_names();
+    builtins.sort();
+    writeln!(io.stdout, "  Builtins:  {}", builtins.join(", ")).unwrap();
+
+    let mut vfs_cmds: Vec<&str> = VFS_COMMANDS.iter().copied().collect();
+    vfs_cmds.sort();
+    writeln!(io.stdout, "  External:  {}", vfs_cmds.join(", ")).unwrap();
+
+    let mut session_cmds: Vec<&str> = SESSION_COMMANDS.iter().copied().collect();
+    session_cmds.sort();
+    writeln!(io.stdout, "  Session:   {}", session_cmds.join(", ")).unwrap();
+}
+
 fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
     let mut reg = CommandRegistry::new();
 
-    // Register session-aware wrappers for common built-ins
-    for cmd in ["sl", "ls", "tree", "seq", "grep", "head", "help", "pwd"] {
+    // Register session-aware wrappers for ALL built-in commands so that
+    // every utility (echo, cat, rm, …) gets the session id set before
+    // execution.  Commands that need custom session handling (cd,
+    // load_sysroot, …) are registered afterwards and override the wrapper.
+    for cmd in BUILTIN_REGISTRY.command_names() {
         let sid = session_id;
-        reg.register(cmd, move |args, io| {
+        reg.register(cmd.to_string(), move |args, io| {
             unsafe { vfs_set_current_session_id(sid) };
             (**BUILTIN_REGISTRY).execute(args, io)
         });
     }
+
+    // Override help to list VFS and session commands in addition to builtins.
+    let sid = session_id;
+    reg.register("help", move |_args, io| {
+        unsafe { vfs_set_current_session_id(sid) };
+        print_available_commands(io);
+        Ok(())
+    });
 
     let sid = session_id;
     reg.register("load_sysroot", move |args, io| {
@@ -446,32 +476,36 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
     let sid = session_id;
     reg.set_fallback(move |args: &[String], io: &mut IoContext| {
         unsafe { vfs_set_current_session_id(sid) };
-        writeln!(io.stdout, "Executing command: {:?}", args).unwrap();
 
-        let args_str = args.join("\0"); // serialize args with NUL separator
-        let context_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let cmd = args.get(0).map(|s| s.as_str()).unwrap_or("");
 
-        // Store args in vfs-shell's memory for vfs to read via memcpy_to
-        *CMD_ARGS.lock().unwrap() = args_str.into_bytes();
+        if VFS_COMMANDS.contains(&cmd) {
+            let args_str = args.join("\0");
+            let context_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
 
-        // Register IoContext with Mutex for thread-safe writes
-        IO_REGISTRY.insert(
-            context_id,
-            Mutex::new(IoPtr {
-                io: io as *mut _ as usize,
-                session_id: sid,
-            }),
-        );
+            *CMD_ARGS.lock().unwrap() = args_str.into_bytes();
 
-        // Call into vfs — scalar only, no pointer crossing Wasm boundary
-        let status = unsafe { vfs_execute_command(context_id) };
+            IO_REGISTRY.insert(
+                context_id,
+                Mutex::new(IoPtr {
+                    io: io as *mut _ as usize,
+                    session_id: sid,
+                }),
+            );
 
-        IO_REGISTRY.remove(&context_id);
+            let status = unsafe { vfs_execute_command(context_id) };
 
-        if status == 0 {
-            Ok(())
+            IO_REGISTRY.remove(&context_id);
+
+            if status == 0 {
+                Ok(())
+            } else {
+                Err(format!("Command exited with status: {}", status))
+            }
         } else {
-            Err(format!("Command exited with status: {}", status))
+            writeln!(io.stdout, "{}", format!("command not found: {}", cmd).red()).unwrap();
+            print_available_commands(io);
+            Ok(())
         }
     });
     Arc::new(reg)
