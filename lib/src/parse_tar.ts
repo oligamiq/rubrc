@@ -29,72 +29,111 @@ export async function parseTar(
 ) {
   const reader = readable_stream.getReader();
 
-  let buffer = new Uint8Array(0);
-  let done = false;
-
-  const check_stream = async () => {
-    const { done: _done, value } = await reader.read();
-
-    if (value) {
-      const new_buffer = new Uint8Array(buffer.length + value.length);
-
-      new_buffer.set(buffer);
-      new_buffer.set(value, buffer.length);
-
-      buffer = new_buffer;
+  const chunks: Uint8Array[] = [];
+  let totalLength = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
     }
+    if (value) {
+      chunks.push(value);
+      totalLength += value.length;
+    }
+  }
 
-    done = _done;
-  };
+  const buffer = new Uint8Array(totalLength);
+  let writeOffset = 0;
+  for (const chunk of chunks) {
+    buffer.set(chunk, writeOffset);
+    writeOffset += chunk.length;
+  }
+  chunks.length = 0;
+
+  let offset = 0;
+  let nextLongName: string | undefined;
 
   while (true) {
-    while (buffer.length < 512 && !done) {
-      await check_stream();
+    if (offset === buffer.length) {
+      break;
+    }
+    if (buffer.length - offset < 512) {
+      throw new Error("Truncated tar header");
     }
 
     // File name (offset: 0 - length: 100)
-    const name = _readString(buffer, 0, 100);
+    let name = _readString(buffer, offset, 100);
     if (name.length === 0) {
       break;
     }
 
     // File mode (offset: 100 - length: 8)
-    const mode = _readString(buffer, 100, 8);
+    const mode = _readString(buffer, offset + 100, 8);
 
     // File uid (offset: 108 - length: 8)
-    const uid = Number.parseInt(_readString(buffer, 108, 8));
+    const uid = _readNumber(buffer, offset + 108, 8);
 
     // File gid (offset: 116 - length: 8)
-    const gid = Number.parseInt(_readString(buffer, 116, 8));
+    const gid = _readNumber(buffer, offset + 116, 8);
 
     // File size (offset: 124 - length: 12)
-    const size = _readNumber(buffer, 124, 12);
+    const size = _readNumber(buffer, offset + 124, 12);
 
     // File mtime (offset: 136 - length: 12)
-    const mtime = _readNumber(buffer, 136, 12);
+    const mtime = _readNumber(buffer, offset + 136, 12);
 
     // File type (offset: 156 - length: 1)
-    const _type = _readNumber(buffer, 156, 1);
-    const type = _type === 0 ? "file" : _type === 5 ? "directory" : _type; // prettier-ignore
+    const _type = String.fromCharCode(buffer[offset + 156] ?? 0);
+    const type = _type === "\0" || _type === "0"
+      ? "file"
+      : _type === "5"
+      ? "directory"
+      : _type; // prettier-ignore
 
-    // Ustar indicator (offset: 257 - length: 6)
-    // Ignore
+    // Ustar prefix (offset: 345 - length: 155)
+    const prefix = _readString(buffer, offset + 345, 155);
+    if (nextLongName !== undefined) {
+      name = nextLongName;
+      nextLongName = undefined;
+    } else if (prefix.length !== 0) {
+      name = `${prefix}/${name}`;
+    }
 
     // Ustar version (offset: 263 - length: 2)
     // Ignore
 
     // File owner user (offset: 265 - length: 32)
-    const user = _readString(buffer, 265, 32);
+    const user = _readString(buffer, offset + 265, 32);
 
     // File owner group (offset: 297 - length: 32)
-    const group = _readString(buffer, 297, 32);
+    const group = _readString(buffer, offset + 297, 32);
 
     // File data (offset: 512 - length: size)
-    while (buffer.length < 512 + size) {
-      await check_stream();
+    if (buffer.length - offset < 512 + size) {
+      throw new Error(`Truncated tar entry: ${name}`);
     }
 
-    const data = buffer.slice(512, 512 + size);
+    const data = buffer.subarray(offset + 512, offset + 512 + size);
+
+    let adjusted_size = 512 + 512 * Math.trunc(size / 512);
+    if (size % 512) {
+      adjusted_size += 512;
+    }
+
+    if (buffer.length - offset < adjusted_size) {
+      throw new Error(`Truncated tar padding: ${name}`);
+    }
+
+    if (_type === "L") {
+      nextLongName = new TextDecoder().decode(data).replace(/\0.*$/s, "");
+      offset += adjusted_size;
+      continue;
+    }
+
+    if (_type === "x" || _type === "g") {
+      offset += adjusted_size;
+      continue;
+    }
 
     const file = {
       name,
@@ -116,20 +155,7 @@ export async function parseTar(
 
     callback(file);
 
-    let adjusted_size = 512 + 512 * Math.trunc(size / 512);
-    if (size % 512) {
-      adjusted_size += 512;
-    }
-
-    while (buffer.length < adjusted_size && !done) {
-      await check_stream();
-    }
-
-    if (done && buffer.length < adjusted_size) {
-      break;
-    }
-
-    buffer = buffer.slice(adjusted_size);
+    offset += adjusted_size;
   }
 }
 
@@ -137,14 +163,17 @@ function _readString(buffer: Uint8Array, offset: number, size: number) {
   const view = buffer.slice(offset, offset + size);
   const i = view.indexOf(0);
   const td = new TextDecoder();
-  return td.decode(view.slice(0, i));
+  return td.decode(view.slice(0, i === -1 ? undefined : i));
 }
 
 function _readNumber(buffer: Uint8Array, offset: number, size: number) {
-  const view = buffer.slice(offset, offset + size);
-  let str = "";
-  for (let i = 0; i < size; i++) {
-    str += String.fromCodePoint(view[i]);
+  const value = _readString(buffer, offset, size).trim();
+  if (value === "") {
+    return 0;
   }
-  return Number.parseInt(str, 8);
+  const parsed = Number.parseInt(value, 8);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Invalid tar numeric field: ${value}`);
+  }
+  return parsed;
 }

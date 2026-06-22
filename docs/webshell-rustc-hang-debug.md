@@ -20,6 +20,17 @@ It runs the command twice by default. Override the defaults with:
 VFS_DEBUG_RUNS=2 VFS_DEBUG_TIMEOUT_MS=60000 VFS_DEBUG_THREADS=2 bun run vfs:debug-rustc-twice
 ```
 
+Sysroot setup:
+
+- The expanded local sysroot at `test_workspace_rustc/sysroot` is removed on
+  every run.
+- The compressed archive is reused from
+  `.rubrc-cache/sysroot/wasm32-wasip1.tar.br` when present.
+- If the archive is missing, the harness downloads
+  `https://oligamiq.github.io/rust_wasm/v0.2.0/wasm32-wasip1.tar.br`, stores it
+  in `.rubrc-cache/sysroot/`, and extracts it into the rustc sysroot layout.
+- `.rubrc-cache/` is ignored by git.
+
 Important markers:
 
 - `[vfs-debug-driver] run:N/M:enter ...`: driver sent the command to the

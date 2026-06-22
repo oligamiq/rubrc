@@ -1,6 +1,7 @@
 import { ConsoleStdout, File, OpenFile } from "@bjorn3/browser_wasi_shim";
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
 import { buildPreopenDirectory } from "./build_preopen.ts";
+import { prepareCachedSysroot } from "./sysroot_cache.ts";
 import {
   buildRepeatedCommands,
   computeWorkerWatchdogMs,
@@ -41,43 +42,10 @@ const workerWatchdogMs = computeWorkerWatchdogMs({
 
 // Prepare the directory structure
 const testDir = "./test_workspace_rustc";
-
-try {
-  Deno.statSync(`${testDir}/sysroot/lib/rustlib/wasm32-wasip1/lib`);
-} catch (e) {
-  if (e instanceof Deno.errors.NotFound) {
-    console.log(
-      "wasm32-wasip1 sysroot not found in test_workspace_rustc. Copying from local rustc installation...",
-    );
-    const sysrootOutput = new Deno.Command("rustc", {
-      args: ["--print", "sysroot"],
-    }).outputSync();
-    if (!sysrootOutput.success) {
-      console.error(
-        "Failed to run rustc --print sysroot. Make sure rustc is in PATH.",
-      );
-      Deno.exit(1);
-    }
-    const localSysroot = new TextDecoder().decode(sysrootOutput.stdout).trim();
-    const sourceLibPath = `${localSysroot}/lib/rustlib/wasm32-wasip1/lib`;
-    const destLibPath = `${testDir}/sysroot/lib/rustlib/wasm32-wasip1`;
-
-    Deno.mkdirSync(destLibPath, { recursive: true });
-    const cpCommand = new Deno.Command("cp", {
-      args: ["-R", sourceLibPath, destLibPath],
-    });
-    const cpResult = cpCommand.outputSync();
-    if (!cpResult.success) {
-      console.error(
-        "Failed to copy sysroot. Make sure the wasm32-wasip1 target is installed (rustup target add wasm32-wasip1).",
-      );
-      Deno.exit(1);
-    }
-    console.log("Sysroot copied successfully.");
-  } else {
-    throw e;
-  }
-}
+const sysroot = await prepareCachedSysroot();
+console.log(
+  `Prepared ${sysroot.expandedSysroot} from ${sysroot.source}: ${sysroot.cacheArchive}`,
+);
 
 const preopen = await buildPreopenDirectory(".", testDir);
 
