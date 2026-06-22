@@ -1,4 +1,4 @@
-import { createEffect, on } from "solid-js";
+import { createEffect, on, onCleanup } from "solid-js";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
@@ -68,12 +68,15 @@ export const SetupMyTerminal = (props: {
 
   createEffect(on(() => props.isActive, (active) => {
     if (active && xterm) {
-      setTimeout(() => {
+      const terminal = xterm;
+      const timeout = window.setTimeout(() => {
         fit_addon.fit();
-        resize_fn({ sessionId: props.sessionId, cols: xterm!.cols, rows: xterm!.rows }).catch(console.error);
+        terminal.focus();
+        resize_fn({ sessionId: props.sessionId, cols: terminal.cols, rows: terminal.rows }).catch(console.error);
       }, 0);
+      onCleanup(() => window.clearTimeout(timeout));
     }
-  }));
+  }, { defer: true }));
 
   if (!shared_xterm) {
     const terminal_handler = (args: { sessionId: number, data: Uint8Array }) => {
