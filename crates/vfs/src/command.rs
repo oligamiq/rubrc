@@ -1,9 +1,9 @@
+use crate::memory_manager::*;
 use crate::vfs::host::bridge::Downloader;
 use crate::*;
 use parking_lot::Mutex;
 use std::io::Write;
 use std::sync::LazyLock;
-use wasi_virt_layer::prelude::*;
 
 pub struct VirtualArgsState {
     pub args: Vec<String>,
@@ -142,6 +142,8 @@ pub fn handle_command(args: Vec<String>) {
             }
         }
         "rustc" => {
+            MEMORY_MANAGER.ensure::<crate::rustc_opt>(RUSTC_CONFIG);
+            MEMORY_MANAGER.ensure::<crate::llvm_opt>(LLVM_CONFIG);
             let mut args = args;
             if !args
                 .iter()
@@ -163,6 +165,7 @@ pub fn handle_command(args: Vec<String>) {
             crate::debug_trace("rustc:_main:return");
         }
         "clang" | "llvm" => {
+            MEMORY_MANAGER.ensure::<crate::llvm_opt>(LLVM_CONFIG);
             set_llvm_opt_args(&args);
             crate::llvm_opt::_reset();
             crate::llvm_opt::_start();
@@ -173,11 +176,12 @@ pub fn handle_command(args: Vec<String>) {
             crate::run_cargo();
         }
         "rust-analyzer" => {
-            if crate::LSP_STARTED.load(std::sync::atomic::Ordering::SeqCst) {
+            if LSP_START_ONCE.is_started() {
                 println!("rust-analyzer is already running for the Web editor");
                 return;
             }
             set_lsp_opt_args(&args);
+            MEMORY_MANAGER.ensure::<crate::lsp_opt>(LSP_CONFIG);
             crate::lsp_opt::_start();
         }
         _ => {

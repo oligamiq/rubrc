@@ -2,7 +2,10 @@ use const_struct::*;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::DirectThreadPool};
+use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
+
+pub mod memory_manager;
+use memory_manager::*;
 
 wit_bindgen::generate!({
     world: "vfs-host",
@@ -11,7 +14,6 @@ wit_bindgen::generate!({
 const LSP_SESSION_ID: u32 = 0xFFFFFFFF;
 const EVENT_TYPE_LSP: u32 = 6;
 const EVENT_TYPE_WRITE_FILE: u32 = 7;
-pub static LSP_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static THREAD_SESSIONS: std::sync::LazyLock<dashmap::DashMap<std::thread::ThreadId, u32>> =
     std::sync::LazyLock::new(|| dashmap::DashMap::new());
 
@@ -45,6 +47,7 @@ pub(crate) static RUSTC_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
 
 pub(crate) fn run_cargo() {
     CARGO_EXIT_STATUS.store(0, Ordering::SeqCst);
+    MEMORY_MANAGER.ensure::<cargo_opt>(CARGO_CONFIG);
     if !CARGO_STARTED.swap(true, Ordering::SeqCst) {
         cargo_opt::_start();
     }
@@ -53,6 +56,8 @@ pub(crate) fn run_cargo() {
 
 fn run_rustc() {
     RUSTC_EXIT_STATUS.store(0, Ordering::SeqCst);
+    MEMORY_MANAGER.ensure::<rustc_opt>(RUSTC_CONFIG);
+    MEMORY_MANAGER.ensure::<llvm_opt>(LLVM_CONFIG);
     if RUSTC_STARTED.swap(true, Ordering::SeqCst) {
         rustc_opt::_main();
     } else {
@@ -89,11 +94,54 @@ struct Wit;
 impl Guest for Wit {
     fn init() {}
     fn main() {
+        let threads = std::env::var("VFS_THREADS")
+            .unwrap_or_else(|_| "8".to_string())
+            .parse::<usize>()
+            .unwrap_or(8);
+
+        unsafe { THREAD_POOL.init() };
+
+        for i in 1..=threads {
+            println!("$$1");
+            MEMORY_MANAGER.reserve_for_thread();
+            println!("d = memory_reserved");
+
+            println!("$$2");
+
+            print!(
+                "\x1b[2K\r\x1b[36mInitializing Thread Pool: {}/{} ...\x1b[0m",
+                i, threads
+            );
+
+            println!("$$3");
+
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+
+            println!("$$4");
+
+            THREAD_POOL.set_capacity(i);
+
+            println!("$$5");
+
+            THREAD_POOL.flush_capacity().wait();
+
+            println!("$$6");
+        }
+        eprintln!(
+            "\x1b[2K\r\x1b[32mThread Pool Initialized ({} threads)\x1b[0m",
+            threads
+        );
+
         Self::flush_to_vfs();
 
         vfs_shell::_reset();
+        println!("###");
+        MEMORY_MANAGER.ensure::<vfs_shell>(VFS_SHELL_CONFIG);
+        println!("###2");
         vfs_shell::_start();
+        println!("###3");
         vfs_shell::_main();
+        println!("###4");
     }
 
     fn flush_to_vfs() {
@@ -153,14 +201,14 @@ impl Guest for Wit {
 
     fn dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
         if session_id == LSP_SESSION_ID {
-            if !crate::LSP_STARTED.load(std::sync::atomic::Ordering::SeqCst) {
-                if !crate::LSP_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                    std::thread::spawn(move || {
-                        crate::shell::vfs_set_current_session_id(LSP_SESSION_ID);
-                        crate::command::set_lsp_opt_args(&["rust-analyzer"]);
-                        unsafe { lsp_opt::_start() };
-                    });
-                }
+            if LSP_START_ONCE.try_start() {
+                MEMORY_MANAGER.reserve_for_thread();
+                std::thread::spawn(move || {
+                    crate::shell::vfs_set_current_session_id(LSP_SESSION_ID);
+                    crate::command::set_lsp_opt_args(&["rust-analyzer"]);
+                    MEMORY_MANAGER.ensure::<lsp_opt>(LSP_CONFIG);
+                    lsp_opt::_start();
+                });
             }
         }
 
@@ -196,7 +244,9 @@ impl Guest for Wit {
                             if let std::path::Component::Normal(c) = component {
                                 let name = c.to_string_lossy();
                                 let mut existing_id = None;
-                                if let Ok(entries) = VIRTUAL_FILE_SYSTEM.lfs.read_dir(current_vfs_parent) {
+                                if let Ok(entries) =
+                                    VIRTUAL_FILE_SYSTEM.lfs.read_dir(current_vfs_parent)
+                                {
                                     for (entry_name, id) in entries {
                                         if entry_name == name {
                                             existing_id = Some(id);
@@ -227,9 +277,11 @@ impl Guest for Wit {
                                 }
                             }
                         }
-                        
+
                         if let Some(id) = file_inode {
-                            let _ = VIRTUAL_FILE_SYSTEM.lfs.write_file(id, content.as_bytes().to_vec());
+                            let _ = VIRTUAL_FILE_SYSTEM
+                                .lfs
+                                .write_file(id, content.as_bytes().to_vec());
                         } else {
                             let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(
                                 current_vfs_parent,
@@ -394,7 +446,7 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
     fn read(buf: &mut [u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
         let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
         if session_id == LSP_SESSION_ID
-            || (session_id == 0 && crate::LSP_STARTED.load(std::sync::atomic::Ordering::SeqCst))
+            || (session_id == 0 && LSP_START_ONCE.is_started())
         {
             let (lock, cvar) = &*LSP_STDIN;
             let mut stdin = lock.lock();
@@ -433,6 +485,7 @@ import_wasm!(lsp_opt);
 import_wasm!(rustc_opt);
 import_wasm!(llvm_opt);
 import_wasm!(cargo_opt);
+wasi_virt_layer::own_memory!(vfs_shell, lsp_opt, rustc_opt, llvm_opt, cargo_opt);
 
 plug_fs!(
     &*VIRTUAL_FILE_SYSTEM,
@@ -473,8 +526,10 @@ plug_random!(
 plug_poll!(WaitPoll, rustc_opt, llvm_opt, vfs_shell, lsp_opt, cargo_opt);
 plug_sched!(DefaultSched, cargo_opt);
 
+static THREAD_POOL: VirtualThreadPool<ThreadAccessor> = unsafe { VirtualThreadPool::new_const(8) };
+
 plug_thread!(
-    { DirectThreadPool::<ThreadAccessor>::new_const() },
+    { &THREAD_POOL },
     self,
     rustc_opt,
     vfs_shell,
