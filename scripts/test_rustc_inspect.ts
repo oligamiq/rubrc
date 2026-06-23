@@ -52,14 +52,12 @@ const preopen = await buildPreopenDirectory(".", testDir);
 const farm = new WASIFarm(
   new OpenFile(new File([])),
   ConsoleStdout.lineBuffered((message) =>
-    console.log(`[WASI stdout] ${message}`)
+    console.log(`[WASI stdout] ${message}`),
   ),
   ConsoleStdout.lineBuffered((message) =>
-    console.error(`[WASI stderr] ${message}`)
+    console.error(`[WASI stderr] ${message}`),
   ),
-  [
-    preopen,
-  ],
+  [preopen],
   {
     allocator_size: 100 * 1024 * 1024,
   },
@@ -72,9 +70,11 @@ const worker = new Worker(
 
 const sourceCode = Deno.readTextFileSync("./test_debug.rs");
 
-const result = await new Promise<
-  { ok: boolean; output: string; error?: string }
->((resolve) => {
+const result = await new Promise<{
+  ok: boolean;
+  output: string;
+  error?: string;
+}>((resolve) => {
   const timer = setTimeout(() => {
     worker.terminate();
     resolve({

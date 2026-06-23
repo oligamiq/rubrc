@@ -71,7 +71,12 @@ globalThis.onmessage = async (event) => {
       },
     );
 
+    console.log("worker ready, starting...");
+
     animal.start(root);
+
+    console.log("custom instantiate...");
+
     root.debugSetTerminalCapture(true);
 
     const memory = animal.get_share_memory().memory;
@@ -92,17 +97,7 @@ globalThis.onmessage = async (event) => {
       }
     };
 
-    const readyDeadline = performance.now() + timeoutMs;
-    while (performance.now() < readyDeadline) {
-      output += drainOutput();
-      if (output.includes(" $ ")) {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    if (!output.includes(" $ ")) {
-      throw new Error(`system not ready after ${timeoutMs}ms (no shell prompt)`);
-    }
+    console.log("system ready, writing source code...");
 
     const writeReq = JSON.stringify({
       path: "/src/main.rs",
@@ -111,10 +106,17 @@ globalThis.onmessage = async (event) => {
     const writeBytes = new TextEncoder().encode(writeReq);
     const writePtr = root.allocBuf(writeBytes.length);
     new Uint8Array(memory.buffer).set(writeBytes, writePtr);
-    root.dispatch(0xeeeeeeee, EVENT_TYPE_WRITE_FILE, writePtr, writeBytes.length);
+    root.dispatch(
+      0xeeeeeeee,
+      EVENT_TYPE_WRITE_FILE,
+      writePtr,
+      writeBytes.length,
+    );
     root.freeBuf(writePtr, writeBytes.length);
 
     for (let run = 0; run < RUNS; run++) {
+      console.log(`run ${run + 1}/${RUNS}`);
+
       output += `\n[vfs-debug-driver] fixed-run:${run + 1}/${RUNS}:enter\n`;
       root.dispatch(0, EVENT_TYPE_DEBUG_FIXED_RUSTC, run + 1, 0);
 
@@ -146,9 +148,8 @@ globalThis.onmessage = async (event) => {
     globalThis.postMessage({
       ok: false,
       output,
-      error: error instanceof Error
-        ? (error.stack ?? error.message)
-        : String(error),
+      error:
+        error instanceof Error ? (error.stack ?? error.message) : String(error),
     });
   }
 };

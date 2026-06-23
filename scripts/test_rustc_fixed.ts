@@ -14,7 +14,7 @@ const timeoutMs = parsePositiveInt(
 );
 const threads = parsePositiveInt(
   Deno.env.get("VFS_DEBUG_THREADS"),
-  2,
+  16,
   "VFS_DEBUG_THREADS",
 );
 

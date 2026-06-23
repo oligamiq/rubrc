@@ -143,7 +143,6 @@ pub fn handle_command(args: Vec<String>) {
         }
         "rustc" => {
             MEMORY_MANAGER.ensure::<crate::rustc_opt>(RUSTC_CONFIG);
-            MEMORY_MANAGER.ensure::<crate::llvm_opt>(LLVM_CONFIG);
             let mut args = args;
             if !args
                 .iter()
@@ -157,9 +156,6 @@ pub fn handle_command(args: Vec<String>) {
             crate::debug_trace("rustc:_reset:enter");
             crate::rustc_opt::_reset();
             crate::debug_trace("rustc:_reset:return");
-            crate::debug_trace("rustc:_start:enter");
-            crate::rustc_opt::_start();
-            crate::debug_trace("rustc:_start:return");
             crate::debug_trace("rustc:_main:enter");
             crate::rustc_opt::_main();
             crate::debug_trace("rustc:_main:return");
