@@ -322,7 +322,9 @@ impl Guest for Wit {
                 crate::rustc_opt::_main();
                 crate::debug_trace("debug-rustc:_main:return");
                 crate::debug_trace(&format!("debug-rustc:return run={run_marker}"));
-            });
+            })
+            .join()
+            .unwrap();
             return;
         }
         unsafe { crate::shell::vfs_shell_dispatch(session_id, event_type, arg1, arg2) };
