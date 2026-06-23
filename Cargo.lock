@@ -1035,6 +1035,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vfs-rustc-twice"
+version = "0.1.0"
+dependencies = [
+ "const_struct",
+ "dashmap 6.2.1",
+ "parking_lot",
+ "serde_json",
+ "wasi_virt_layer",
+ "wit-bindgen 0.57.1",
+]
+
+[[package]]
 name = "vfs-shell"
 version = "0.1.0"
 dependencies = [

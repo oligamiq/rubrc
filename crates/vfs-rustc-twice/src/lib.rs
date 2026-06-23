@@ -106,46 +106,36 @@ impl Guest for Wit {
         unsafe { THREAD_POOL.init() };
 
         for i in 1..=threads {
-            println!("$$1");
             MEMORY_MANAGER.reserve_for_thread();
-            println!("d = memory_reserved");
-
-            println!("$$2");
-
-            print!(
-                "\x1b[2K\r\x1b[36mInitializing Thread Pool: {}/{} ...\x1b[0m",
-                i, threads
-            );
-
-            println!("$$3");
-
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-
-            println!("$$4");
-
             THREAD_POOL.set_capacity(i);
-
-            println!("$$5");
-
             THREAD_POOL.flush_capacity().wait();
-
-            println!("$$6");
         }
-        eprintln!(
-            "\x1b[2K\r\x1b[32mThread Pool Initialized ({} threads)\x1b[0m",
-            threads
-        );
 
         Self::flush_to_vfs();
 
-        vfs_shell::_reset();
-        println!("###");
-        MEMORY_MANAGER.ensure::<vfs_shell>(VFS_SHELL_CONFIG);
-        println!("###2");
-        vfs_shell::_start();
-        println!("###3");
-        vfs_shell::_main();
-        println!("###4");
+        println!("Running rustc_opt (1/2)");
+        MEMORY_MANAGER.ensure::<rustc_opt>(RUSTC_CONFIG);
+        MEMORY_MANAGER.ensure::<llvm_opt>(LLVM_CONFIG);
+        let fixed_args: &[&str] = &[
+            "rustc",
+            "/src/main.rs",
+            "--sysroot",
+            "/sysroot",
+            "--target",
+            "wasm32-wasip1",
+            "-Clinker-flavor=wasm-ld",
+            "-Clinker=wasm-ld",
+        ];
+        crate::command::set_rustc_opt_args(fixed_args);
+
+        crate::rustc_opt::_reset();
+        crate::rustc_opt::_main();
+
+        println!("Running rustc_opt (2/2)");
+        crate::rustc_opt::_reset();
+        crate::rustc_opt::_main();
+
+        println!("Done!");
     }
 
     fn flush_to_vfs() {
