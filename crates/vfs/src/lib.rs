@@ -299,24 +299,20 @@ impl Guest for Wit {
             return;
         } else if event_type == EVENT_TYPE_DEBUG_FIXED_RUSTC {
             let run_marker = arg1;
-            debug_trace(&format!("1 debug-rustc:enter run={run_marker}"));
+            crate::debug_trace(&format!("debug-rustc:enter run={run_marker}"));
+            MEMORY_MANAGER.ensure::<rustc_opt>(RUSTC_CONFIG);
+            let fixed_args: &[&str] = &[
+                "rustc",
+                "/src/main.rs",
+                "--sysroot",
+                "/sysroot",
+                "--target",
+                "wasm32-wasip1",
+                "-Ccodegen-units=1",
+                "-Clinker-flavor=wasm-ld",
+                "-Clinker=wasm-ld",
+            ];
             std::thread::spawn(move || {
-                debug_trace(&format!("2 debug-rustc:enter run={run_marker}"));
-
-                crate::debug_trace(&format!("3 debug-rustc:enter run={run_marker}"));
-                MEMORY_MANAGER.ensure::<rustc_opt>(RUSTC_CONFIG);
-                MEMORY_MANAGER.ensure::<llvm_opt>(LLVM_CONFIG);
-                let fixed_args: &[&str] = &[
-                    "rustc",
-                    "/src/main.rs",
-                    "--sysroot",
-                    "/sysroot",
-                    "--target",
-                    "wasm32-wasip1",
-                    "-Ccodegen-units=1",
-                    "-Clinker-flavor=wasm-ld",
-                    "-Clinker=wasm-ld",
-                ];
                 crate::command::set_rustc_opt_args(fixed_args);
                 crate::debug_trace("debug-rustc:_reset:enter");
                 crate::rustc_opt::_reset();
