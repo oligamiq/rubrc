@@ -15,6 +15,7 @@
     "vfs:build": "wasi_virt_layer build -p vfs crates/vfs/llvm_opt.wasm crates/vfs/rustc_opt.wasm crates/vfs/lsp_opt.wasm crates/vfs/cargo_opt.wasm vfs-shell --dev --own-memory && node -e \"const fs=require('fs'); fs.rmSync('page/src/worker_process/vfs_bindings', {recursive:true, force:true}); fs.mkdirSync('page/src/worker_process/vfs_bindings', {recursive:true}); fs.cpSync('dist', 'page/src/worker_process/vfs_bindings', {recursive:true})\" && git restore page/src/worker_process/vfs_bindings/inst.ts && cd page/src/worker_process/vfs_bindings && bun i",
     "vfs:debug-shell": "deno run --no-lock -A scripts/vfs_debug_shell.ts",
     "vfs:debug-rustc-twice": "deno run --no-lock -A scripts/test_rustc_inspect.ts",
+    "vfs:debug-rustc-fixed": "deno run --no-lock -A scripts/test_rustc_fixed.ts",
     "vfs:clean": "cd crates/vfs && rm -rf dist target llvm_mock.wasm rustc_mock.wasm",
     "build": "bun run vfs:build && bun run --cwd lib build && bun run --cwd page build"
   },
