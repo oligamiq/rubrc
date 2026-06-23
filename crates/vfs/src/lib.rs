@@ -14,6 +14,7 @@ wit_bindgen::generate!({
 const LSP_SESSION_ID: u32 = 0xFFFFFFFF;
 const EVENT_TYPE_LSP: u32 = 6;
 const EVENT_TYPE_WRITE_FILE: u32 = 7;
+const EVENT_TYPE_DEBUG_FIXED_RUSTC: u32 = 1007;
 pub static THREAD_SESSIONS: std::sync::LazyLock<dashmap::DashMap<std::thread::ThreadId, u32>> =
     std::sync::LazyLock::new(|| dashmap::DashMap::new());
 
@@ -57,12 +58,15 @@ pub(crate) fn run_cargo() {
 fn run_rustc() {
     RUSTC_EXIT_STATUS.store(0, Ordering::SeqCst);
     MEMORY_MANAGER.ensure::<rustc_opt>(RUSTC_CONFIG);
-    MEMORY_MANAGER.ensure::<llvm_opt>(LLVM_CONFIG);
-    if RUSTC_STARTED.swap(true, Ordering::SeqCst) {
-        rustc_opt::_main();
-    } else {
-        rustc_opt::_start();
-    }
+    // MEMORY_MANAGER.ensure::<llvm_opt>(LLVM_CONFIG);
+    // if RUSTC_STARTED.swap(true, Ordering::SeqCst) {
+    //     rustc_opt::_main();
+    // } else {
+    //     rustc_opt::_start();
+    // }
+    // rustc_opt::_start();
+    // rustc_opt::_main();
+    unreachable!("##");
 }
 
 fn capture_cargo_output(stderr: bool, buf: &[u8]) -> bool {
@@ -293,6 +297,30 @@ impl Guest for Wit {
                 }
             }
             return;
+        } else if event_type == EVENT_TYPE_DEBUG_FIXED_RUSTC {
+            let run_marker = arg1;
+            crate::debug_trace(&format!("debug-rustc:enter run={run_marker}"));
+            MEMORY_MANAGER.ensure::<rustc_opt>(RUSTC_CONFIG);
+            MEMORY_MANAGER.ensure::<llvm_opt>(LLVM_CONFIG);
+            let fixed_args: &[&str] = &[
+                "rustc",
+                "/src/main.rs",
+                "--sysroot",
+                "/sysroot",
+                "--target",
+                "wasm32-wasip1",
+                "-Clinker-flavor=wasm-ld",
+                "-Clinker=wasm-ld",
+            ];
+            crate::command::set_rustc_opt_args(fixed_args);
+            crate::debug_trace("debug-rustc:_reset:enter");
+            crate::rustc_opt::_reset();
+            crate::debug_trace("debug-rustc:_reset:return");
+            crate::debug_trace("debug-rustc:_main:enter");
+            crate::rustc_opt::_main();
+            crate::debug_trace("debug-rustc:_main:return");
+            crate::debug_trace(&format!("debug-rustc:return run={run_marker}"));
+            return;
         }
         unsafe { crate::shell::vfs_shell_dispatch(session_id, event_type, arg1, arg2) };
     }
@@ -445,9 +473,7 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
     }
     fn read(buf: &mut [u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
         let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
-        if session_id == LSP_SESSION_ID
-            || (session_id == 0 && LSP_START_ONCE.is_started())
-        {
+        if session_id == LSP_SESSION_ID || (session_id == 0 && LSP_START_ONCE.is_started()) {
             let (lock, cvar) = &*LSP_STDIN;
             let mut stdin = lock.lock();
             while stdin.is_empty() {
