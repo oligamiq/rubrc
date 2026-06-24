@@ -15,6 +15,7 @@ const command = [
   "/sysroot",
   "--target",
   "wasm32-wasip1",
+  "-Ccodegen-units=1",
   "-Clinker-flavor=wasm-ld",
   "-Clinker=wasm-ld",
 ];
@@ -25,7 +26,7 @@ const timeoutMs = parsePositiveInt(
 );
 const threads = parsePositiveInt(
   Deno.env.get("VFS_DEBUG_THREADS"),
-  2,
+  8,
   "VFS_DEBUG_THREADS",
 );
 const runs = parsePositiveInt(
