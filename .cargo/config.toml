@@ -1,0 +1,2 @@
+[patch.crates-io]
+wasi_virt_layer = { path = "../wasi_virt_layer/wasi_virt_layer" }

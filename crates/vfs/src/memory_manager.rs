@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use wasi_virt_layer::memory::{WasmAccess, WasmAccessName};
 
 #[derive(Debug, Clone, Copy)]

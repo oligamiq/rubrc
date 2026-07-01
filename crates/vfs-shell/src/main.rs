@@ -480,6 +480,12 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
         let cmd = args.get(0).map(|s| s.as_str()).unwrap_or("");
 
         if VFS_COMMANDS.contains(&cmd) {
+            eprintln!(
+                "[vfs-shell-debug] fallback:enter sid={} tid={:?} cmd={}",
+                sid,
+                std::thread::current().id(),
+                args.join(" ")
+            );
             let args_str = args.join("\0");
             let context_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
 
@@ -493,7 +499,20 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                 }),
             );
 
+            eprintln!(
+                "[vfs-shell-debug] fallback:vfs_execute_command:enter sid={} tid={:?} context_id={}",
+                sid,
+                std::thread::current().id(),
+                context_id
+            );
             let status = unsafe { vfs_execute_command(context_id) };
+            eprintln!(
+                "[vfs-shell-debug] fallback:vfs_execute_command:return sid={} tid={:?} context_id={} status={}",
+                sid,
+                std::thread::current().id(),
+                context_id,
+                status
+            );
 
             IO_REGISTRY.remove(&context_id);
 
@@ -637,9 +656,17 @@ impl Write for SessionStdout {
 }
 
 fn print_prompt(writer: &mut dyn Write) {
+    eprintln!(
+        "[vfs-shell-debug] prompt:enter tid={:?}",
+        std::thread::current().id()
+    );
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     write!(writer, "{} $ ", cwd.display().to_string().cyan()).unwrap();
     writer.flush().unwrap();
+    eprintln!(
+        "[vfs-shell-debug] prompt:return tid={:?}",
+        std::thread::current().id()
+    );
 }
 
 struct CommandStdin {
@@ -892,12 +919,22 @@ fn process_input_char(
             buffer: Vec::new(),
         };
 
+        eprintln!(
+            "[vfs-shell-debug] handle_parallel:enter tid={:?} line={}",
+            std::thread::current().id(),
+            trimmed
+        );
         let results = handle_parallel(
             vec![trimmed.to_string()],
             Box::new(cmd_stdin),
             Box::new(stdout.clone()),
             Arc::clone(session_reg),
             cancellation_token.clone(),
+        );
+        eprintln!(
+            "[vfs-shell-debug] handle_parallel:return tid={:?} results={}",
+            std::thread::current().id(),
+            results.len()
         );
 
         for res in results {

@@ -15,6 +15,8 @@ const LSP_SESSION_ID: u32 = 0xFFFFFFFF;
 const EVENT_TYPE_LSP: u32 = 6;
 const EVENT_TYPE_WRITE_FILE: u32 = 7;
 const EVENT_TYPE_DEBUG_FIXED_RUSTC: u32 = 1007;
+const EVENT_TYPE_DEBUG_RESERVE_SELF: u32 = 1008;
+const EVENT_TYPE_DEBUG_RESERVE_RUSTC: u32 = 1009;
 pub static THREAD_SESSIONS: std::sync::LazyLock<dashmap::DashMap<std::thread::ThreadId, u32>> =
     std::sync::LazyLock::new(|| dashmap::DashMap::new());
 
@@ -300,7 +302,15 @@ impl Guest for Wit {
         } else if event_type == EVENT_TYPE_DEBUG_FIXED_RUSTC {
             let run_marker = arg1;
             crate::debug_trace(&format!("debug-rustc:enter run={run_marker}"));
+            crate::debug_trace(&format!(
+                "debug-rustc:memory:before-ensure pages={}",
+                crate::memory_size::<rustc_opt>()
+            ));
             MEMORY_MANAGER.ensure::<rustc_opt>(RUSTC_CONFIG);
+            crate::debug_trace(&format!(
+                "debug-rustc:memory:after-ensure pages={}",
+                crate::memory_size::<rustc_opt>()
+            ));
             let fixed_args: &[&str] = &[
                 "rustc",
                 "/src/main.rs",
@@ -315,16 +325,60 @@ impl Guest for Wit {
             std::thread::spawn(move || {
                 crate::command::set_rustc_opt_args(fixed_args);
                 crate::debug_trace("debug-rustc:_reset:enter");
+                crate::debug_trace(&format!(
+                    "debug-rustc:memory:before-reset pages={}",
+                    crate::memory_size::<rustc_opt>()
+                ));
                 crate::rustc_opt::_reset();
+                crate::debug_trace(&format!(
+                    "debug-rustc:memory:after-reset pages={}",
+                    crate::memory_size::<rustc_opt>()
+                ));
                 crate::debug_trace("debug-rustc:_reset:return");
                 crate::shell::vfs_set_current_session_id(1);
                 crate::debug_trace("debug-rustc:_main:enter");
                 crate::rustc_opt::_main();
+                crate::debug_trace(&format!(
+                    "debug-rustc:memory:after-main pages={}",
+                    crate::memory_size::<rustc_opt>()
+                ));
                 crate::debug_trace("debug-rustc:_main:return");
                 crate::debug_trace(&format!("debug-rustc:return run={run_marker}"));
             })
             .join()
             .unwrap();
+            return;
+        } else if event_type == EVENT_TYPE_DEBUG_RESERVE_SELF {
+            let count = arg1.max(1);
+            let pages = arg2.max(1) as i32;
+            let before = crate::memory_size_self();
+            crate::debug_trace(&format!(
+                "debug-reserve-self:enter count={count} pages={pages} before={before}"
+            ));
+            let mut last_result = 0;
+            for _ in 0..count {
+                last_result = crate::memory_reserve_self(pages);
+            }
+            let after = crate::memory_size_self();
+            crate::debug_trace(&format!(
+                "debug-reserve-self:return count={count} pages={pages} result={last_result} after={after}"
+            ));
+            return;
+        } else if event_type == EVENT_TYPE_DEBUG_RESERVE_RUSTC {
+            let count = arg1.max(1);
+            let pages = arg2.max(1) as i32;
+            let before = crate::memory_size::<rustc_opt>();
+            crate::debug_trace(&format!(
+                "debug-reserve-rustc:enter count={count} pages={pages} before={before}"
+            ));
+            let mut last_result = 0;
+            for _ in 0..count {
+                last_result = crate::memory_reserve::<rustc_opt>(pages);
+            }
+            let after = crate::memory_size::<rustc_opt>();
+            crate::debug_trace(&format!(
+                "debug-reserve-rustc:return count={count} pages={pages} result={last_result} after={after}"
+            ));
             return;
         }
         unsafe { crate::shell::vfs_shell_dispatch(session_id, event_type, arg1, arg2) };
@@ -639,6 +693,9 @@ pub extern "C" fn wasi_ext_spawn(
     let args = cargo_opt::get_array(args_ptr as *const u8, args_len as usize);
     let env = cargo_opt::get_array(env_ptr as *const u8, env_len as usize);
     let cwd = cargo_opt::get_array(cwd_ptr as *const u8, cwd_len as usize);
+    crate::debug_trace(&format!(
+        "wasi-ext-spawn:enter program={program} args_len={args_len} env_len={env_len} cwd_len={cwd_len}"
+    ));
 
     let mut argv = vec![program.clone()];
     argv.extend(
@@ -677,12 +734,17 @@ pub extern "C" fn wasi_ext_spawn(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(&program);
+    crate::debug_trace(&format!("wasi-ext-spawn:program-name {program_name}"));
     let status = if program_name == "rustc" {
+        crate::debug_trace("wasi-ext-spawn:run-rustc:enter");
         command::set_rustc_opt_args(&argv);
         run_rustc();
-        RUSTC_EXIT_STATUS.load(Ordering::SeqCst)
+        let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
+        crate::debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
+        status
     } else {
         let message = format!("unsupported child process: {program}");
+        crate::debug_trace(&format!("wasi-ext-spawn:unsupported {program}"));
         CARGO_OUTPUT.with(|output| {
             if let Some(output) = output.borrow_mut().as_mut() {
                 output.stderr.extend_from_slice(message.as_bytes());
@@ -711,6 +773,7 @@ pub extern "C" fn wasi_ext_spawn(
         out_stderr_ptr,
         out_stderr_len,
     );
+    crate::debug_trace(&format!("wasi-ext-spawn:return status={status}"));
     0
 }
 

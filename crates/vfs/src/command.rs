@@ -142,7 +142,15 @@ pub fn handle_command(args: Vec<String>) {
             }
         }
         "rustc" => {
+            crate::debug_trace(&format!(
+                "rustc:memory:before-ensure pages={}",
+                crate::memory_size::<crate::rustc_opt>()
+            ));
             MEMORY_MANAGER.ensure::<crate::rustc_opt>(RUSTC_CONFIG);
+            crate::debug_trace(&format!(
+                "rustc:memory:after-ensure pages={}",
+                crate::memory_size::<crate::rustc_opt>()
+            ));
             let mut args = args;
             if !args
                 .iter()
@@ -154,10 +162,22 @@ pub fn handle_command(args: Vec<String>) {
             }
             set_rustc_opt_args(&args);
             crate::debug_trace("rustc:_reset:enter");
+            crate::debug_trace(&format!(
+                "rustc:memory:before-reset pages={}",
+                crate::memory_size::<crate::rustc_opt>()
+            ));
             crate::rustc_opt::_reset();
+            crate::debug_trace(&format!(
+                "rustc:memory:after-reset pages={}",
+                crate::memory_size::<crate::rustc_opt>()
+            ));
             crate::debug_trace("rustc:_reset:return");
             crate::debug_trace("rustc:_main:enter");
             crate::rustc_opt::_main();
+            crate::debug_trace(&format!(
+                "rustc:memory:after-main pages={}",
+                crate::memory_size::<crate::rustc_opt>()
+            ));
             crate::debug_trace("rustc:_main:return");
         }
         "clang" | "llvm" => {

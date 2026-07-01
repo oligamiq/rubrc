@@ -5,6 +5,11 @@ import { custom_instantiate } from "../page/src/worker_process/vfs_bindings/inst
 await set_fake_worker();
 
 const decoder = new TextDecoder();
+const encoder = new TextEncoder();
+const EVENT_TYPE_WRITE_FILE = 7;
+const EVENT_TYPE_DEBUG_RESERVE_SELF = 1008;
+const EVENT_TYPE_DEBUG_RESERVE_RUSTC = 1009;
+
 const bindingsDir = new URL(
   "../page/src/worker_process/vfs_bindings/",
   import.meta.url,
@@ -21,12 +26,19 @@ function hasReturnedToPrompt(output: string): boolean {
   return returnIndex !== -1 && output.indexOf(" $ ", returnIndex) !== -1;
 }
 
-const EVENT_TYPE_WRITE_FILE = 7;
-const EVENT_TYPE_DEBUG_FIXED_RUSTC = 1007;
-
 globalThis.onmessage = async (event) => {
-  const { wasiRef, commands, threads, timeoutMs, sourceCode } = event.data;
+  const {
+    wasiRef,
+    commands,
+    threads,
+    timeoutMs,
+    memoryReserveCount,
+    memoryReservePages,
+    rustcMemoryReservePages,
+    sourceCode,
+  } = event.data;
   let output = "";
+  let threadSpawnCount = 0;
 
   try {
     const wasm = await compile("vfs.core.wasm");
@@ -53,22 +65,37 @@ globalThis.onmessage = async (event) => {
     );
 
     await animal.wait_worker_background_worker();
+
+    const threadSpawn = animal.wasiThreadImport["thread-spawn"].bind(
+      animal.wasiThreadImport,
+    );
+    const wasiThreadImport = {
+      ...animal.wasiThreadImport,
+      "thread-spawn": (startArg: number): number => {
+        const index = ++threadSpawnCount;
+        output += `[host-thread-spawn] #${index}:enter start_arg=${startArg}\n`;
+        const tid = threadSpawn(startArg);
+        output += `[host-thread-spawn] #${index}:return tid=${tid}\n`;
+        return tid;
+      },
+    };
+
     const root = await custom_instantiate(
       wasm,
       animal.wasiImport,
-      animal.wasiThreadImport,
+      wasiThreadImport,
       animal.get_share_memory(),
-      (_index, unknown: { name?: string; args?: any }) => {
-        if (unknown.name === "sysrootStartFetch") {
+      (_index, message: { name?: string }) => {
+        if (message.name === "terminalWrite") {
           return {};
-        } else if (unknown.name === "sysrootGetNextFileMeta") {
+        } else if (message.name === "sysrootStartFetch") {
+          return {};
+        } else if (message.name === "sysrootGetNextFileMeta") {
           return { has_file: false, name_len: 0, data_len: 0 };
-        } else if (unknown.name === "sysrootReadFileName") {
+        } else if (message.name === "sysrootReadFileName") {
           return { name: [] };
-        } else if (unknown.name === "sysrootReadFileChunk") {
+        } else if (message.name === "sysrootReadFileChunk") {
           return { chunk: [] };
-        } else if (unknown.name === "terminalWrite") {
-          return {};
         } else {
           return {};
         }
@@ -81,9 +108,7 @@ globalThis.onmessage = async (event) => {
     const memory = animal.get_share_memory().memory;
     const drainOutput = () => {
       const len = root.debugTerminalOutputLen();
-      if (len === 0) {
-        return "";
-      }
+      if (len === 0) return "";
       const ptr = root.allocBuf(len);
       try {
         const read = root.debugReadTerminalOutput(ptr, len);
@@ -98,7 +123,6 @@ globalThis.onmessage = async (event) => {
 
     const sessionId = 1;
     root.dispatch(sessionId, 3, 0, 0);
-
     const promptDeadline = performance.now() + timeoutMs;
     while (performance.now() < promptDeadline && !output.includes(" $ ")) {
       output += drainOutput();
@@ -108,48 +132,72 @@ globalThis.onmessage = async (event) => {
       throw new Error(`initial shell prompt timed out after ${timeoutMs}ms`);
     }
 
-    output += drainOutput();
-
     const writeReq = JSON.stringify({
       path: "/src/main.rs",
       content: sourceCode,
     });
-    const writeBytes = new TextEncoder().encode(writeReq);
+    const writeBytes = encoder.encode(writeReq);
     const writePtr = root.allocBuf(writeBytes.length);
     new Uint8Array(memory.buffer).set(writeBytes, writePtr);
-    root.dispatch(0xeeeeeeee, EVENT_TYPE_WRITE_FILE, writePtr, writeBytes.length);
+    root.dispatch(
+      0xeeeeeeee,
+      EVENT_TYPE_WRITE_FILE,
+      writePtr,
+      writeBytes.length,
+    );
     root.freeBuf(writePtr, writeBytes.length);
+    output += drainOutput();
 
-    const displayCmd = commands[0].join(" ");
-    for (let run = 0; run < commands.length; run++) {
-      output += `\n[vfs-debug-driver] run:${
-        run + 1
-      }/${commands.length}:enter ${displayCmd}\n`;
-
-      root.dispatch(0, EVENT_TYPE_DEBUG_FIXED_RUSTC, run + 1, 0);
-
-      const deadline = performance.now() + timeoutMs * 2;
-      let runDone = false;
+    for (let index = 0; index < commands.length; index++) {
+      const command = commands[index].join(" ");
       let runOutput = "";
+      output += `\n[vfs-debug-driver] run:${
+        index + 1
+      }/${commands.length}:enter ${command}\n`;
+
+      root.dispatch(
+        0,
+        EVENT_TYPE_DEBUG_RESERVE_SELF,
+        memoryReserveCount,
+        memoryReservePages,
+      );
+      root.dispatch(
+        0,
+        EVENT_TYPE_DEBUG_RESERVE_RUSTC,
+        memoryReserveCount,
+        rustcMemoryReservePages,
+      );
+      output += drainOutput();
+
+      for (const character of `${command}\r`) {
+        root.dispatch(sessionId, 0, character.codePointAt(0) ?? 0, 0);
+      }
+
+      const deadline = performance.now() + timeoutMs;
+      let cmdDone = false;
       while (performance.now() < deadline) {
         const chunk = drainOutput();
         output += chunk;
         runOutput += chunk;
-        if (runOutput.includes(`debug-rustc:return run=${run + 1}`)) {
-          runDone = true;
+        if (hasReturnedToPrompt(runOutput)) {
+          cmdDone = true;
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      if (!runDone) {
+
+      if (!cmdDone) {
         output += drainOutput();
         throw new Error(
-          `rustc run ${run + 1}/${commands.length} timed out`,
+          `command timed out after ${timeoutMs}ms on run ${
+            index + 1
+          }/${commands.length}: ${command}`,
         );
       }
+
       output += `[vfs-debug-driver] run:${
-        run + 1
-      }/${commands.length}:return ${displayCmd}\n`;
+        index + 1
+      }/${commands.length}:return ${command}\n`;
     }
 
     root.dispatch(sessionId, 5, 0, 0);
@@ -160,7 +208,7 @@ globalThis.onmessage = async (event) => {
       ok: false,
       output,
       error: error instanceof Error
-        ? (error.stack ?? error.message)
+        ? error.stack ?? error.message
         : String(error),
     });
   }

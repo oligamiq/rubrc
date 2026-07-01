@@ -142,6 +142,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
   
   class RepTable {
     #data = [0, null];
+    #size = 0;
     #target;
     
     constructor(args) {
@@ -158,6 +159,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         this.#data.push(null);
         const rep = (this.#data.length >> 1) - 1;
         _debugLog('[RepTable#insert()] inserted', { val, target: this.target, rep });
+        this.#size += 1;
         return rep;
       }
       this.#data[0] = this.#data[freeIdx << 1];
@@ -165,6 +167,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       this.#data[placementIdx] = val;
       this.#data[placementIdx + 1] = null;
       _debugLog('[RepTable#insert()] inserted', { val, target: this.target, rep: freeIdx });
+      this.#size += 1;
       return freeIdx;
     }
     
@@ -195,9 +198,12 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       
       this.#data[baseIdx] = this.#data[0];
       this.#data[0] = rep;
+      this.#size -= 1;
       
       return val;
     }
+    
+    size() { return this.#size; }
     
     clear() {
       _debugLog('[RepTable#clear()] args', { rep, target: this.target });
@@ -554,6 +560,22 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       
       this.#resolved = true;
       this.#parentTask.removeSubtask(this);
+      
+      if (!this.isAsync) {
+        this.deliverResolve();
+        const rep = this.waitableRep();
+        if (rep) {
+          try {
+            const removed = this.#getComponentState().handles.remove(rep);
+            if (removed !== this) {
+              throw new Error("unexpectedly received non-self Subtask from handle removal");
+            }
+            this.drop();
+          } catch (err) {
+            _debugLog('[AsyncSubtask#onResolve()] failed to remove subtask after sync subtask completion', err);
+          }
+        }
+      }
     }
     
     getStateNumber() { return this.#state; }
@@ -969,7 +991,14 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       
       let callbackResult;
       try {
-        let jspiCallee = WebAssembly.promising(callee);
+        let jspiCallee;
+        if (callee._cachedPromising) {
+          jspiCallee = callee._cachedPromising;
+        } else {
+          callee._cachedPromising = WebAssembly.promising(callee);
+          jspiCallee = callee._cachedPromising;
+        }
+        
         callbackResult = await _withGlobalCurrentTaskMetaAsync({
           taskID: preparedTask.id(),
           componentIdx: preparedTask.componentIdx(),
@@ -1340,6 +1369,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         this.#completionPromise = completionPromise;
         
         this.#onResolveHandlers.push((results) => {
+          if (this.#parentSubtask !== null) { return; }
+          if (!this.#isAsync) { return; }
+          
           if (this.#errored !== null) {
             rejectCompletionPromise(this.#errored);
             return;
@@ -1347,6 +1379,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
             rejectCompletionPromise(results);
             return;
           }
+          
           resolveCompletionPromise(results);
         });
         
@@ -1757,9 +1790,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
     
     isRejected() { return this.#rejected; }
     
-    setErrored(err) {
-      this.#errored = err;
-    }
+    isErrored() { return this.#errored; }
+    setErrored(err) { this.#errored = err; }
     
     reject(taskErr) {
       _debugLog('[AsyncTask#reject()] args', {
@@ -1773,10 +1805,6 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       });
       
       if (this.isResolvedState() || this.#rejected) { return; }
-      
-      for (const subtask of this.#subtasks) {
-        subtask.reject(taskErr);
-      }
       
       this.#rejected = true;
       this.cancelRequested = true;
@@ -1835,22 +1863,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       if (this.#exited)  { throw new Error("task has already exited"); }
       
       if (this.#state !== AsyncTask.State.RESOLVED) {
-        // TODO(fix): only fused, manually specified post returns seem to break this invariant,
-        // as the TaskReturn trampoline is not activated it seems.
-        //
-        // see: test/p3/ported/wasmtime/component-async/post-return.js
-        //
-        // We *should* be able to upgrade this to be more strict and throw at some point,
-        // which may involve rewriting the upstream test to surface task return manually somehow.
-        //
-        //throw new Error(`(component [${this.#componentIdx}]) task [${this.#id}] exited without resolution`);
-        _debugLog('[AsyncTask#exit()] task exited without resolution', {
-          componentIdx: this.#componentIdx,
-          taskID: this.#id,
-          subtask: this.getParentSubtask(),
-          subtaskID: this.getParentSubtask()?.id(),
-        });
-        this.#state = AsyncTask.State.RESOLVED;
+        throw new Error(`(component [${this.#componentIdx}]) task [${this.#id}] exited without resolution`);
       }
       
       if (this.borrowedHandles > 0) {
@@ -1914,7 +1927,6 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       newSubtask.setTarget(`subtask (internal ID [${newSubtask.id()}], waitable [${waitable.idx()}], component [${componentIdx}])`);
       waitable.setIdx(cstate.handles.insert(newSubtask));
       waitable.setTarget(`waitable for subtask (waitable id [${waitable.idx()}], subtask internal ID [${newSubtask.id()}])`);
-      
       return newSubtask;
     }
     
@@ -1934,7 +1946,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
     }
     
     removeSubtask(subtask) {
-      if (this.#subtasks.length === 0) { throw new Error('cannot end current subtask: no current subtask'); }
+      if (this.#subtasks.length === 0) {
+        throw new Error('cannot end current subtask: no current subtask');
+      }
       this.#subtasks = this.#subtasks.filter(t => t !== subtask);
       return subtask;
     }
@@ -3163,7 +3177,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -3242,7 +3256,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -3322,7 +3336,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -3401,7 +3415,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -3480,7 +3494,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -3559,7 +3573,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -3638,7 +3652,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -3717,7 +3731,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -3738,167 +3752,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       }
       _trampoline7.fnName = 'vfs:host/bridge#Downloader.downloadFileEnd';
       
-      const _trampoline8 = function(arg0, arg1, arg2, arg3) {
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-write-import"] [Instruction::CallInterface] (sync, @ enter)');
-        const hostProvided = true;
-        
-        let parentTask;
-        let task;
-        let subtask;
-        
-        const createTask = () => {
-          const results = createNewCurrentTask({
-            componentIdx: -1,
-            isAsync: false,
-            entryFnName: 'Wasip1.fdWriteImport',
-            getCallbackFn: () => null,
-            callbackFnName: null,
-            errHandling: 'none',
-            callingWasmExport: false,
-          });
-          task = results[0];
-        };
-        
-        taskCreation: {
-          parentTask = getCurrentTask(
-          0,
-          _getGlobalCurrentTaskMeta(0)?.taskID,
-          )?.task;
-          
-          if (!parentTask) {
-            createTask();
-            break taskCreation;
-          }
-          
-          createTask();
-          
-          if (hostProvided) {
-            subtask = parentTask.getLatestSubtask();
-            if (!subtask) {
-              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
-            }
-            task.setParentSubtask(subtask);
-          }
-        }
-        
-        const started = task.enterSync();
-        
-        let ret;
-        
-        try {
-          ret = _withGlobalCurrentTaskMeta({
-            componentIdx: task.componentIdx(),
-            taskID: task.id(),
-            fn: () => Wasip1.fdWriteImport(arg0, arg1, arg2, arg3),
-          })
-          ;
-        } catch (err) {
-          
-          _debugLog('[Instruction::CallInterface] error during sync call', {
-            taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
-            err,
-          });
-          task.setErrored(err);
-          task.reject(err);
-          task.exit();
-          throw err;
-          
-        }
-        
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-write-import"][Instruction::Return]', {
-          funcName: '[static]wasip1.fd-write-import',
-          paramCount: 1,
-          async: false,
-          postReturn: false
-        });
-        task.resolve([toInt32(ret)]);
-        task.exit();
-        return toInt32(ret);
-      }
-      _trampoline8.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdWriteImport';
-      
-      const _trampoline9 = function(arg0, arg1, arg2, arg3) {
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"] [Instruction::CallInterface] (sync, @ enter)');
-        const hostProvided = true;
-        
-        let parentTask;
-        let task;
-        let subtask;
-        
-        const createTask = () => {
-          const results = createNewCurrentTask({
-            componentIdx: -1,
-            isAsync: false,
-            entryFnName: 'Wasip1.fdReadImport',
-            getCallbackFn: () => null,
-            callbackFnName: null,
-            errHandling: 'none',
-            callingWasmExport: false,
-          });
-          task = results[0];
-        };
-        
-        taskCreation: {
-          parentTask = getCurrentTask(
-          0,
-          _getGlobalCurrentTaskMeta(0)?.taskID,
-          )?.task;
-          
-          if (!parentTask) {
-            createTask();
-            break taskCreation;
-          }
-          
-          createTask();
-          
-          if (hostProvided) {
-            subtask = parentTask.getLatestSubtask();
-            if (!subtask) {
-              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
-            }
-            task.setParentSubtask(subtask);
-          }
-        }
-        
-        const started = task.enterSync();
-        
-        let ret;
-        
-        try {
-          ret = _withGlobalCurrentTaskMeta({
-            componentIdx: task.componentIdx(),
-            taskID: task.id(),
-            fn: () => Wasip1.fdReadImport(arg0, arg1, arg2, arg3),
-          })
-          ;
-        } catch (err) {
-          
-          _debugLog('[Instruction::CallInterface] error during sync call', {
-            taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
-            err,
-          });
-          task.setErrored(err);
-          task.reject(err);
-          task.exit();
-          throw err;
-          
-        }
-        
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"][Instruction::Return]', {
-          funcName: '[static]wasip1.fd-read-import',
-          paramCount: 1,
-          async: false,
-          postReturn: false
-        });
-        task.resolve([toInt32(ret)]);
-        task.exit();
-        return toInt32(ret);
-      }
-      _trampoline9.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdReadImport';
-      
-      const _trampoline10 = function(arg0) {
+      const _trampoline8 = function(arg0) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-threads-import", function="[static]wasip1-threads.thread-spawn-import"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
         
@@ -3956,7 +3810,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -3976,7 +3830,167 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline10.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-threads-import#Wasip1Threads.threadSpawnImport';
+      _trampoline8.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-threads-import#Wasip1Threads.threadSpawnImport';
+      
+      const _trampoline9 = function(arg0, arg1, arg2, arg3) {
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-write-import"] [Instruction::CallInterface] (sync, @ enter)');
+        const hostProvided = true;
+        
+        let parentTask;
+        let task;
+        let subtask;
+        
+        const createTask = () => {
+          const results = createNewCurrentTask({
+            componentIdx: -1,
+            isAsync: false,
+            entryFnName: 'Wasip1.fdWriteImport',
+            getCallbackFn: () => null,
+            callbackFnName: null,
+            errHandling: 'none',
+            callingWasmExport: false,
+          });
+          task = results[0];
+        };
+        
+        taskCreation: {
+          parentTask = getCurrentTask(
+          0,
+          _getGlobalCurrentTaskMeta(0)?.taskID,
+          )?.task;
+          
+          if (!parentTask) {
+            createTask();
+            break taskCreation;
+          }
+          
+          createTask();
+          
+          if (hostProvided) {
+            subtask = parentTask.getLatestSubtask();
+            if (!subtask) {
+              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
+            }
+            task.setParentSubtask(subtask);
+          }
+        }
+        
+        const started = task.enterSync();
+        
+        let ret;
+        
+        try {
+          ret = _withGlobalCurrentTaskMeta({
+            componentIdx: task.componentIdx(),
+            taskID: task.id(),
+            fn: () => Wasip1.fdWriteImport(arg0, arg1, arg2, arg3),
+          })
+          ;
+        } catch (err) {
+          
+          _debugLog('[Instruction::CallInterface] error during sync call', {
+            taskID: task.id(),
+            subtaskID: task.getParentSubtask()?.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-write-import"][Instruction::Return]', {
+          funcName: '[static]wasip1.fd-write-import',
+          paramCount: 1,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([toInt32(ret)]);
+        task.exit();
+        return toInt32(ret);
+      }
+      _trampoline9.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdWriteImport';
+      
+      const _trampoline10 = function(arg0, arg1, arg2, arg3) {
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"] [Instruction::CallInterface] (sync, @ enter)');
+        const hostProvided = true;
+        
+        let parentTask;
+        let task;
+        let subtask;
+        
+        const createTask = () => {
+          const results = createNewCurrentTask({
+            componentIdx: -1,
+            isAsync: false,
+            entryFnName: 'Wasip1.fdReadImport',
+            getCallbackFn: () => null,
+            callbackFnName: null,
+            errHandling: 'none',
+            callingWasmExport: false,
+          });
+          task = results[0];
+        };
+        
+        taskCreation: {
+          parentTask = getCurrentTask(
+          0,
+          _getGlobalCurrentTaskMeta(0)?.taskID,
+          )?.task;
+          
+          if (!parentTask) {
+            createTask();
+            break taskCreation;
+          }
+          
+          createTask();
+          
+          if (hostProvided) {
+            subtask = parentTask.getLatestSubtask();
+            if (!subtask) {
+              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
+            }
+            task.setParentSubtask(subtask);
+          }
+        }
+        
+        const started = task.enterSync();
+        
+        let ret;
+        
+        try {
+          ret = _withGlobalCurrentTaskMeta({
+            componentIdx: task.componentIdx(),
+            taskID: task.id(),
+            fn: () => Wasip1.fdReadImport(arg0, arg1, arg2, arg3),
+          })
+          ;
+        } catch (err) {
+          
+          _debugLog('[Instruction::CallInterface] error during sync call', {
+            taskID: task.id(),
+            subtaskID: task.getParentSubtask()?.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+          
+        }
+        
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"][Instruction::Return]', {
+          funcName: '[static]wasip1.fd-read-import',
+          paramCount: 1,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([toInt32(ret)]);
+        task.exit();
+        return toInt32(ret);
+      }
+      _trampoline10.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdReadImport';
       
       const _trampoline11 = function(arg0, arg1) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.random-get-import"] [Instruction::CallInterface] (sync, @ enter)');
@@ -4036,7 +4050,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4116,7 +4130,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4196,7 +4210,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4276,7 +4290,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4356,7 +4370,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4436,7 +4450,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4516,7 +4530,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4596,7 +4610,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4676,7 +4690,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4756,7 +4770,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4836,7 +4850,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4916,7 +4930,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -4996,7 +5010,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -5076,7 +5090,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -5156,7 +5170,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -5236,7 +5250,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
           _debugLog('[Instruction::CallInterface] error during sync call', {
             taskID: task.id(),
-            subtaskID: currentSubtask?.id(),
+            subtaskID: task.getParentSubtask()?.id(),
             err,
           });
           task.setErrored(err);
@@ -6255,7 +6269,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline8.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -6275,7 +6289,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline8.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -6337,7 +6351,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline10.manuallyAsync,
-        paramLiftFns: [_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -6357,7 +6371,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline10.manuallyAsync,
-        paramLiftFns: [_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -7048,9 +7062,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           '[static]wasip1.fd-filestat-get-import': trampoline19,
           '[static]wasip1.fd-prestat-dir-name-import': trampoline21,
           '[static]wasip1.fd-prestat-get-import': trampoline20,
-          '[static]wasip1.fd-read-import': trampoline9,
+          '[static]wasip1.fd-read-import': trampoline10,
           '[static]wasip1.fd-readdir-import': trampoline22,
-          '[static]wasip1.fd-write-import': trampoline8,
+          '[static]wasip1.fd-write-import': trampoline9,
           '[static]wasip1.path-create-directory-import': trampoline23,
           '[static]wasip1.path-filestat-get-import': trampoline24,
           '[static]wasip1.path-open-import': trampoline25,
@@ -7059,7 +7073,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           '[static]wasip1.sched-yield-import': trampoline12,
         },
         'wasip1-vfs:host/virtual-file-system-wasip1-threads-import': {
-          '[static]wasip1-threads.thread-spawn-import': trampoline10,
+          '[static]wasip1-threads.thread-spawn-import': trampoline8,
         },
       }));
       exports0FlushToVfs = exports0['flush-to-vfs'];
