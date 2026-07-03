@@ -2862,7 +2862,7 @@
         "npm:unplugin-swc@^1.5.9",
         "npm:vite-plugin-dts@^4.5.4",
         "npm:vite-plugin-solid@^2.11.12",
-        "npm:vite@^7.3.5"
+        "npm:vite@^8.1.3"
       ]
     },
     "members": {

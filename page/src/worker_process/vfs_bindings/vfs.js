@@ -3752,8 +3752,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       }
       _trampoline7.fnName = 'vfs:host/bridge#Downloader.downloadFileEnd';
       
-      const _trampoline8 = function(arg0) {
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-threads-import", function="[static]wasip1-threads.thread-spawn-import"] [Instruction::CallInterface] (sync, @ enter)');
+      const _trampoline8 = function(arg0, arg1, arg2, arg3) {
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
         
         let parentTask;
@@ -3764,7 +3764,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           const results = createNewCurrentTask({
             componentIdx: -1,
             isAsync: false,
-            entryFnName: 'Wasip1Threads.threadSpawnImport',
+            entryFnName: 'Wasip1.fdReadImport',
             getCallbackFn: () => null,
             callbackFnName: null,
             errHandling: 'none',
@@ -3803,7 +3803,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           ret = _withGlobalCurrentTaskMeta({
             componentIdx: task.componentIdx(),
             taskID: task.id(),
-            fn: () => Wasip1Threads.threadSpawnImport(arg0),
+            fn: () => Wasip1.fdReadImport(arg0, arg1, arg2, arg3),
           })
           ;
         } catch (err) {
@@ -3820,8 +3820,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
         }
         
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-threads-import", function="[static]wasip1-threads.thread-spawn-import"][Instruction::Return]', {
-          funcName: '[static]wasip1-threads.thread-spawn-import',
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"][Instruction::Return]', {
+          funcName: '[static]wasip1.fd-read-import',
           paramCount: 1,
           async: false,
           postReturn: false
@@ -3830,7 +3830,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline8.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-threads-import#Wasip1Threads.threadSpawnImport';
+      _trampoline8.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdReadImport';
       
       const _trampoline9 = function(arg0, arg1, arg2, arg3) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-write-import"] [Instruction::CallInterface] (sync, @ enter)');
@@ -3912,8 +3912,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       }
       _trampoline9.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdWriteImport';
       
-      const _trampoline10 = function(arg0, arg1, arg2, arg3) {
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"] [Instruction::CallInterface] (sync, @ enter)');
+      const _trampoline10 = function(arg0) {
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-threads-import", function="[static]wasip1-threads.thread-spawn-import"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
         
         let parentTask;
@@ -3924,7 +3924,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           const results = createNewCurrentTask({
             componentIdx: -1,
             isAsync: false,
-            entryFnName: 'Wasip1.fdReadImport',
+            entryFnName: 'Wasip1Threads.threadSpawnImport',
             getCallbackFn: () => null,
             callbackFnName: null,
             errHandling: 'none',
@@ -3963,7 +3963,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           ret = _withGlobalCurrentTaskMeta({
             componentIdx: task.componentIdx(),
             taskID: task.id(),
-            fn: () => Wasip1.fdReadImport(arg0, arg1, arg2, arg3),
+            fn: () => Wasip1Threads.threadSpawnImport(arg0),
           })
           ;
         } catch (err) {
@@ -3980,8 +3980,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           
         }
         
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"][Instruction::Return]', {
-          funcName: '[static]wasip1.fd-read-import',
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-threads-import", function="[static]wasip1-threads.thread-spawn-import"][Instruction::Return]', {
+          funcName: '[static]wasip1-threads.thread-spawn-import',
           paramCount: 1,
           async: false,
           postReturn: false
@@ -3990,7 +3990,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline10.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdReadImport';
+      _trampoline10.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-threads-import#Wasip1Threads.threadSpawnImport';
       
       const _trampoline11 = function(arg0, arg1) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.random-get-import"] [Instruction::CallInterface] (sync, @ enter)');
@@ -6269,7 +6269,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline8.manuallyAsync,
-        paramLiftFns: [_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -6289,7 +6289,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline8.manuallyAsync,
-        paramLiftFns: [_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -6351,7 +6351,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline10.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -6371,7 +6371,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline10.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -7062,7 +7062,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           '[static]wasip1.fd-filestat-get-import': trampoline19,
           '[static]wasip1.fd-prestat-dir-name-import': trampoline21,
           '[static]wasip1.fd-prestat-get-import': trampoline20,
-          '[static]wasip1.fd-read-import': trampoline10,
+          '[static]wasip1.fd-read-import': trampoline8,
           '[static]wasip1.fd-readdir-import': trampoline22,
           '[static]wasip1.fd-write-import': trampoline9,
           '[static]wasip1.path-create-directory-import': trampoline23,
@@ -7073,7 +7073,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           '[static]wasip1.sched-yield-import': trampoline12,
         },
         'wasip1-vfs:host/virtual-file-system-wasip1-threads-import': {
-          '[static]wasip1-threads.thread-spawn-import': trampoline8,
+          '[static]wasip1-threads.thread-spawn-import': trampoline10,
         },
       }));
       exports0FlushToVfs = exports0['flush-to-vfs'];
