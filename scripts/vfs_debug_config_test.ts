@@ -1,6 +1,7 @@
 import {
   buildRepeatedCommands,
   computeWorkerWatchdogMs,
+  requireRustcLinkerOutput,
   parsePositiveInt,
 } from "./vfs_debug_config.ts";
 
@@ -47,4 +48,31 @@ Deno.test("computeWorkerWatchdogMs scales with run count and per-run timeout", (
   if (timeoutMs !== 360000) {
     throw new Error(`expected 360000ms, got ${timeoutMs}ms`);
   }
+});
+
+Deno.test("requireRustcLinkerOutput rejects prompt return without linker output", () => {
+  let threw = false;
+  try {
+    requireRustcLinkerOutput({
+      command: "rustc /src/main.rs",
+      runIndex: 1,
+      totalRuns: 2,
+      output: "[vfs-debug] rustc:_main:enter\n[vfs-debug] command:return\n/ $ ",
+    });
+  } catch (error) {
+    threw = error instanceof Error && error.message.includes("missing linker output");
+  }
+
+  if (!threw) {
+    throw new Error("expected missing linker output to fail");
+  }
+});
+
+Deno.test("requireRustcLinkerOutput accepts rustc linker output", () => {
+  requireRustcLinkerOutput({
+    command: "rustc /src/main.rs",
+    runIndex: 2,
+    totalRuns: 2,
+    output: "[vfs-debug] rustc:_main:enter\nLinking using LC_ALL=\"C\"\n[vfs-debug] command:return\n/ $ ",
+  });
 });

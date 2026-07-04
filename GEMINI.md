@@ -21,7 +21,6 @@ The project uses `bun` as the primary package manager and task runner.
 ## Development Conventions
 - **Package Manager**: `bun` (and `cargo` for Rust).
 - **Linter/Formatter**: `Biome` is used for JavaScript/TypeScript code formatting.
-- **Commit Rule (`inst.ts`)**: When modifying `page/src/worker_process/vfs_bindings/inst.ts`, the changes **MUST** be committed with a `wip` message.
 
 ## `xterm.tsx` and `unknown_fn` Relationship
 The WebAssembly `vfs` component makes host calls via a custom `call_unknown_fn` callback. This is passed down from the UI layer to the worker process.

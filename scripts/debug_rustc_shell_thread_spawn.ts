@@ -50,6 +50,7 @@ const rustcMemoryReservePages = parsePositiveInt(
   4096,
   "VFS_DEBUG_RUSTC_MEMORY_RESERVE_PAGES",
 );
+const skipMemoryReserve = Deno.env.get("VFS_DEBUG_SKIP_MEMORY_RESERVE") === "1";
 const workerWatchdogMs = computeWorkerWatchdogMs({
   commandTimeoutMs: timeoutMs,
   runs,
@@ -113,6 +114,7 @@ const result = await new Promise<{
     memoryReserveCount,
     memoryReservePages,
     rustcMemoryReservePages,
+    skipMemoryReserve,
     sourceCode,
   });
 });

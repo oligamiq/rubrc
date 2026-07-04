@@ -34,3 +34,17 @@ export function computeWorkerWatchdogMs(options: {
   const { commandTimeoutMs, runs, perRunMultiplier, graceMs } = options;
   return commandTimeoutMs * (1 + perRunMultiplier * runs) + graceMs;
 }
+
+export function requireRustcLinkerOutput(options: {
+  command: string;
+  runIndex: number;
+  totalRuns: number;
+  output: string;
+}): void {
+  const { command, runIndex, totalRuns, output } = options;
+  if (!output.includes("Linking using")) {
+    throw new Error(
+      `rustc run ${runIndex}/${totalRuns} returned to prompt with missing linker output: ${command}`,
+    );
+  }
+}

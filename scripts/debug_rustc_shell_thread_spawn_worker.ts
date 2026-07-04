@@ -1,6 +1,7 @@
 import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import { set_fake_worker } from "../page/src/worker_process/vfs_bindings/common.ts";
 import { custom_instantiate } from "../page/src/worker_process/vfs_bindings/inst.ts";
+import { requireRustcLinkerOutput } from "./vfs_debug_config.ts";
 
 await set_fake_worker();
 
@@ -35,6 +36,7 @@ globalThis.onmessage = async (event) => {
     memoryReserveCount,
     memoryReservePages,
     rustcMemoryReservePages,
+    skipMemoryReserve,
     sourceCode,
   } = event.data;
   let output = "";
@@ -155,19 +157,21 @@ globalThis.onmessage = async (event) => {
         index + 1
       }/${commands.length}:enter ${command}\n`;
 
-      root.dispatch(
-        0,
-        EVENT_TYPE_DEBUG_RESERVE_SELF,
-        memoryReserveCount,
-        memoryReservePages,
-      );
-      root.dispatch(
-        0,
-        EVENT_TYPE_DEBUG_RESERVE_RUSTC,
-        memoryReserveCount,
-        rustcMemoryReservePages,
-      );
-      output += drainOutput();
+      if (!skipMemoryReserve) {
+        root.dispatch(
+          0,
+          EVENT_TYPE_DEBUG_RESERVE_SELF,
+          memoryReserveCount,
+          memoryReservePages,
+        );
+        root.dispatch(
+          0,
+          EVENT_TYPE_DEBUG_RESERVE_RUSTC,
+          memoryReserveCount,
+          rustcMemoryReservePages,
+        );
+        output += drainOutput();
+      }
 
       for (const character of `${command}\r`) {
         root.dispatch(sessionId, 0, character.codePointAt(0) ?? 0, 0);
@@ -193,6 +197,15 @@ globalThis.onmessage = async (event) => {
             index + 1
           }/${commands.length}: ${command}`,
         );
+      }
+
+      if (command === "rustc" || command.startsWith("rustc ")) {
+        requireRustcLinkerOutput({
+          command,
+          runIndex: index + 1,
+          totalRuns: commands.length,
+          output: runOutput,
+        });
       }
 
       output += `[vfs-debug-driver] run:${
