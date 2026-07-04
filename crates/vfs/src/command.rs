@@ -1,4 +1,3 @@
-use crate::memory_manager::*;
 use crate::vfs::host::bridge::Downloader;
 use crate::*;
 use parking_lot::Mutex;
@@ -146,7 +145,7 @@ pub fn handle_command(args: Vec<String>) {
                 "rustc:memory:before-ensure pages={}",
                 crate::memory_size::<crate::rustc_opt>()
             ));
-            MEMORY_MANAGER.ensure::<crate::rustc_opt>(RUSTC_CONFIG);
+            MEMORY_MANAGER.ensure_once::<crate::rustc_opt>(&RUSTC_RESERVE_ONCE, RUSTC_CONFIG);
             crate::debug_trace(&format!(
                 "rustc:memory:after-ensure pages={}",
                 crate::memory_size::<crate::rustc_opt>()
@@ -181,7 +180,7 @@ pub fn handle_command(args: Vec<String>) {
             crate::debug_trace("rustc:_main:return");
         }
         "clang" | "llvm" => {
-            MEMORY_MANAGER.ensure::<crate::llvm_opt>(LLVM_CONFIG);
+            MEMORY_MANAGER.ensure_once::<crate::llvm_opt>(&LLVM_RESERVE_ONCE, LLVM_CONFIG);
             set_llvm_opt_args(&args);
             crate::llvm_opt::_reset();
             crate::llvm_opt::_start();
@@ -197,7 +196,7 @@ pub fn handle_command(args: Vec<String>) {
                 return;
             }
             set_lsp_opt_args(&args);
-            MEMORY_MANAGER.ensure::<crate::lsp_opt>(LSP_CONFIG);
+            MEMORY_MANAGER.ensure_once::<crate::lsp_opt>(&LSP_RESERVE_ONCE, LSP_CONFIG);
             crate::lsp_opt::_start();
         }
         _ => {

@@ -1083,6 +1083,8 @@ dependencies = [
 [[package]]
 name = "wasi_virt_layer"
 version = "0.5.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "deb3ad29a1e3e0a72f3b74de28e998d1c324c4d985319fe04a97284d8c1e36a7"
 dependencies = [
  "const_for",
  "const_struct",
@@ -1470,3 +1472,7 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[patch.unused]]
+name = "wasi_virt_layer"
+version = "0.6.0"

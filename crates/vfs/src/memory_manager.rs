@@ -17,21 +17,37 @@ impl MemoryReserveManager {
         Self { thread_margin }
     }
 
-    fn warn_failed(name: &str, config: TargetConfig, current: i32) {
+    fn warn_failed(name: &str, config: TargetConfig, current: i32, reserve_pages: i32) {
         eprintln!(
             "\x1b[33m[memory] failed to reserve {} pages for {} (have {}, need {})\x1b[0m",
-            config.reserve_pages, name, current, config.min_pages
+            reserve_pages, name, current, config.min_pages
         );
     }
 
-    pub fn ensure<Wasm: WasmAccess + WasmAccessName>(&self, config: TargetConfig) {
-        let current = crate::memory_size::<Wasm>();
-        if current < config.min_pages {
-            let result = crate::memory_reserve::<Wasm>(config.reserve_pages);
-            if result <= 0 {
-                Self::warn_failed(Wasm::NAME, config, current);
-            }
+    pub fn ensure_once<Wasm: WasmAccess + WasmAccessName>(
+        &self,
+        reserve: &TargetReserveOnce,
+        config: TargetConfig,
+    ) {
+        let mut reserved = reserve.reserved.lock();
+        if *reserved {
+            return;
         }
+
+        let current = crate::memory_size::<Wasm>();
+        if current >= config.min_pages {
+            *reserved = true;
+            return;
+        }
+
+        let reserve_pages = config.reserve_pages.max(config.min_pages - current);
+        let result = crate::memory_reserve::<Wasm>(reserve_pages);
+        if result <= 0 {
+            Self::warn_failed(Wasm::NAME, config, current, reserve_pages);
+            return;
+        }
+
+        *reserved = true;
     }
 
     pub fn reserve_for_thread(&self) {
@@ -40,8 +56,20 @@ impl MemoryReserveManager {
         if current < config.min_pages {
             let result = crate::memory_reserve_self(config.reserve_pages);
             if result <= 0 {
-                Self::warn_failed("__self", config, current);
+                Self::warn_failed("__self", config, current, config.reserve_pages);
             }
+        }
+    }
+}
+
+pub(crate) struct TargetReserveOnce {
+    reserved: parking_lot::Mutex<bool>,
+}
+
+impl TargetReserveOnce {
+    pub const fn new() -> Self {
+        Self {
+            reserved: parking_lot::Mutex::new(false),
         }
     }
 }
@@ -98,5 +126,11 @@ pub(crate) const VFS_SHELL_CONFIG: TargetConfig = TargetConfig {
 
 pub(crate) static MEMORY_MANAGER: LazyLock<MemoryReserveManager> =
     LazyLock::new(|| MemoryReserveManager::new(THREAD_SELF_CONFIG));
+
+pub(crate) static CARGO_RESERVE_ONCE: TargetReserveOnce = TargetReserveOnce::new();
+pub(crate) static RUSTC_RESERVE_ONCE: TargetReserveOnce = TargetReserveOnce::new();
+pub(crate) static LLVM_RESERVE_ONCE: TargetReserveOnce = TargetReserveOnce::new();
+pub(crate) static LSP_RESERVE_ONCE: TargetReserveOnce = TargetReserveOnce::new();
+pub(crate) static VFS_SHELL_RESERVE_ONCE: TargetReserveOnce = TargetReserveOnce::new();
 
 pub(crate) static LSP_START_ONCE: StartOnce = StartOnce::new();

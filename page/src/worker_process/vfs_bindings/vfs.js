@@ -1,6 +1,6 @@
 "use components";
 export function instantiate(getCoreModule, imports, instantiateCore = WebAssembly.instantiate) {
-  
+
   function promiseWithResolvers() {
     if (Promise.withResolvers) {
       return Promise.withResolvers();
@@ -7116,4 +7116,3 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
     const maybeSyncReturn = runNext(null);
     return promise || maybeSyncReturn;
   };
-  

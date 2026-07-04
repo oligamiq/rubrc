@@ -50,7 +50,7 @@ pub(crate) static RUSTC_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
 
 pub(crate) fn run_cargo() {
     CARGO_EXIT_STATUS.store(0, Ordering::SeqCst);
-    MEMORY_MANAGER.ensure::<cargo_opt>(CARGO_CONFIG);
+    MEMORY_MANAGER.ensure_once::<cargo_opt>(&CARGO_RESERVE_ONCE, CARGO_CONFIG);
     if !CARGO_STARTED.swap(true, Ordering::SeqCst) {
         cargo_opt::_start();
     }
@@ -59,8 +59,8 @@ pub(crate) fn run_cargo() {
 
 fn run_rustc() {
     RUSTC_EXIT_STATUS.store(0, Ordering::SeqCst);
-    MEMORY_MANAGER.ensure::<rustc_opt>(RUSTC_CONFIG);
-    // MEMORY_MANAGER.ensure::<llvm_opt>(LLVM_CONFIG);
+    MEMORY_MANAGER.ensure_once::<rustc_opt>(&RUSTC_RESERVE_ONCE, RUSTC_CONFIG);
+    // MEMORY_MANAGER.ensure_once::<llvm_opt>(&LLVM_RESERVE_ONCE, LLVM_CONFIG);
     // if RUSTC_STARTED.swap(true, Ordering::SeqCst) {
     //     rustc_opt::_main();
     // } else {
@@ -142,7 +142,7 @@ impl Guest for Wit {
 
         vfs_shell::_reset();
         println!("###");
-        MEMORY_MANAGER.ensure::<vfs_shell>(VFS_SHELL_CONFIG);
+        MEMORY_MANAGER.ensure_once::<vfs_shell>(&VFS_SHELL_RESERVE_ONCE, VFS_SHELL_CONFIG);
         println!("###2");
         vfs_shell::_start();
         println!("###3");
@@ -212,7 +212,7 @@ impl Guest for Wit {
                 std::thread::spawn(move || {
                     crate::shell::vfs_set_current_session_id(LSP_SESSION_ID);
                     crate::command::set_lsp_opt_args(&["rust-analyzer"]);
-                    MEMORY_MANAGER.ensure::<lsp_opt>(LSP_CONFIG);
+                    MEMORY_MANAGER.ensure_once::<lsp_opt>(&LSP_RESERVE_ONCE, LSP_CONFIG);
                     lsp_opt::_start();
                 });
             }
@@ -306,7 +306,7 @@ impl Guest for Wit {
                 "debug-rustc:memory:before-ensure pages={}",
                 crate::memory_size::<rustc_opt>()
             ));
-            MEMORY_MANAGER.ensure::<rustc_opt>(RUSTC_CONFIG);
+            MEMORY_MANAGER.ensure_once::<rustc_opt>(&RUSTC_RESERVE_ONCE, RUSTC_CONFIG);
             crate::debug_trace(&format!(
                 "debug-rustc:memory:after-ensure pages={}",
                 crate::memory_size::<rustc_opt>()
@@ -781,6 +781,14 @@ pub extern "C" fn wasi_ext_spawn(
 #[link(wasm_import_module = "wasip1_vfs_cargo_opt")]
 unsafe extern "C" {
     fn wasi_ext_allocate(size: usize) -> *mut u8;
+}
+
+#[cfg(not(target_os = "wasi"))]
+unsafe fn wasi_ext_allocate(size: usize) -> *mut u8 {
+    let mut data = Vec::<u8>::with_capacity(size);
+    let ptr = data.as_mut_ptr();
+    std::mem::forget(data);
+    ptr
 }
 
 #[allow(clippy::too_many_arguments)]
