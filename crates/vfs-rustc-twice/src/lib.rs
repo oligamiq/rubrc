@@ -376,6 +376,7 @@ pub static VIRTUAL_SHELL_ENV: std::sync::LazyLock<parking_lot::Mutex<VirtualEnvS
                 "HOME=~/".to_string(),
                 // "RUST_SRC_PATH=/sysroot/lib/rustlib".to_string(),
                 "SYSROOT=/sysroot".to_string(),
+                "PATH=/bin".to_string(),
             ],
         })
     });
@@ -497,6 +498,9 @@ pub static VIRTUAL_FILE_SYSTEM: std::sync::LazyLock<StandardDynamicFileSystem<LF
     std::sync::LazyLock::new(|| {
         let lfs = StandardDynamicLFS::new();
         let root_inode = lfs.add_preopen(".");
+        if let Ok(bin_inode) = lfs.add_dir(root_inode, "bin") {
+            let _ = lfs.add_file(bin_inode, "cargo", b"#!/bin/sh\nexit 0\n".to_vec());
+        }
         LFS_ROOT.store(root_inode, std::sync::atomic::Ordering::SeqCst);
         let vfs = StandardDynamicFileSystem::new(lfs);
         vfs.add_fd(root_inode, !0, !0);
@@ -522,7 +526,7 @@ plug_fs!(
 #[const_struct]
 const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
     // environ: &["RUST_MIN_STACK=16777216", "HOME=~/"],
-    environ: &["HOME=~/"],
+    environ: &["HOME=~/", "PATH=/bin"],
 };
 
 plug_env!(
@@ -670,6 +674,10 @@ pub extern "C" fn wasi_ext_spawn(
         .and_then(|name| name.to_str())
         .unwrap_or(&program);
     let status = if program_name == "rustc" {
+        argv.push("--sysroot".to_string());
+        argv.push("/sysroot".to_string());
+        argv.push("-Clinker-flavor=wasm-ld".to_string());
+        argv.push("-Clinker=wasm-ld".to_string());
         command::set_rustc_opt_args(&argv);
         run_rustc();
         RUSTC_EXIT_STATUS.load(Ordering::SeqCst)

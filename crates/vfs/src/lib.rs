@@ -1,5 +1,6 @@
 use const_struct::*;
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
@@ -36,6 +37,116 @@ static DEBUG_TERMINAL_OUTPUT: std::sync::LazyLock<parking_lot::Mutex<Vec<u8>>> =
 struct CargoOutput {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+}
+
+#[derive(Default)]
+struct VirtualPipe {
+    buffer: VecDeque<u8>,
+    write_closed: bool,
+}
+
+impl VirtualPipe {
+    fn closed_with(data: Vec<u8>) -> Self {
+        Self {
+            buffer: VecDeque::from(data),
+            write_closed: true,
+        }
+    }
+
+    fn read(&mut self, buf: &mut [u8]) -> usize {
+        if self.buffer.is_empty() && !self.write_closed {
+            return 0;
+        }
+        let len = std::cmp::min(buf.len(), self.buffer.len());
+        for slot in &mut buf[..len] {
+            *slot = self.buffer.pop_front().unwrap_or_default();
+        }
+        len
+    }
+
+    fn write(&mut self, buf: &[u8]) -> usize {
+        self.buffer.extend(buf.iter().copied());
+        buf.len()
+    }
+
+    fn drain(&mut self) -> Vec<u8> {
+        self.buffer.drain(..).collect()
+    }
+}
+
+struct ChildProcessStdio {
+    owner: std::thread::ThreadId,
+    cwd: Vec<u8>,
+    stdin: VirtualPipe,
+    stdout: VirtualPipe,
+    stderr: VirtualPipe,
+}
+
+impl ChildProcessStdio {
+    fn new(cwd: Vec<u8>, stdin: Vec<u8>) -> Self {
+        Self {
+            owner: std::thread::current().id(),
+            cwd,
+            stdin: VirtualPipe::closed_with(stdin),
+            stdout: VirtualPipe::default(),
+            stderr: VirtualPipe::default(),
+        }
+    }
+
+    fn is_owner(&self) -> bool {
+        self.owner == std::thread::current().id()
+    }
+}
+
+static CHILD_PROCESS_STDIO: std::sync::LazyLock<parking_lot::Mutex<Option<ChildProcessStdio>>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+
+fn with_child_process_stdio<T>(
+    cwd: Vec<u8>,
+    stdin: Vec<u8>,
+    f: impl FnOnce() -> T,
+) -> (T, CargoOutput) {
+    let previous = {
+        let mut process = CHILD_PROCESS_STDIO.lock();
+        process.replace(ChildProcessStdio::new(cwd, stdin))
+    };
+
+    let result = f();
+
+    let mut current = {
+        let mut process = CHILD_PROCESS_STDIO.lock();
+        let current = process
+            .take()
+            .unwrap_or_else(|| ChildProcessStdio::new(Vec::new(), Vec::new()));
+        *process = previous;
+        current
+    };
+
+    if !current.cwd.is_empty() {
+        debug_trace(&format!(
+            "child-process:cwd {}",
+            String::from_utf8_lossy(&current.cwd)
+        ));
+    }
+
+    (
+        result,
+        CargoOutput {
+            stdout: current.stdout.drain(),
+            stderr: current.stderr.drain(),
+        },
+    )
+}
+
+fn virtual_cwd_for_set_current_dir(cwd: &[u8]) -> Option<std::borrow::Cow<'_, str>> {
+    let cwd = String::from_utf8_lossy(cwd);
+    if cwd == "/" {
+        None
+    } else if let Some(relative) = cwd.strip_prefix('/') {
+        Some(std::borrow::Cow::Owned(relative.to_string()))
+    } else {
+        Some(cwd)
+    }
 }
 
 thread_local! {
@@ -464,8 +575,10 @@ pub static VIRTUAL_SHELL_ENV: std::sync::LazyLock<parking_lot::Mutex<VirtualEnvS
         parking_lot::Mutex::new(VirtualEnvState {
             env: vec![
                 "HOME=~/".to_string(),
+                "CARGO_INCREMENTAL=0".to_string(),
                 // "RUST_SRC_PATH=/sysroot/lib/rustlib".to_string(),
                 "SYSROOT=/sysroot".to_string(),
+                "PATH=/bin".to_string(),
             ],
         })
     });
@@ -475,6 +588,15 @@ pub struct ShellVirtualStdIO;
 
 impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
     fn write(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        {
+            let mut process = CHILD_PROCESS_STDIO.lock();
+            if let Some(process) = process.as_mut() {
+                if process.is_owner() {
+                    return Ok(process.stdout.write(buf));
+                }
+            }
+        }
+
         if capture_cargo_output(false, buf) {
             return Ok(buf.len());
         }
@@ -530,6 +652,15 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
         }
     }
     fn ewrite(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        {
+            let mut process = CHILD_PROCESS_STDIO.lock();
+            if let Some(process) = process.as_mut() {
+                if process.is_owner() {
+                    return Ok(process.stderr.write(buf));
+                }
+            }
+        }
+
         if capture_cargo_output(true, buf) {
             return Ok(buf.len());
         }
@@ -559,6 +690,15 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
         }
     }
     fn read(buf: &mut [u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        {
+            let mut process = CHILD_PROCESS_STDIO.lock();
+            if let Some(process) = process.as_mut() {
+                if process.is_owner() {
+                    return Ok(process.stdin.read(buf));
+                }
+            }
+        }
+
         let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
         if session_id == LSP_SESSION_ID || (session_id == 0 && LSP_START_ONCE.is_started()) {
             let (lock, cvar) = &*LSP_STDIN;
@@ -587,6 +727,9 @@ pub static VIRTUAL_FILE_SYSTEM: std::sync::LazyLock<StandardDynamicFileSystem<LF
     std::sync::LazyLock::new(|| {
         let lfs = StandardDynamicLFS::new();
         let root_inode = lfs.add_preopen(".");
+        if let Ok(bin_inode) = lfs.add_dir(root_inode, "bin") {
+            let _ = lfs.add_file(bin_inode, "cargo", b"#!/bin/sh\nexit 0\n".to_vec());
+        }
         LFS_ROOT.store(root_inode, std::sync::atomic::Ordering::SeqCst);
         let vfs = StandardDynamicFileSystem::new(lfs);
         vfs.add_fd(root_inode, !0, !0);
@@ -612,7 +755,7 @@ plug_fs!(
 #[const_struct]
 const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
     // environ: &["RUST_MIN_STACK=16777216", "HOME=~/"],
-    environ: &["HOME=~/"],
+    environ: &["HOME=~/", "CARGO_INCREMENTAL=0", "PATH=/bin"],
 };
 
 plug_env!(
@@ -637,13 +780,13 @@ plug_random!(
 );
 
 plug_poll!(WaitPoll, rustc_opt, llvm_opt, vfs_shell, lsp_opt, cargo_opt);
-plug_sched!(DefaultSched, cargo_opt);
 
 static THREAD_POOL: VirtualThreadPool<ThreadAccessor> = unsafe { VirtualThreadPool::new_const(8) };
 
 plug_thread!(
     { &THREAD_POOL },
     self,
+    cargo_opt,
     rustc_opt,
     vfs_shell,
     lsp_opt,
@@ -769,22 +912,32 @@ pub extern "C" fn wasi_ext_spawn(
             .collect();
         old
     };
+    if !cwd.is_empty() {
+        crate::debug_trace(&format!(
+            "wasi-ext-spawn:virtual-cwd {}",
+            String::from_utf8_lossy(&cwd)
+        ));
+    }
+
     let old_cwd = std::env::current_dir().ok();
     if !cwd.is_empty() {
-        let cwd = String::from_utf8_lossy(&cwd);
-        if let Err(error) = std::env::set_current_dir(cwd.as_ref()) {
-            VIRTUAL_SHELL_ENV.lock().env = old_env;
-            write_cargo_owned_spawn_result(
-                Vec::new(),
-                format!("failed to set cwd `{cwd}`: {error}").into_bytes(),
-                1,
-                out_exit_code,
-                out_stdout_ptr,
-                out_stdout_len,
-                out_stderr_ptr,
-                out_stderr_len,
-            );
-            return 0;
+        let cwd_string = String::from_utf8_lossy(&cwd);
+        let set_cwd = virtual_cwd_for_set_current_dir(&cwd);
+        if let Some(set_cwd) = set_cwd {
+            if let Err(error) = std::env::set_current_dir(set_cwd.as_ref()) {
+                VIRTUAL_SHELL_ENV.lock().env = old_env;
+                write_cargo_owned_spawn_result(
+                    Vec::new(),
+                    format!("failed to set cwd `{cwd_string}`: {error}").into_bytes(),
+                    1,
+                    out_exit_code,
+                    out_stdout_ptr,
+                    out_stdout_len,
+                    out_stderr_ptr,
+                    out_stderr_len,
+                );
+                return 0;
+            }
         }
     }
 
@@ -793,17 +946,18 @@ pub extern "C" fn wasi_ext_spawn(
 
     crate::debug_trace("wasi-ext-spawn:run-rustc:enter");
     let old_args = command::VIRTUAL_ARGS.lock().args.clone();
+    argv.push("--sysroot".to_string());
+    argv.push("/sysroot".to_string());
+    argv.push("-Clinker-flavor=wasm-ld".to_string());
+    argv.push("-Clinker=wasm-ld".to_string());
     command::set_rustc_opt_args(&argv);
-    run_rustc();
+    let ((), child_output) = with_child_process_stdio(cwd.to_vec(), Vec::new(), run_rustc);
     command::VIRTUAL_ARGS.lock().args = old_args;
     let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
     crate::debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
 
-    let child_output = CARGO_OUTPUT
-        .with(|output| output.borrow_mut().take())
-        .unwrap_or_default();
+    let _ = CARGO_OUTPUT.with(|output| output.borrow_mut().take());
     CARGO_OUTPUT.with(|output| *output.borrow_mut() = outer_output);
-
     if let Some(old_cwd) = old_cwd {
         let _ = std::env::set_current_dir(old_cwd);
     }

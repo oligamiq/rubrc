@@ -27,11 +27,15 @@ globalThis.onmessage = async (event) => {
     commands,
     threads,
     timeoutMs,
+    preloads = [],
+    lspInputBytes = [],
   }: {
     wasiRef: unknown;
     commands: string[][];
     threads: number;
     timeoutMs: number;
+    preloads?: { path: string; content: string }[];
+    lspInputBytes?: number[];
   } = event.data;
   let output = "";
 
@@ -88,6 +92,15 @@ globalThis.onmessage = async (event) => {
     root.debugSetTerminalCapture(true);
 
     const memory = animal.get_share_memory().memory;
+    const dispatchBytes = (sessionId: number, eventType: number, bytes: Uint8Array) => {
+      const ptr = root.allocBuf(bytes.length);
+      try {
+        new Uint8Array(memory.buffer).set(bytes, ptr);
+        root.dispatch(sessionId, eventType, ptr, bytes.length);
+      } finally {
+        root.freeBuf(ptr, bytes.length);
+      }
+    };
     const drainOutput = () => {
       const len = root.debugTerminalOutputLen();
       if (len === 0) {
@@ -104,6 +117,14 @@ globalThis.onmessage = async (event) => {
         root.freeBuf(ptr, len);
       }
     };
+
+    for (const preload of preloads) {
+      dispatchBytes(0, 7, new TextEncoder().encode(JSON.stringify(preload)));
+    }
+
+    if (lspInputBytes.length > 0) {
+      dispatchBytes(0xffffffff, 6, new Uint8Array(lspInputBytes));
+    }
 
     const sessionId = 1;
     root.dispatch(sessionId, 3, 0, 0);
