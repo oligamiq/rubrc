@@ -141,15 +141,8 @@ pub fn handle_command(args: Vec<String>) {
             }
         }
         "rustc" => {
-            crate::debug_trace(&format!(
-                "rustc:memory:before-ensure pages={}",
-                crate::memory_size::<crate::rustc_opt>()
-            ));
-            MEMORY_MANAGER.ensure_once::<crate::rustc_opt>(&RUSTC_RESERVE_ONCE, RUSTC_CONFIG);
-            crate::debug_trace(&format!(
-                "rustc:memory:after-ensure pages={}",
-                crate::memory_size::<crate::rustc_opt>()
-            ));
+            let _tool_guard = crate::CARGO_RUN_LOCK.lock();
+            let _rustc_guard = crate::RUSTC_RUN_LOCK.lock();
             let mut args = args;
             if !args
                 .iter()
@@ -160,24 +153,7 @@ pub fn handle_command(args: Vec<String>) {
                 args.push(DEFAULT_RUSTC_SYSROOT.to_string());
             }
             set_rustc_opt_args(&args);
-            crate::debug_trace("rustc:_reset:enter");
-            crate::debug_trace(&format!(
-                "rustc:memory:before-reset pages={}",
-                crate::memory_size::<crate::rustc_opt>()
-            ));
-            crate::rustc_opt::_reset();
-            crate::debug_trace(&format!(
-                "rustc:memory:after-reset pages={}",
-                crate::memory_size::<crate::rustc_opt>()
-            ));
-            crate::debug_trace("rustc:_reset:return");
-            crate::debug_trace("rustc:_main:enter");
-            crate::rustc_opt::_main();
-            crate::debug_trace(&format!(
-                "rustc:memory:after-main pages={}",
-                crate::memory_size::<crate::rustc_opt>()
-            ));
-            crate::debug_trace("rustc:_main:return");
+            crate::run_rustc();
         }
         "clang" | "llvm" => {
             MEMORY_MANAGER.ensure_once::<crate::llvm_opt>(&LLVM_RESERVE_ONCE, LLVM_CONFIG);
@@ -187,6 +163,7 @@ pub fn handle_command(args: Vec<String>) {
             crate::llvm_opt::_main();
         }
         "cargo" => {
+            let _run_guard = crate::CARGO_RUN_LOCK.lock();
             set_cargo_opt_args(&args);
             crate::run_cargo();
         }

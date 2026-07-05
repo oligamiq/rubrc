@@ -1,5 +1,5 @@
 use const_struct::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
@@ -40,35 +40,78 @@ struct CargoOutput {
 
 thread_local! {
     static CARGO_OUTPUT: RefCell<Option<CargoOutput>> = const { RefCell::new(None) };
+    static RUSTC_ACTIVE: Cell<bool> = const { Cell::new(false) };
 }
 
-static CARGO_RUN_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-static CARGO_STARTED: AtomicBool = AtomicBool::new(false);
+pub(crate) static CARGO_RUN_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 pub(crate) static CARGO_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
+pub(crate) static RUSTC_RUN_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+#[allow(dead_code)]
 static RUSTC_STARTED: AtomicBool = AtomicBool::new(false);
 pub(crate) static RUSTC_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
+
+struct RustcActiveGuard;
+
+impl Drop for RustcActiveGuard {
+    fn drop(&mut self) {
+        RUSTC_ACTIVE.with(|active| active.set(false));
+    }
+}
 
 pub(crate) fn run_cargo() {
     CARGO_EXIT_STATUS.store(0, Ordering::SeqCst);
     MEMORY_MANAGER.ensure_once::<cargo_opt>(&CARGO_RESERVE_ONCE, CARGO_CONFIG);
-    if !CARGO_STARTED.swap(true, Ordering::SeqCst) {
-        cargo_opt::_start();
-    }
+    debug_trace(&format!(
+        "cargo:memory:after-ensure pages={}",
+        memory_size::<cargo_opt>()
+    ));
+    debug_trace("cargo:_reset:enter");
+    cargo_opt::_reset();
+    debug_trace(&format!(
+        "cargo:memory:after-reset pages={}",
+        memory_size::<cargo_opt>()
+    ));
+    debug_trace("cargo:_reset:return");
+    debug_trace("cargo:_main:enter");
     cargo_opt::_main();
+    debug_trace(&format!(
+        "cargo:memory:after-main pages={}",
+        memory_size::<cargo_opt>()
+    ));
+    debug_trace("cargo:_main:return");
 }
 
-fn run_rustc() {
+pub(crate) fn run_rustc() {
     RUSTC_EXIT_STATUS.store(0, Ordering::SeqCst);
+    if RUSTC_ACTIVE.with(|active| active.replace(true)) {
+        debug_trace("rustc:already-running");
+        RUSTC_EXIT_STATUS.store(127, Ordering::SeqCst);
+        return;
+    }
+    let _active_guard = RustcActiveGuard;
+    debug_trace(&format!(
+        "rustc:memory:before-ensure pages={}",
+        memory_size::<rustc_opt>()
+    ));
     MEMORY_MANAGER.ensure_once::<rustc_opt>(&RUSTC_RESERVE_ONCE, RUSTC_CONFIG);
-    // MEMORY_MANAGER.ensure_once::<llvm_opt>(&LLVM_RESERVE_ONCE, LLVM_CONFIG);
-    // if RUSTC_STARTED.swap(true, Ordering::SeqCst) {
-    //     rustc_opt::_main();
-    // } else {
-    //     rustc_opt::_start();
-    // }
-    // rustc_opt::_start();
-    // rustc_opt::_main();
-    unreachable!("##");
+    debug_trace(&format!(
+        "rustc:memory:after-ensure pages={}",
+        memory_size::<rustc_opt>()
+    ));
+    debug_trace("rustc:_reset:enter");
+    rustc_opt::_reset();
+    debug_trace(&format!(
+        "rustc:memory:after-reset pages={}",
+        memory_size::<rustc_opt>()
+    ));
+    debug_trace("rustc:_reset:return");
+    debug_trace("rustc:_main:enter");
+    rustc_opt::_main();
+    debug_trace(&format!(
+        "rustc:memory:after-main pages={}",
+        memory_size::<rustc_opt>()
+    ));
+    debug_trace("rustc:_main:return");
 }
 
 fn capture_cargo_output(stderr: bool, buf: &[u8]) -> bool {
@@ -302,15 +345,6 @@ impl Guest for Wit {
         } else if event_type == EVENT_TYPE_DEBUG_FIXED_RUSTC {
             let run_marker = arg1;
             crate::debug_trace(&format!("debug-rustc:enter run={run_marker}"));
-            crate::debug_trace(&format!(
-                "debug-rustc:memory:before-ensure pages={}",
-                crate::memory_size::<rustc_opt>()
-            ));
-            MEMORY_MANAGER.ensure_once::<rustc_opt>(&RUSTC_RESERVE_ONCE, RUSTC_CONFIG);
-            crate::debug_trace(&format!(
-                "debug-rustc:memory:after-ensure pages={}",
-                crate::memory_size::<rustc_opt>()
-            ));
             let fixed_args: &[&str] = &[
                 "rustc",
                 "/src/main.rs",
@@ -323,26 +357,20 @@ impl Guest for Wit {
                 "-Clinker=wasm-ld",
             ];
             std::thread::spawn(move || {
+                let _tool_guard = crate::CARGO_RUN_LOCK.lock();
+                let _rustc_guard = crate::RUSTC_RUN_LOCK.lock();
+                crate::debug_trace(&format!(
+                    "debug-rustc:memory:before-ensure pages={}",
+                    crate::memory_size::<rustc_opt>()
+                ));
+                MEMORY_MANAGER.ensure_once::<rustc_opt>(&RUSTC_RESERVE_ONCE, RUSTC_CONFIG);
+                crate::debug_trace(&format!(
+                    "debug-rustc:memory:after-ensure pages={}",
+                    crate::memory_size::<rustc_opt>()
+                ));
                 crate::command::set_rustc_opt_args(fixed_args);
-                crate::debug_trace("debug-rustc:_reset:enter");
-                crate::debug_trace(&format!(
-                    "debug-rustc:memory:before-reset pages={}",
-                    crate::memory_size::<rustc_opt>()
-                ));
-                crate::rustc_opt::_reset();
-                crate::debug_trace(&format!(
-                    "debug-rustc:memory:after-reset pages={}",
-                    crate::memory_size::<rustc_opt>()
-                ));
-                crate::debug_trace("debug-rustc:_reset:return");
                 crate::shell::vfs_set_current_session_id(1);
-                crate::debug_trace("debug-rustc:_main:enter");
-                crate::rustc_opt::_main();
-                crate::debug_trace(&format!(
-                    "debug-rustc:memory:after-main pages={}",
-                    crate::memory_size::<rustc_opt>()
-                ));
-                crate::debug_trace("debug-rustc:_main:return");
+                crate::run_rustc();
                 crate::debug_trace(&format!("debug-rustc:return run={run_marker}"));
             })
             .join()
@@ -688,6 +716,10 @@ pub extern "C" fn wasi_ext_spawn(
     out_stderr_ptr: i32,
     out_stderr_len: i32,
 ) -> i32 {
+    if RUSTC_ACTIVE.with(|active| active.get()) {
+        return 1;
+    }
+
     let program = cargo_opt::get_array(program_ptr as *const u8, program_len as usize);
     let program = String::from_utf8_lossy(&program).into_owned();
     let args = cargo_opt::get_array(args_ptr as *const u8, args_len as usize);
@@ -704,54 +736,68 @@ pub extern "C" fn wasi_ext_spawn(
             .map(|arg| String::from_utf8_lossy(arg).into_owned()),
     );
 
-    let old_env = {
-        let mut virtual_env = VIRTUAL_SHELL_ENV.lock();
-        let old = virtual_env.env.clone();
-        for entry in env
-            .split(|byte| *byte == 0)
-            .filter(|entry| !entry.is_empty())
-        {
-            let entry = String::from_utf8_lossy(entry);
-            let Some((key, _)) = entry.split_once('=') else {
-                continue;
-            };
-            virtual_env
-                .env
-                .retain(|current| !current.starts_with(&format!("{key}=")));
-            virtual_env.env.push(entry.into_owned());
-        }
-        old
-    };
-    let old_cwd = std::env::current_dir().ok();
-    if !cwd.is_empty() {
-        let _ = std::env::set_current_dir(String::from_utf8_lossy(&cwd).as_ref());
-    }
-
-    let outer_output = CARGO_OUTPUT.with(|output| output.borrow_mut().take());
-    CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
-
     let program_name = Path::new(&program)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(&program);
     crate::debug_trace(&format!("wasi-ext-spawn:program-name {program_name}"));
-    let status = if program_name == "rustc" {
-        crate::debug_trace("wasi-ext-spawn:run-rustc:enter");
-        command::set_rustc_opt_args(&argv);
-        run_rustc();
-        let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
-        crate::debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
-        status
-    } else {
+    if program_name != "rustc" {
         let message = format!("unsupported child process: {program}");
         crate::debug_trace(&format!("wasi-ext-spawn:unsupported {program}"));
-        CARGO_OUTPUT.with(|output| {
-            if let Some(output) = output.borrow_mut().as_mut() {
-                output.stderr.extend_from_slice(message.as_bytes());
-            }
-        });
-        127
+        write_cargo_owned_spawn_result(
+            Vec::new(),
+            message.into_bytes(),
+            127,
+            out_exit_code,
+            out_stdout_ptr,
+            out_stdout_len,
+            out_stderr_ptr,
+            out_stderr_len,
+        );
+        return 0;
+    }
+
+    let _rustc_guard = RUSTC_RUN_LOCK.lock();
+
+    let old_env = {
+        let mut virtual_env = VIRTUAL_SHELL_ENV.lock();
+        let old = virtual_env.env.clone();
+        virtual_env.env = env
+            .split(|byte| *byte == 0)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| String::from_utf8_lossy(entry).into_owned())
+            .collect();
+        old
     };
+    let old_cwd = std::env::current_dir().ok();
+    if !cwd.is_empty() {
+        let cwd = String::from_utf8_lossy(&cwd);
+        if let Err(error) = std::env::set_current_dir(cwd.as_ref()) {
+            VIRTUAL_SHELL_ENV.lock().env = old_env;
+            write_cargo_owned_spawn_result(
+                Vec::new(),
+                format!("failed to set cwd `{cwd}`: {error}").into_bytes(),
+                1,
+                out_exit_code,
+                out_stdout_ptr,
+                out_stdout_len,
+                out_stderr_ptr,
+                out_stderr_len,
+            );
+            return 0;
+        }
+    }
+
+    let outer_output = CARGO_OUTPUT.with(|output| output.borrow_mut().take());
+    CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
+
+    crate::debug_trace("wasi-ext-spawn:run-rustc:enter");
+    let old_args = command::VIRTUAL_ARGS.lock().args.clone();
+    command::set_rustc_opt_args(&argv);
+    run_rustc();
+    command::VIRTUAL_ARGS.lock().args = old_args;
+    let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
+    crate::debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
 
     let child_output = CARGO_OUTPUT
         .with(|output| output.borrow_mut().take())
@@ -940,7 +986,20 @@ pub extern "C" fn host_run_cargo(
     };
     let old_cwd = std::env::current_dir().ok();
     if let Some(cwd) = request.get("cwd").and_then(serde_json::Value::as_str) {
-        let _ = std::env::set_current_dir(cwd);
+        if let Err(error) = std::env::set_current_dir(cwd) {
+            VIRTUAL_SHELL_ENV.lock().env = old_env;
+            write_cargo_result(
+                Vec::new(),
+                format!("failed to set cwd `{cwd}`: {error}").into_bytes(),
+                1,
+                out_stdout_ptr,
+                out_stdout_len,
+                out_stderr_ptr,
+                out_stderr_len,
+                out_status,
+            );
+            return 0;
+        }
     }
 
     command::set_cargo_opt_args(&args);
