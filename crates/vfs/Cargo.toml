@@ -11,7 +11,7 @@ debugging = ["wasi_virt_layer/trace"]
 default = []
 
 [dependencies]
-wasi_virt_layer = { version = "0.5", default-features = false, features = [
+wasi_virt_layer = { version = "0.6", default-features = false, features = [
   "dynamic-fs",
   # "embedded-fs",
   "threads",
