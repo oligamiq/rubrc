@@ -13,6 +13,8 @@ import {
 } from "@bjorn3/browser_wasi_shim";
 import type { Ctx } from "./ctx";
 import { rust_file } from "./config";
+import { createHttpBridge, isHttpBridgeMessage } from "../../lib/src/http_bridge";
+import { createCratesProxyFetch } from "../../lib/src/proxy";
 
 wait_async_polyfill();
 
@@ -321,6 +323,10 @@ edition = "2021"
 
   let sysroot_queue: { name: Uint8Array, data: Uint8Array }[] = [];
   let current_sysroot_file: { name: Uint8Array, data: Uint8Array } | null = null;
+  const cratesProxyFetch = createCratesProxyFetch({
+    proxyBaseUrl: "https://proxy.rubrc.workers.dev",
+  });
+  const httpBridge = createHttpBridge(cratesProxyFetch);
 
   const farm = new WASIFarm(
     new XtermStdio(term),
@@ -331,7 +337,9 @@ edition = "2021"
       allocator_size: 100 * 1024 * 1024, // 100MB
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
       unknown_fn: async (unknown: any) => {
-        if (unknown.name === "downloadFileStart") {
+        if (isHttpBridgeMessage(unknown)) {
+          return await httpBridge(unknown);
+        } else if (unknown.name === "downloadFileStart") {
           download_name = unknown.args.name;
           download_chunks = [];
         } else if (unknown.name === "downloadFileChunk") {

@@ -557,6 +557,7 @@ impl Guest for Wit {
     }
 }
 
+#[cfg(not(test))]
 export!(Wit);
 
 pub struct VirtualEnvState {
@@ -576,7 +577,7 @@ pub static VIRTUAL_SHELL_ENV: std::sync::LazyLock<parking_lot::Mutex<VirtualEnvS
     std::sync::LazyLock::new(|| {
         parking_lot::Mutex::new(VirtualEnvState {
             env: vec![
-                "HOME=~/".to_string(),
+                "HOME=/".to_string(),
                 "CARGO_INCREMENTAL=0".to_string(),
                 CARGO_BUILD_TARGET_ENV.to_string(),
                 // "RUST_SRC_PATH=/sysroot/lib/rustlib".to_string(),
@@ -821,19 +822,205 @@ pub extern "C" fn __wasip1_vfs_cargo_opt_sock_shutdown(_fd: i32, _how: i32) -> i
 
 #[unsafe(no_mangle)]
 pub extern "C" fn wasi_ext_fetch(
-    _method_ptr: i32,
-    _method_len: i32,
-    _url_ptr: i32,
-    _url_len: i32,
-    _headers_ptr: i32,
-    _headers_len: i32,
-    _body_ptr: i32,
-    _body_len: i32,
-    _out_status: i32,
-    _out_resp_ptr: i32,
-    _out_resp_len: i32,
+    method_ptr: i32,
+    method_len: i32,
+    url_ptr: i32,
+    url_len: i32,
+    headers_ptr: i32,
+    headers_len: i32,
+    body_ptr: i32,
+    body_len: i32,
+    out_status: i32,
+    out_resp_ptr: i32,
+    out_resp_len: i32,
 ) -> i32 {
-    1
+    use crate::vfs::host::bridge::Http;
+
+    const MAX_CHUNK_SIZE: usize = 16 * 1024;
+
+    if method_len < 0
+        || url_len < 0
+        || headers_len < 0
+        || body_len < 0
+        || (method_len > 0 && method_ptr == 0)
+        || (url_len > 0 && url_ptr == 0)
+        || (headers_len > 0 && headers_ptr == 0)
+        || (body_len > 0 && body_ptr == 0)
+        || out_status == 0
+        || out_resp_ptr == 0
+        || out_resp_len == 0
+    {
+        return 1;
+    }
+
+    let copy_request = |ptr: i32, len: i32| {
+        if len == 0 {
+            Box::<[u8]>::default()
+        } else {
+            cargo_opt::get_array(ptr as *const u8, len as usize)
+        }
+    };
+    let method = copy_request(method_ptr, method_len);
+    let url = copy_request(url_ptr, url_len);
+    let headers = copy_request(headers_ptr, headers_len);
+    let body = copy_request(body_ptr, body_len);
+
+    let mut request_id = 0u32;
+    let mut status = 0u32;
+    let mut response_headers_len = 0u32;
+    let mut response_body_len = 0u32;
+    let mut response_error_len = 0u32;
+    let start_result = Http::request_start(
+        method.as_ptr() as i32,
+        method.len() as i32,
+        url.as_ptr() as i32,
+        url.len() as i32,
+        headers.as_ptr() as i32,
+        headers.len() as i32,
+        body.as_ptr() as i32,
+        body.len() as i32,
+        (&mut request_id as *mut u32) as i32,
+        (&mut status as *mut u32) as i32,
+        (&mut response_headers_len as *mut u32) as i32,
+        (&mut response_body_len as *mut u32) as i32,
+        (&mut response_error_len as *mut u32) as i32,
+    );
+
+    struct ResponseGuard {
+        request_id: u32,
+        active: bool,
+    }
+
+    impl ResponseGuard {
+        fn finish(mut self) -> i32 {
+            self.active = false;
+            Http::response_end(self.request_id)
+        }
+    }
+
+    impl Drop for ResponseGuard {
+        fn drop(&mut self) {
+            if self.active {
+                let _ = Http::response_end(self.request_id);
+            }
+        }
+    }
+
+    if start_result != 0 {
+        return 1;
+    }
+    let response_guard = ResponseGuard {
+        request_id,
+        active: true,
+    };
+
+    let allocate_buffer = |length: u32| -> Option<Vec<u8>> {
+        let length = usize::try_from(length).ok()?;
+        let mut buffer = Vec::new();
+        buffer.try_reserve_exact(length).ok()?;
+        buffer.resize(length, 0);
+        Some(buffer)
+    };
+    let Some(mut response_headers) = allocate_buffer(response_headers_len) else {
+        return 1;
+    };
+    let Some(mut response_body) = allocate_buffer(response_body_len) else {
+        return 1;
+    };
+    let Some(mut response_error) = allocate_buffer(response_error_len) else {
+        return 1;
+    };
+
+    let mut offset = 0usize;
+    while offset < response_headers.len() {
+        let chunk_len = MAX_CHUNK_SIZE.min(response_headers.len() - offset);
+        let result = Http::response_read_headers(
+            request_id,
+            response_headers[offset..].as_mut_ptr() as i32,
+            chunk_len as i32,
+        );
+        if result != 0 {
+            return 1;
+        }
+        offset += chunk_len;
+    }
+
+    offset = 0;
+    while offset < response_body.len() {
+        let chunk_len = MAX_CHUNK_SIZE.min(response_body.len() - offset);
+        let result = Http::response_read_body(
+            request_id,
+            response_body[offset..].as_mut_ptr() as i32,
+            chunk_len as i32,
+        );
+        if result != 0 {
+            return 1;
+        }
+        offset += chunk_len;
+    }
+
+    offset = 0;
+    while offset < response_error.len() {
+        let chunk_len = MAX_CHUNK_SIZE.min(response_error.len() - offset);
+        let result = Http::response_read_error(
+            request_id,
+            response_error[offset..].as_mut_ptr() as i32,
+            chunk_len as i32,
+        );
+        if result != 0 {
+            return 1;
+        }
+        offset += chunk_len;
+    }
+
+    if response_guard.finish() != 0 || !response_error.is_empty() || status > u16::MAX as u32 {
+        return 1;
+    }
+
+    let Some(response) = format_http_response(status, &response_headers, &response_body) else {
+        return 1;
+    };
+
+    let Ok(response_len) = u32::try_from(response.len()) else {
+        return 1;
+    };
+    let cargo_response_ptr = unsafe { wasi_ext_allocate(response.len()) };
+    if cargo_response_ptr.is_null() {
+        return 1;
+    }
+    cargo_opt::memcpy(cargo_response_ptr, &response);
+    cargo_opt::memcpy(out_status as *mut u8, &(status as u16).to_ne_bytes());
+    cargo_opt::memcpy(
+        out_resp_ptr as *mut u8,
+        &(cargo_response_ptr as u32).to_ne_bytes(),
+    );
+    cargo_opt::memcpy(out_resp_len as *mut u8, &response_len.to_ne_bytes());
+    0
+}
+
+fn format_http_response(status: u32, headers: &[u8], body: &[u8]) -> Option<Vec<u8>> {
+    let status_line = status.to_string();
+    let separator_len = if !headers.is_empty() && !headers.ends_with(b"\n") {
+        3
+    } else {
+        2
+    };
+    let response_capacity = status_line
+        .len()
+        .checked_add(headers.len())?
+        .checked_add(body.len())?
+        .checked_add(separator_len)?;
+    let mut response = Vec::new();
+    response.try_reserve_exact(response_capacity).ok()?;
+    response.extend_from_slice(status_line.as_bytes());
+    response.push(b'\n');
+    response.extend_from_slice(headers);
+    if !headers.is_empty() && !headers.ends_with(b"\n") {
+        response.push(b'\n');
+    }
+    response.push(b'\n');
+    response.extend_from_slice(body);
+    Some(response)
 }
 
 #[unsafe(no_mangle)]
@@ -996,10 +1183,12 @@ unsafe extern "C" {
 
 #[cfg(not(target_os = "wasi"))]
 unsafe fn wasi_ext_allocate(size: usize) -> *mut u8 {
-    let mut data = Vec::<u8>::with_capacity(size);
-    let ptr = data.as_mut_ptr();
-    std::mem::forget(data);
-    ptr
+    allocate_cargo_owned(size)
+}
+
+#[cfg(not(target_os = "wasi"))]
+fn allocate_cargo_owned(size: usize) -> *mut u8 {
+    Box::into_raw(vec![0; size].into_boxed_slice()) as *mut u8
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1014,9 +1203,6 @@ fn write_cargo_owned_spawn_result(
     out_stderr_len: i32,
 ) {
     fn copy_to_cargo(data: &[u8]) -> (i32, i32) {
-        if data.is_empty() {
-            return (0, 0);
-        }
         let ptr = unsafe { wasi_ext_allocate(data.len()) };
         cargo_opt::memcpy(ptr, data);
         (ptr as i32, data.len() as i32)
@@ -1232,4 +1418,51 @@ fn write_cargo_result(
     lsp_opt::memcpy(out_stderr_ptr as *mut u8, &stderr_ptr.to_ne_bytes());
     lsp_opt::memcpy(out_stderr_len as *mut u8, &stderr_len.to_ne_bytes());
     lsp_opt::memcpy(out_status as *mut u8, &status.to_ne_bytes());
+}
+
+#[cfg(test)]
+mod http_tests {
+    use super::{allocate_cargo_owned, format_http_response};
+
+    #[test]
+    fn cargo_owned_allocation_can_be_reconstructed_and_dropped() {
+        for (expected, size) in [(Vec::new(), 0), (vec![11, 22, 33, 44], 4)] {
+            let ptr = allocate_cargo_owned(size);
+            assert!(!ptr.is_null());
+
+            unsafe {
+                std::ptr::copy_nonoverlapping(expected.as_ptr(), ptr, size);
+                let actual = Vec::from_raw_parts(ptr, size, size);
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn response_wire_format_keeps_status_line_and_binary_body() {
+        let response = format_http_response(
+            206,
+            b"content-type: application/octet-stream\nx-test: yes\n",
+            &[0, 255, 17, 128],
+        )
+        .expect("response should fit in memory");
+
+        assert_eq!(
+            response,
+            b"206\ncontent-type: application/octet-stream\nx-test: yes\n\n\x00\xff\x11\x80"
+        );
+    }
+
+    #[test]
+    fn virtual_shell_home_is_absolute() {
+        let home = super::VIRTUAL_SHELL_ENV
+            .lock()
+            .env
+            .iter()
+            .find_map(|value| value.strip_prefix("HOME="))
+            .expect("virtual shell HOME should be set")
+            .to_string();
+
+        assert!(std::path::Path::new(&home).is_absolute(), "HOME={home}");
+    }
 }

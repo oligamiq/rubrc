@@ -21,6 +21,14 @@ interface bridge {
     host-run-cargo: static func(req-ptr: s32, req-len: s32, out-stdout-ptr: s32, out-stdout-len: s32, out-stderr-ptr: s32, out-stderr-len: s32, out-status: s32) -> s32;
     host-free-memory: static func(ptr: s32, len: s32);
   }
+
+  resource http {
+    request-start: static func(method-ptr: s32, method-len: s32, url-ptr: s32, url-len: s32, headers-ptr: s32, headers-len: s32, body-ptr: s32, body-len: s32, out-request-id: s32, out-status: s32, out-headers-len: s32, out-body-len: s32, out-error-len: s32) -> s32;
+    response-read-headers: static func(request-id: u32, data-ptr: s32, data-len: s32) -> s32;
+    response-read-body: static func(request-id: u32, data-ptr: s32, data-len: s32) -> s32;
+    response-read-error: static func(request-id: u32, data-ptr: s32, data-len: s32) -> s32;
+    response-end: static func(request-id: u32) -> s32;
+  }
 }
 
 world vfs-host {

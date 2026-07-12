@@ -6,7 +6,7 @@
 
 **Architecture:** On WASI, Cargo bypasses its HTTP worker/oneshot path and calls the existing synchronous `fetch_wasi` bridge directly. VFS uses a two-pass WIT bridge: async host fetch starts and retains a response, then VFS-owned buffers read metadata and bounded chunks before explicitly ending the response. JavaScript never re-enters Wasm while handling a Wasm callback.
 
-**Tech Stack:** Rust, Cargo HTTP client, WIT component bindings, SharedArrayBuffer/Atomics, TypeScript Fetch API, Deno regression harness.
+**Tech Stack:** Rust, Cargo HTTP client, WIT component bindings, the existing `call_unknown_fn` transport, TypeScript Fetch API, Deno regression harness.
 
 ## Global Constraints
 
@@ -16,6 +16,7 @@
 - Network failures must return an explicit Cargo error instead of hanging.
 - Preserve the existing process stdin ABI, Cargo build behavior, and protected untracked files.
 - Do not amend, force-push, or create a PR.
+- Do not add or directly use `Atomics` or `SharedArrayBuffer`; rely only on the existing `call_unknown_fn` abstraction.
 
 ---
 
@@ -78,26 +79,27 @@ Expected: exit 0 with only existing WASI-port warnings.
 - Modify: `/home/oligami/projects/rubrc/crates/vfs/src/lib.rs:822-837`
 - Modify: `/home/oligami/projects/rubrc/crates/vfs-rustc-twice/wit/vfs-host.wit`
 - Modify: `/home/oligami/projects/rubrc/crates/vfs-rustc-twice/src/lib.rs:586-600`
+- Create: `/home/oligami/projects/rubrc/page/src/worker_process/vfs_bindings/http_import.ts`
 - Modify: `/home/oligami/projects/rubrc/page/src/worker_process/vfs_bindings/inst.ts:68-190`
-- Test: create `/home/oligami/projects/rubrc/scripts/vfs_http_bridge_test.ts`
+- Test: create `/home/oligami/projects/rubrc/scripts/vfs_http_import_test.ts`
 
 **Interfaces:**
 - Consumes: Cargo's existing `wasi_ext_fetch` pointer ABI.
 - Produces: WIT `Http` start/read/end bridge returning a request ID, status, lengths, newline-encoded headers, raw body, and explicit error bytes.
 
-- [ ] **Step 1: Write the host bridge RED test**
+- [ ] **Step 1: Write the generated-import adapter RED test**
 
-Create a Deno test for a shared `httpRequestStart`/read/end contract using an injected fake `fetch`: verify unique request IDs, two overlapping retained responses without cross-wiring, method, URL, request headers, binary request body, response status, comma-joined repeated response headers, 16 KiB maximum binary chunks, rejected-fetch error chunks, and state cleanup after end.
+Create a Deno behavior test for a small `createHttpImports(memory, callUnknownFn)` helper. With a fake memory and callback, verify request-start copies method, URL, headers, and binary body before transport; writes only scalar ID/status/length metadata; each read requests at most 16 KiB for the correct request ID and copies returned bytes into the supplied VFS buffer; and end clears the same request ID. The helper must not accept or call any Wasm export. Also compare the `http` resource declarations in both WIT worlds for exact parity.
 
 - [ ] **Step 2: Run RED**
 
 Run:
 
 ```bash
-deno test --no-lock -A scripts/vfs_http_bridge_test.ts
+deno test --no-lock -A scripts/vfs_http_import_test.ts
 ```
 
-Expected: fail because the host HTTP handler/contract does not exist.
+Expected: fail because the HTTP import helper does not exist.
 
 - [ ] **Step 3: Extend both WIT worlds identically**
 
@@ -109,9 +111,9 @@ Add an `http` resource to `bridge` with identical functions in both WIT worlds:
 
 Return zero for a structurally valid response and nonzero for bridge failure.
 
-- [ ] **Step 4: Implement the generated binding adapter in `inst.ts`**
+- [ ] **Step 4: Implement and install the generated binding adapter**
 
-Read VFS-owned input buffers and call `call_unknown_fn` with `httpRequestStart`. Store no response bytes in Wasm from this callback; write only scalar request ID/status/length metadata to caller-provided pointers. Implement read functions by requesting at most 16 KiB JSON-safe chunks for that request ID and copying them directly into VFS-provided destinations. Implement request-scoped `response-end` cleanup. Do not call `root.allocBuf` or any other Wasm export from a Wasm-initiated callback.
+Implement `createHttpImports` in `http_import.ts`, then install its result as the WIT `Http` resource in `inst.ts`. Read VFS-owned input buffers and call `call_unknown_fn` with `httpRequestStart`. The existing transport may await the host Promise before returning its resolved metadata; do not add asynchronous WIT imports, `Atomics`, or `SharedArrayBuffer`. Store no response bytes in Wasm from this callback; write only scalar request ID/status/length metadata to caller-provided pointers. Implement read functions by requesting at most 16 KiB JSON-safe chunks for that request ID and copying them directly into VFS-provided destinations. Implement request-scoped `response-end` cleanup. Do not call `root.allocBuf` or any other Wasm export from a Wasm-initiated callback.
 
 - [ ] **Step 5: Replace the VFS fetch stub**
 
@@ -124,9 +126,10 @@ Keep `vfs-rustc-twice` WIT ABI-compatible; it may return an explicit unsupported
 Run:
 
 ```bash
-deno test --no-lock -A scripts/vfs_http_bridge_test.ts
+deno test --no-lock -A scripts/vfs_http_import_test.ts
 cargo check -p vfs
 cargo check -p vfs-rustc-twice --target wasm32-wasip1-threads
+deno check --no-lock page/src/worker_process/vfs_bindings/http_import.ts
 git diff --check
 ```
 
@@ -147,19 +150,23 @@ Expected: all target-appropriate checks pass.
 - Consumes: `httpRequest` unknown-function messages from generated `inst.ts`.
 - Produces: a `Map<number, ResponseState>`, request-scoped scalar metadata, and bounded JSON-safe chunks.
 
-- [ ] **Step 1: Implement one shared handler**
+- [ ] **Step 1: Write and run the host bridge RED test**
+
+Create a Deno test for a shared `httpRequestStart`/read/end contract using an injected fake `fetch`: verify unique request IDs, two overlapping retained responses without cross-wiring, method, URL, request headers, binary request body, response status, comma-joined repeated response headers, 16 KiB maximum binary chunks, rejected-fetch error chunks, and state cleanup after end. Run it and confirm it fails because the shared handler does not exist.
+
+- [ ] **Step 2: Implement one shared handler**
 
 Implement an HTTP response store in `lib/src/http_bridge.ts`. `requestStart(args, fetchImpl = fetch)` allocates a monotonically increasing request ID, builds a `Headers` object, preserves binary request/response bodies, calls `fetchImpl`, stores encoded headers/body/error in `Map<number, ResponseState>`, and returns only ID plus scalar metadata. Request-scoped read methods return at most 16 KiB as strict-JSON byte arrays and advance independent offsets. `end(id)` clears only that response. Catch exceptions and retain encoded error bytes.
 
-- [ ] **Step 2: Integrate production WebShell**
+- [ ] **Step 3: Integrate production WebShell**
 
 Add an `httpRequest` branch to the existing `WASIFarm` `unknown_fn` in `page/src/xterm.tsx`, delegating to the shared handler. Preserve download and sysroot handlers unchanged.
 
-- [ ] **Step 3: Integrate debug harness**
+- [ ] **Step 4: Integrate debug harness**
 
 Configure `scripts/vfs_debug_shell.ts`'s `WASIFarm` with the same async unknown-function handler so `cargo info` uses real Deno `fetch()`.
 
-- [ ] **Step 4: Verify handler and TypeScript**
+- [ ] **Step 5: Verify handler and TypeScript**
 
 Run:
 
@@ -186,22 +193,22 @@ Expected: all pass.
 
 - [ ] **Step 1: Add the command regression**
 
-Create an isolated harness that runs `cargo info dashmap`, rejects timeout/network/Cargo errors, requires DashMap package metadata, requires command return, and requires shell prompt return. Use the same HTTP unknown-function handler as production.
+Create an isolated harness with a fresh in-memory VFS and no host Cargo cache preopen. Run `cargo info dashmap`, reject timeout/network/Cargo errors, require DashMap package metadata, command return, shell prompt return, and at least one invocation of an injected counting wrapper around real `fetch()`. Use the same HTTP unknown-function handler as production.
 
 - [ ] **Step 2: Confirm RED against the old artifact**
 
-Run:
+Run the two commands separately. Record the first command's expected nonzero timeout result, then run the baseline even though RED failed:
 
 ```bash
 deno run --no-lock -A scripts/vfs_debug_cargo_info_test.ts
 deno run --no-lock -A scripts/vfs_debug_cargo_pipe_test.ts
 ```
 
-Expected: timeout after `Updating crates.io index` before rebuilding Cargo/VFS.
+Expected: the new info regression times out after `Updating crates.io index` before rebuilding Cargo/VFS; the existing pipe/build regression remains a passing baseline.
 
 - [ ] **Step 3: Build and install Cargo**
 
-Run the established clean `wasm32-wasip1-threads` Cargo release build, then:
+Run the established clean `wasm32-wasip1-threads` Cargo release build from `/home/oligami/projects/cargo`, then optimize its artifact into rubrc:
 
 ```bash
 WASI_SDK_PATH=/opt/wasi-sdk \
@@ -214,13 +221,13 @@ CXXFLAGS_wasm32_wasip1_threads='--target=wasm32-wasip1-threads --sysroot=/opt/wa
 RUSTFLAGS='-Cpanic=unwind -Cllvm-args=-wasm-use-legacy-eh=false' \
 cargo +nightly build -r --bin cargo --target wasm32-wasip1-threads -Zbuild-std
 
-wasm-opt -Oz target/wasm32-wasip1-threads/release/cargo.wasm \
+wasm-opt -Oz /home/oligami/projects/cargo/target/wasm32-wasip1-threads/release/cargo.wasm \
   -o /home/oligami/projects/rubrc/crates/vfs/cargo_opt.wasm
 ```
 
 - [ ] **Step 4: Rebuild and validate VFS**
 
-Run:
+Before rebuilding, record the SHA-256 of both existing VFS artifacts. Run:
 
 ```bash
 bun run vfs:build
@@ -229,7 +236,7 @@ wasm-tools validate page/src/worker_process/vfs_bindings/vfs.core.wasm
 cmp -s dist/vfs.core.wasm page/src/worker_process/vfs_bindings/vfs.core.wasm
 ```
 
-Expected: all exit 0.
+Expected: all exit 0, the rebuilt files are byte-identical to each other, and their SHA-256 differs from the pre-build artifacts. This proves the checks did not merely validate two stale copies.
 
 - [ ] **Step 5: Run GREEN and build regression**
 
@@ -237,9 +244,10 @@ Run:
 
 ```bash
 deno run --no-lock -A scripts/vfs_debug_cargo_info_test.ts
+deno run --no-lock -A scripts/vfs_debug_cargo_pipe_test.ts
 ```
 
-Expected: `cargo info dashmap` displays DashMap metadata and returns to the prompt; the isolated Cargo build still compiles, links, and reports `Finished dev profile`.
+Expected: `cargo info dashmap` displays DashMap metadata and returns to the prompt; the isolated Cargo build still compiles, links, reports `Finished dev profile`, and returns successfully.
 
 - [ ] **Step 6: Final review and hygiene**
 

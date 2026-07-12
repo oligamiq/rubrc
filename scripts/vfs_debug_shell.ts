@@ -1,6 +1,10 @@
 import { ConsoleStdout, File, OpenFile } from "@bjorn3/browser_wasi_shim";
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
 import {
+  createHttpBridge,
+  isHttpBridgeMessage,
+} from "../lib/src/http_bridge.ts";
+import {
   buildRepeatedCommands,
   computeWorkerWatchdogMs,
   parsePositiveInt,
@@ -28,6 +32,7 @@ const workerWatchdogMs = computeWorkerWatchdogMs({
   perRunMultiplier: 1,
   graceMs: 60000,
 });
+const httpBridge = createHttpBridge();
 
 const farm = new WASIFarm(
   new OpenFile(new File([])),
@@ -38,6 +43,14 @@ const farm = new WASIFarm(
     console.error(`[WASI stderr] ${message}`)
   ),
   [],
+  {
+    unknown_fn: (message: unknown) => {
+      if (!isHttpBridgeMessage(message)) {
+        throw new Error("unexpected non-HTTP farm callback");
+      }
+      return httpBridge(message);
+    },
+  },
 );
 
 const worker = new Worker(

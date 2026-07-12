@@ -1,6 +1,7 @@
 import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import { set_fake_worker } from "../page/src/worker_process/vfs_bindings/common.ts";
 import { custom_instantiate } from "../page/src/worker_process/vfs_bindings/inst.ts";
+import { isHttpBridgeMessage } from "../lib/src/http_bridge.ts";
 
 await set_fake_worker();
 
@@ -70,7 +71,9 @@ globalThis.onmessage = async (event) => {
       animal.wasiThreadImport,
       animal.get_share_memory(),
       (_index, message: { name?: string }) => {
-        if (message.name === "terminalWrite") {
+        if (isHttpBridgeMessage(message)) {
+          return animal.call_unknown_fn(_index, message);
+        } else if (message.name === "terminalWrite") {
           return {};
         } else if (message.name === "sysrootStartFetch") {
           return {};

@@ -49,7 +49,7 @@ Deno.test("vfs copy script preserves local binding overrides and lockfile", () =
   }
 
   const copyScript = Deno.readTextFileSync(copyScriptPath);
-  for (const fileName of ["inst.ts", "bun.lock"] as const) {
+  for (const fileName of ["inst.ts", "http_import.ts", "bun.lock"] as const) {
     if (!copyScript.includes(fileName)) {
       throw new Error(`copy script must preserve ${fileName}`);
     }
@@ -75,6 +75,7 @@ Deno.test("vfs copy script can be tested against explicit source and target dirs
     Deno.writeTextFileSync(`${sourceDir}/vfs.js`, "generated vfs");
     Deno.writeTextFileSync(`${sourceDir}/inst.ts`, "generated inst");
     Deno.writeTextFileSync(`${targetDir}/inst.ts`, "custom inst");
+    Deno.writeTextFileSync(`${targetDir}/http_import.ts`, "custom HTTP imports");
     Deno.writeTextFileSync(`${targetDir}/bun.lock`, "locked deps");
     Deno.writeTextFileSync(`${targetDir}/stale.txt`, "stale");
 
@@ -97,6 +98,11 @@ Deno.test("vfs copy script can be tested against explicit source and target dirs
     if (Deno.readTextFileSync(`${targetDir}/inst.ts`) !== "custom inst") {
       throw new Error("copy script must preserve inst.ts");
     }
+    if (
+      Deno.readTextFileSync(`${targetDir}/http_import.ts`) !== "custom HTTP imports"
+    ) {
+      throw new Error("copy script must preserve http_import.ts");
+    }
     if (Deno.readTextFileSync(`${targetDir}/bun.lock`) !== "locked deps") {
       throw new Error("copy script must preserve bun.lock");
     }
@@ -112,6 +118,32 @@ Deno.test("vfs copy script can be tested against explicit source and target dirs
     }
     if (staleExists) {
       throw new Error("copy script must remove stale generated files");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("vfs copy script keeps the target when the source directory is missing", () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const sourceDir = `${tempDir}/missing-dist`;
+    const targetDir = `${tempDir}/vfs_bindings`;
+    Deno.mkdirSync(targetDir);
+    Deno.writeTextFileSync(`${targetDir}/sentinel.txt`, "keep me");
+
+    const result = new Deno.Command("node", {
+      args: ["scripts/copy_vfs_bindings.mjs"],
+      env: {
+        VFS_BINDINGS_SOURCE_DIR: sourceDir,
+        VFS_BINDINGS_TARGET_DIR: targetDir,
+      },
+      cwd: new URL("..", import.meta.url).pathname,
+    }).outputSync();
+
+    if (result.success) throw new Error("copy must fail when source is missing");
+    if (Deno.readTextFileSync(`${targetDir}/sentinel.txt`) !== "keep me") {
+      throw new Error("missing source must not modify the target directory");
     }
   } finally {
     Deno.removeSync(tempDir, { recursive: true });

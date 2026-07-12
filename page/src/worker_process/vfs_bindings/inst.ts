@@ -1,4 +1,5 @@
 import type { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
+import { createHttpImports } from "./http_import.ts";
 import { type ImportObject, instantiate } from "./vfs.js";function snakeToCamel(snakeCaseString) {
 	return snakeCaseString
 		.toLowerCase()
@@ -137,6 +138,7 @@ export const custom_instantiate = async (
             view8.set(chunk_bytes, data_ptr);
           },
         },
+        Http: createHttpImports(memory, call_unknown_fn),
         Terminal: {
           terminalWrite: (session_id: number, data_ptr: number, data_len: number) => {
             const view = new Uint8Array(memory.memory.buffer, data_ptr, data_len);

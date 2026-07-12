@@ -14,7 +14,7 @@ On WASI only, Cargo performs HTTP requests directly from `Client::request()` thr
 
 VFS replaces the `wasi_ext_fetch` stub with a two-pass WIT host bridge. It copies request data from `cargo_opt` memory into VFS-owned data and starts a host request. The host returns a unique request ID and retains response state in a map while VFS queries lengths, allocates its own buffers, reads headers/body/error in bounded chunks, and explicitly ends that request. VFS then copies the response into Cargo-owned memory using Cargo's exported allocator.
 
-The WIT import delegates to `WASIFarm.unknown_fn` with an `httpRequest` message. The farm executes browser `fetch()` asynchronously on its host side. The existing SharedArrayBuffer/Atomics unknown-function bridge synchronously suspends the Wasm caller until the Promise resolves.
+The WIT import delegates to `WASIFarm.unknown_fn` with an `httpRequest` message. The farm executes browser `fetch()` asynchronously on its host side. The existing `call_unknown_fn` transport returns the resolved host result synchronously to the Wasm caller; this change does not add or directly use `Atomics` or `SharedArrayBuffer`.
 
 ## Components
 
