@@ -12,7 +12,7 @@ Cargo's WASI `Client::request()` sends work to a spawned HTTP worker and awaits 
 
 On WASI only, Cargo performs HTTP requests directly from `Client::request()` through the existing synchronous `fetch_wasi` bridge. Non-WASI Cargo retains the worker-thread implementation.
 
-VFS replaces the `wasi_ext_fetch` stub with a WIT host bridge. It copies request data from `cargo_opt` memory into VFS-owned data, invokes a synchronous WIT import, then copies the returned status, headers, and body into Cargo-owned memory using Cargo's exported allocator.
+VFS replaces the `wasi_ext_fetch` stub with a two-pass WIT host bridge. It copies request data from `cargo_opt` memory into VFS-owned data and starts a host request. The host returns a unique request ID and retains response state in a map while VFS queries lengths, allocates its own buffers, reads headers/body/error in bounded chunks, and explicitly ends that request. VFS then copies the response into Cargo-owned memory using Cargo's exported allocator.
 
 The WIT import delegates to `WASIFarm.unknown_fn` with an `httpRequest` message. The farm executes browser `fetch()` asynchronously on its host side. The existing SharedArrayBuffer/Atomics unknown-function bridge synchronously suspends the Wasm caller until the Promise resolves.
 
@@ -35,13 +35,16 @@ The WIT import delegates to `WASIFarm.unknown_fn` with an `httpRequest` message.
 ### Browser Host
 
 - `httpRequest` uses `fetch()` with the supplied method, headers, and body.
-- Response headers preserve repeated entries as far as the Fetch API exposes them.
+- Response headers preserve the Fetch API representation. Browsers may comma-join repeated headers.
 - Response body remains binary and is never decoded as text.
-- Fetch rejection returns a structured error to Cargo instead of hanging.
+- Fetch rejection is retained as structured error bytes until VFS reads and ends the response.
+- JavaScript never calls a Wasm export while servicing a Wasm-initiated callback.
+- Every read/end operation carries the request ID returned by start, preventing response cross-wiring if calls overlap.
+- Strict-JSON transport limits binary chunks to 16 KiB to bound serialization and allocation overhead.
 
 ### Deno Regression Host
 
-- The debug harness supplies the same `httpRequest` unknown-function contract using Deno `fetch()`.
+- The debug harness supplies the same request-start/read/end unknown-function contract using Deno `fetch()`.
 - The regression uses an isolated VFS workspace and rejects timeout, Cargo errors, or missing package metadata.
 
 ## Error Handling
@@ -50,6 +53,7 @@ The WIT import delegates to `WASIFarm.unknown_fn` with an `httpRequest` message.
 - Non-2xx HTTP responses retain their actual status and body for Cargo's normal handling.
 - Malformed host responses produce a bridge error, not undefined memory reads.
 - The caller always receives a response or an explicit error; no oneshot wait remains on WASI.
+- WASI HTTP requests are intentionally serialized on the Cargo executor thread. This is the minimal reliable model for the current synchronous host ABI; native Cargo remains concurrent.
 
 ## Testing
 
