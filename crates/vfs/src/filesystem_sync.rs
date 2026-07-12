@@ -1,8 +1,11 @@
 use crate::LFS;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::io::Read as _;
 use std::ops::Index;
 use std::path::{Component, Path, PathBuf};
+use wasi_virt_layer::prelude::__self;
+use wasi_virt_layer::wasi::file::Wasip1LFSBase;
 
 pub(crate) const DEFAULT_SYNC_LIMITS: SyncLimits = SyncLimits {
     max_entries: 10_000,
@@ -138,9 +141,11 @@ fn is_runtime_excluded(path: &Path, runtime_exclusions: &[PathBuf]) -> bool {
         .any(|excluded| !excluded.as_os_str().is_empty() && path.starts_with(excluded))
 }
 
-fn contains_runtime_exclusion(path: &Path, runtime_exclusions: &[PathBuf]) -> bool {
-    runtime_exclusions
+fn contains_exclusion(path: &Path, runtime_exclusions: &[PathBuf]) -> bool {
+    EXCLUDED_ROOTS
         .iter()
+        .map(Path::new)
+        .chain(runtime_exclusions.iter().map(PathBuf::as_path))
         .any(|excluded| excluded != path && excluded.starts_with(path))
 }
 
@@ -172,6 +177,20 @@ fn check_configured_limits(
     Ok(())
 }
 
+fn check_file_size(
+    current_bytes: usize,
+    file_bytes: usize,
+    limits: SyncLimits,
+) -> Result<usize, SyncError> {
+    let total = current_bytes
+        .checked_add(file_bytes)
+        .ok_or(SyncError::TooManyBytes)?;
+    if total > limits.max_bytes {
+        return Err(SyncError::TooManyBytes);
+    }
+    Ok(total)
+}
+
 fn reconcile_diff(
     baseline: &SyncBaseline,
     child: &SyncBaseline,
@@ -194,10 +213,19 @@ fn reconcile_diff_with_limits(
         .cloned()
         .collect::<BTreeSet<_>>();
 
-    let conflicts = changed
-        .iter()
+    let conflicts = baseline
+        .entries
+        .keys()
+        .chain(current_vfs.entries.keys())
         .filter(|path| current_vfs.entries.get(*path) != baseline.entries.get(*path))
+        .filter(|path| {
+            changed
+                .iter()
+                .any(|change| path.starts_with(change) || change.starts_with(*path))
+        })
         .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .collect::<Vec<_>>();
 
     let mut tree = current_vfs.clone();
@@ -280,8 +308,18 @@ pub(crate) fn sync_host_to_vfs(
     let child = snapshot_host(host_root, limits, &baseline.runtime_exclusions)?;
     let current_vfs = snapshot_vfs(lfs, root, limits, &baseline.runtime_exclusions)?;
     let result = reconcile_diff_with_limits(baseline, &child, &current_vfs, limits)?;
-    apply_vfs_snapshot(lfs, root, &current_vfs, &result.tree)?;
-    Ok(result.conflicts)
+    let mut conflicts = result.conflicts;
+    conflicts.extend(apply_vfs_snapshot_rechecked(
+        lfs,
+        root,
+        &current_vfs,
+        &result.tree,
+        limits,
+        |_| {},
+    )?);
+    conflicts.sort();
+    conflicts.dedup();
+    Ok(conflicts)
 }
 
 pub(crate) fn import_host_authoritative(
@@ -382,10 +420,17 @@ fn snapshot_host_dir(
         let snapshot_entry = if file_type.is_dir() {
             SnapshotEntry::directory()
         } else if file_type.is_file() {
-            let bytes = std::fs::read(entry.path()).map_err(io_error)?;
-            *byte_count = byte_count
-                .checked_add(bytes.len())
-                .ok_or(SyncError::TooManyBytes)?;
+            let file_size = usize::try_from(entry.metadata().map_err(io_error)?.len())
+                .map_err(|_| SyncError::TooManyBytes)?;
+            check_file_size(*byte_count, file_size, limits)?;
+            let remaining = limits.max_bytes - *byte_count;
+            let mut bytes = Vec::with_capacity(file_size.min(remaining));
+            std::fs::File::open(entry.path())
+                .map_err(io_error)?
+                .take(remaining as u64 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(io_error)?;
+            *byte_count = check_file_size(*byte_count, bytes.len(), limits)?;
             SnapshotEntry::file(bytes)
         } else {
             return Err(SyncError::UnsupportedFileType(relative_path));
@@ -459,12 +504,9 @@ fn snapshot_vfs_dir(
                 limits,
             )?;
         } else {
-            let bytes = lfs
-                .read_file(child_inode)
-                .map_err(|_| SyncError::Vfs("read_file"))?;
-            *byte_count = byte_count
-                .checked_add(bytes.len())
-                .ok_or(SyncError::TooManyBytes)?;
+            let (bytes, total_bytes) =
+                read_vfs_file_bounded(lfs, child_inode, *byte_count, limits)?;
+            *byte_count = total_bytes;
             snapshot
                 .entries
                 .insert(relative_path, SnapshotEntry::file(bytes));
@@ -472,6 +514,94 @@ fn snapshot_vfs_dir(
         }
     }
     Ok(())
+}
+
+fn read_vfs_file_bounded(
+    lfs: &LFS,
+    inode: usize,
+    current_bytes: usize,
+    limits: SyncLimits,
+) -> Result<(Vec<u8>, usize), SyncError> {
+    let stat = <LFS as Wasip1LFSBase>::fd_filestat_get_raw::<__self>(lfs, &inode)
+        .map_err(|_| SyncError::Vfs("fd_filestat_get_raw"))?;
+    let file_size = usize::try_from(stat.size).map_err(|_| SyncError::TooManyBytes)?;
+    let total_bytes = check_file_size(current_bytes, file_size, limits)?;
+    let mut bytes = vec![0; file_size];
+    let bytes_read = <LFS as Wasip1LFSBase>::fd_pread_raw::<__self>(
+        lfs,
+        &inode,
+        bytes.as_mut_ptr(),
+        bytes.len(),
+        0,
+    )
+    .map_err(|_| SyncError::Vfs("fd_pread_raw"))?;
+    bytes.truncate(bytes_read);
+    let final_stat = <LFS as Wasip1LFSBase>::fd_filestat_get_raw::<__self>(lfs, &inode)
+        .map_err(|_| SyncError::Vfs("fd_filestat_get_raw"))?;
+    if final_stat.size != stat.size || bytes.len() != file_size {
+        return Err(SyncError::Vfs("file changed during snapshot"));
+    }
+    Ok((bytes, total_bytes))
+}
+
+fn snapshot_vfs_branch(
+    lfs: &LFS,
+    root: usize,
+    path: &Path,
+    include_descendants: bool,
+    limits: SyncLimits,
+    runtime_exclusions: &[PathBuf],
+) -> Result<SyncBaseline, SyncError> {
+    let mut snapshot = SyncBaseline {
+        entries: BTreeMap::new(),
+        runtime_exclusions: runtime_exclusions.to_vec(),
+    };
+    let mut inode = root;
+    let mut relative_path = PathBuf::new();
+    let mut components = path.components().peekable();
+    let mut byte_count = 0;
+
+    while let Some(Component::Normal(component)) = components.next() {
+        let name = component
+            .to_str()
+            .ok_or_else(|| SyncError::InvalidPath(path.to_path_buf()))?;
+        let Some(child_inode) = lfs
+            .read_dir(inode)
+            .map_err(|_| SyncError::Vfs("read_dir"))?
+            .into_iter()
+            .find_map(|(entry_name, inode)| (entry_name == name).then_some(inode))
+        else {
+            break;
+        };
+        relative_path.push(name);
+
+        if lfs.read_dir(child_inode).is_ok() {
+            snapshot
+                .entries
+                .insert(relative_path.clone(), SnapshotEntry::directory());
+            check_configured_limits(snapshot.entries.len(), byte_count, limits)?;
+            if components.peek().is_none() && include_descendants {
+                snapshot_vfs_dir(
+                    lfs,
+                    child_inode,
+                    &relative_path,
+                    &mut snapshot,
+                    &mut byte_count,
+                    limits,
+                )?;
+            }
+            inode = child_inode;
+        } else {
+            let (bytes, total_bytes) = read_vfs_file_bounded(lfs, child_inode, byte_count, limits)?;
+            byte_count = total_bytes;
+            snapshot
+                .entries
+                .insert(relative_path.clone(), SnapshotEntry::file(bytes));
+            check_configured_limits(snapshot.entries.len(), byte_count, limits)?;
+            break;
+        }
+    }
+    Ok(snapshot)
 }
 
 fn apply_host_snapshot(
@@ -484,8 +614,8 @@ fn apply_host_snapshot(
         .iter()
         .filter(|(path, entry)| {
             !entry.is_directory()
-                || (!contains_runtime_exclusion(path, &current.runtime_exclusions)
-                    && !contains_runtime_exclusion(path, &desired.runtime_exclusions))
+                || (!contains_exclusion(path, &current.runtime_exclusions)
+                    && !contains_exclusion(path, &desired.runtime_exclusions))
         })
         .filter(|(path, entry)| {
             desired
@@ -534,8 +664,8 @@ fn apply_vfs_snapshot(
         .iter()
         .filter(|(path, entry)| {
             !entry.is_directory()
-                || (!contains_runtime_exclusion(path, &current.runtime_exclusions)
-                    && !contains_runtime_exclusion(path, &desired.runtime_exclusions))
+                || (!contains_exclusion(path, &current.runtime_exclusions)
+                    && !contains_exclusion(path, &desired.runtime_exclusions))
         })
         .filter(|(path, entry)| {
             desired
@@ -591,6 +721,159 @@ fn apply_vfs_snapshot(
     Ok(())
 }
 
+fn apply_vfs_snapshot_rechecked<F>(
+    lfs: &LFS,
+    root: usize,
+    current: &SyncBaseline,
+    desired: &SyncBaseline,
+    limits: SyncLimits,
+    mut before_mutation: F,
+) -> Result<Vec<PathBuf>, SyncError>
+where
+    F: FnMut(&Path),
+{
+    let mut expected = current.clone();
+    let mut conflicts = BTreeSet::new();
+    let mut removals = current
+        .entries
+        .iter()
+        .filter(|(path, entry)| {
+            !entry.is_directory()
+                || (!contains_exclusion(path, &current.runtime_exclusions)
+                    && !contains_exclusion(path, &desired.runtime_exclusions))
+        })
+        .filter(|(path, entry)| {
+            desired
+                .entries
+                .get(*path)
+                .is_none_or(|wanted| wanted.is_directory() != entry.is_directory())
+        })
+        .map(|(path, entry)| (path.clone(), entry.is_directory()))
+        .collect::<Vec<_>>();
+    removals.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
+
+    for (path, is_directory) in removals {
+        if is_related_to_conflict(&path, &conflicts) {
+            continue;
+        }
+        before_mutation(&path);
+        let live = snapshot_vfs_branch(
+            lfs,
+            root,
+            &path,
+            is_directory,
+            limits,
+            &current.runtime_exclusions,
+        )?;
+        let found = affected_differences(&expected, &live, &path, is_directory);
+        if !found.is_empty() {
+            conflicts.extend(found);
+            continue;
+        }
+
+        let (parent, name) = vfs_parent_and_name(lfs, root, &path)?;
+        if is_directory {
+            lfs.remove_dir(parent, name)
+                .map_err(|_| SyncError::Vfs("remove_dir"))?;
+            expected
+                .entries
+                .retain(|existing, _| existing != &path && !existing.starts_with(&path));
+        } else {
+            lfs.remove_file(parent, name)
+                .map_err(|_| SyncError::Vfs("remove_file"))?;
+            expected.entries.remove(&path);
+        }
+    }
+
+    let mut directories = desired
+        .entries
+        .iter()
+        .filter(|(path, entry)| entry.is_directory() && current.entries.get(*path) != Some(*entry))
+        .map(|(path, _)| path.clone())
+        .collect::<Vec<_>>();
+    directories.sort_by_key(|path| path.components().count());
+    for path in directories {
+        if is_related_to_conflict(&path, &conflicts) {
+            continue;
+        }
+        before_mutation(&path);
+        let live =
+            snapshot_vfs_branch(lfs, root, &path, false, limits, &current.runtime_exclusions)?;
+        let found = affected_differences(&expected, &live, &path, false);
+        if !found.is_empty() {
+            conflicts.extend(found);
+            continue;
+        }
+
+        let (parent, name) = vfs_parent_and_name(lfs, root, &path)?;
+        lfs.add_dir(parent, name)
+            .map_err(|_| SyncError::Vfs("add_dir"))?;
+        expected.entries.insert(path, SnapshotEntry::directory());
+    }
+
+    for (path, entry) in &desired.entries {
+        if entry.is_directory()
+            || current.entries.get(path) == Some(entry)
+            || is_related_to_conflict(path, &conflicts)
+        {
+            continue;
+        }
+        before_mutation(path);
+        let live =
+            snapshot_vfs_branch(lfs, root, path, false, limits, &current.runtime_exclusions)?;
+        let found = affected_differences(&expected, &live, path, false);
+        if !found.is_empty() {
+            conflicts.extend(found);
+            continue;
+        }
+
+        let (parent, name) = vfs_parent_and_name(lfs, root, path)?;
+        if expected
+            .entries
+            .get(path)
+            .is_some_and(|entry| !entry.is_directory())
+        {
+            let inode = vfs_child(lfs, parent, name)?;
+            lfs.write_file(inode, entry.bytes().to_vec())
+                .map_err(|_| SyncError::Vfs("write_file"))?;
+        } else {
+            lfs.add_file(parent, name, entry.bytes().to_vec())
+                .map_err(|_| SyncError::Vfs("add_file"))?;
+        }
+        expected.entries.insert(path.clone(), entry.clone());
+    }
+
+    Ok(conflicts.into_iter().collect())
+}
+
+fn is_related_to_conflict(path: &Path, conflicts: &BTreeSet<PathBuf>) -> bool {
+    conflicts
+        .iter()
+        .any(|conflict| path.starts_with(conflict) || conflict.starts_with(path))
+}
+
+fn affected_differences(
+    expected: &SyncBaseline,
+    live: &SyncBaseline,
+    path: &Path,
+    include_descendants: bool,
+) -> Vec<PathBuf> {
+    expected
+        .entries
+        .keys()
+        .chain(live.entries.keys())
+        .filter(|candidate| {
+            *candidate == path
+                || path.starts_with(*candidate)
+                || (include_descendants && candidate.starts_with(path))
+        })
+        .filter(|candidate| expected.entries.get(*candidate) != live.entries.get(*candidate))
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 fn vfs_parent_and_name<'a>(
     lfs: &LFS,
     root: usize,
@@ -631,6 +914,20 @@ fn io_error(error: std::io::Error) -> SyncError {
 mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TEMP_ID: AtomicUsize = AtomicUsize::new(0);
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "rubrc-vfs-{name}-{}-{}",
+            std::process::id(),
+            TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
 
     fn file_map<const N: usize>(files: [(&str, &[u8]); N]) -> SyncBaseline {
         SyncBaseline {
@@ -684,6 +981,55 @@ mod tests {
     }
 
     #[test]
+    fn rejects_known_file_size_before_reading_contents() {
+        let limits = SyncLimits {
+            max_entries: 10,
+            max_bytes: 1,
+        };
+
+        assert_eq!(check_file_size(0, 2, limits), Err(SyncError::TooManyBytes));
+        assert_eq!(check_file_size(1, 1, limits), Err(SyncError::TooManyBytes));
+        assert_eq!(check_file_size(0, 1, limits), Ok(1));
+    }
+
+    #[test]
+    fn host_snapshot_rejects_file_larger_than_remaining_budget() {
+        let root = temp_dir("host-byte-limit");
+        std::fs::write(root.join("large.bin"), b"12").unwrap();
+
+        let result = snapshot_host(
+            &root,
+            SyncLimits {
+                max_entries: 10,
+                max_bytes: 1,
+            },
+            &[],
+        );
+
+        assert_eq!(result, Err(SyncError::TooManyBytes));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn vfs_snapshot_rejects_file_larger_than_remaining_budget() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        lfs.add_file(root, "large.bin", b"12".to_vec()).unwrap();
+
+        let result = snapshot_vfs(
+            &lfs,
+            root,
+            SyncLimits {
+                max_entries: 10,
+                max_bytes: 1,
+            },
+            &[],
+        );
+
+        assert_eq!(result, Err(SyncError::TooManyBytes));
+    }
+
+    #[test]
     fn rejects_vfs_names_that_can_escape_the_host_root() {
         for name in ["../escape", "/absolute", "nested/name"] {
             assert_eq!(
@@ -722,6 +1068,31 @@ mod tests {
         let result = reconcile_diff(&baseline, &child, &current_vfs).unwrap();
         assert_eq!(result.conflicts, vec![PathBuf::from("shared.txt")]);
         assert_eq!(result.tree["shared.txt"].bytes(), b"editor");
+    }
+
+    #[test]
+    fn child_delete_preserves_concurrent_descendant_creation() {
+        let baseline = tree(&[("item", None)]);
+        let child = SyncBaseline::default();
+        let current_vfs = tree(&[("item", None), ("item/editor.txt", Some(b"editor"))]);
+
+        let result = reconcile_diff(&baseline, &child, &current_vfs).unwrap();
+
+        assert_eq!(result.conflicts, vec![PathBuf::from("item/editor.txt")]);
+        assert_eq!(result.tree["item/editor.txt"].bytes(), b"editor");
+    }
+
+    #[test]
+    fn child_type_replacement_preserves_concurrent_descendant_creation() {
+        let baseline = tree(&[("item", None)]);
+        let child = file_map([("item", b"child")]);
+        let current_vfs = tree(&[("item", None), ("item/editor.txt", Some(b"editor"))]);
+
+        let result = reconcile_diff(&baseline, &child, &current_vfs).unwrap();
+
+        assert_eq!(result.conflicts, vec![PathBuf::from("item/editor.txt")]);
+        assert!(result.tree["item"].is_directory());
+        assert_eq!(result.tree["item/editor.txt"].bytes(), b"editor");
     }
 
     #[test]
@@ -779,6 +1150,125 @@ mod tests {
     }
 
     #[test]
+    fn mutation_time_recheck_preserves_concurrent_file_edit() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        lfs.add_file(root, "a.txt", b"before".to_vec()).unwrap();
+        let b_inode = lfs.add_file(root, "b.txt", b"before".to_vec()).unwrap();
+        let baseline = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        let child = file_map([("a.txt", b"child"), ("b.txt", b"child")]);
+        let desired = reconcile_diff(&baseline, &child, &baseline).unwrap().tree;
+        let mut edited = false;
+
+        let conflicts = apply_vfs_snapshot_rechecked(
+            &lfs,
+            root,
+            &baseline,
+            &desired,
+            DEFAULT_SYNC_LIMITS,
+            |path| {
+                if path == Path::new("b.txt") && !edited {
+                    lfs.write_file(b_inode, b"editor".to_vec()).unwrap();
+                    edited = true;
+                }
+            },
+        )
+        .unwrap();
+
+        assert_eq!(conflicts, vec![PathBuf::from("b.txt")]);
+        let actual = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        assert_eq!(actual["a.txt"].bytes(), b"child");
+        assert_eq!(actual["b.txt"].bytes(), b"editor");
+    }
+
+    #[test]
+    fn mutation_time_recheck_preserves_descendant_created_before_parent_delete() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        let item = lfs.add_dir(root, "item").unwrap();
+        let baseline = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        let desired = SyncBaseline::default();
+        let mut created = false;
+
+        let conflicts = apply_vfs_snapshot_rechecked(
+            &lfs,
+            root,
+            &baseline,
+            &desired,
+            DEFAULT_SYNC_LIMITS,
+            |path| {
+                if path == Path::new("item") && !created {
+                    lfs.add_file(item, "editor.txt", b"editor".to_vec())
+                        .unwrap();
+                    created = true;
+                }
+            },
+        )
+        .unwrap();
+
+        assert_eq!(conflicts, vec![PathBuf::from("item/editor.txt")]);
+        let actual = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        assert_eq!(actual["item/editor.txt"].bytes(), b"editor");
+    }
+
+    #[test]
+    fn mutation_recheck_snapshots_only_the_affected_branch() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        let item = lfs.add_dir(root, "item").unwrap();
+        lfs.add_file(item, "child.txt", b"child".to_vec()).unwrap();
+        lfs.add_file(root, "unrelated.txt", b"unrelated".to_vec())
+            .unwrap();
+
+        let branch = snapshot_vfs_branch(
+            &lfs,
+            root,
+            Path::new("item/child.txt"),
+            false,
+            DEFAULT_SYNC_LIMITS,
+            &[],
+        )
+        .unwrap();
+
+        assert!(branch.entries.contains_key(Path::new("item")));
+        assert!(branch.entries.contains_key(Path::new("item/child.txt")));
+        assert!(!branch.entries.contains_key(Path::new("unrelated.txt")));
+    }
+
+    #[test]
+    fn mutation_time_recheck_reports_parent_removed_before_child_add() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        lfs.add_dir(root, "item").unwrap();
+        let baseline = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        let desired = tree(&[("item", None), ("item/child.txt", Some(b"child"))]);
+        let mut removed = false;
+
+        let conflicts = apply_vfs_snapshot_rechecked(
+            &lfs,
+            root,
+            &baseline,
+            &desired,
+            DEFAULT_SYNC_LIMITS,
+            |path| {
+                if path == Path::new("item/child.txt") && !removed {
+                    lfs.remove_dir(root, "item").unwrap();
+                    removed = true;
+                }
+            },
+        )
+        .unwrap();
+
+        assert_eq!(conflicts, vec![PathBuf::from("item")]);
+        assert!(
+            lfs.read_dir(root)
+                .unwrap()
+                .iter()
+                .all(|(name, _)| name != "item")
+        );
+    }
+
+    #[test]
     fn authoritative_recovery_replaces_the_entire_tree() {
         let current = tree(&[("stale", None), ("stale/file", Some(b"old"))]);
         let host = tree(&[("src", None), ("src/main.rs", Some(b"fn main() {}"))]);
@@ -812,14 +1302,32 @@ mod tests {
 
     #[test]
     fn preserves_parent_directories_of_runtime_exclusions() {
-        assert!(contains_runtime_exclusion(
+        assert!(contains_exclusion(
             Path::new("workspace"),
             &[PathBuf::from("workspace/build-output")],
         ));
-        assert!(!contains_runtime_exclusion(
+        assert!(!contains_exclusion(
             Path::new("src"),
             &[PathBuf::from("workspace/build-output")],
         ));
+    }
+
+    #[test]
+    fn fixed_exclusion_children_do_not_block_cargo_parent_reconciliation() {
+        let root = temp_dir("fixed-exclusions");
+        std::fs::create_dir_all(root.join(".cargo/registry")).unwrap();
+        std::fs::create_dir_all(root.join(".cargo/git")).unwrap();
+        std::fs::write(root.join(".cargo/registry/cache"), b"registry").unwrap();
+        std::fs::write(root.join(".cargo/git/db"), b"git").unwrap();
+        std::fs::write(root.join(".cargo/config.toml"), b"remove me").unwrap();
+        let current = snapshot_host(&root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+
+        apply_host_snapshot(&root, &current, &SyncBaseline::default()).unwrap();
+
+        assert!(root.join(".cargo/registry/cache").is_file());
+        assert!(root.join(".cargo/git/db").is_file());
+        assert!(!root.join(".cargo/config.toml").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
