@@ -1,10 +1,11 @@
 use const_struct::*;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
 
+mod filesystem_sync;
 pub mod memory_manager;
 use memory_manager::*;
 
@@ -292,7 +293,15 @@ impl Guest for Wit {
             threads
         );
 
-        Self::flush_to_vfs();
+        let root = initialized_lfs_root();
+        if let Err(error) = filesystem_sync::import_host_authoritative(
+            &VIRTUAL_FILE_SYSTEM.lfs,
+            root,
+            Path::new("."),
+            filesystem_sync::DEFAULT_SYNC_LIMITS,
+        ) {
+            eprintln!("failed to initialize VFS from host: {error}");
+        }
 
         vfs_shell::_reset();
         println!("###");
@@ -305,58 +314,28 @@ impl Guest for Wit {
     }
 
     fn flush_to_vfs() {
-        let root = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
-
-        fn walk_host(dir: &Path, vfs_parent: usize) {
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    let name = path.file_name().unwrap().to_string_lossy().to_string();
-
-                    if path.is_dir() {
-                        let vfs_child = VIRTUAL_FILE_SYSTEM
-                            .lfs
-                            .add_dir(vfs_parent, &name)
-                            .unwrap_or(vfs_parent);
-                        walk_host(&path, vfs_child);
-                    } else if path.is_file() {
-                        if let Ok(content) = std::fs::read(&path) {
-                            let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(vfs_parent, &name, content);
-                        }
-                    }
-                }
-            }
+        let root = initialized_lfs_root();
+        if let Err(error) = filesystem_sync::import_host_authoritative(
+            &VIRTUAL_FILE_SYSTEM.lfs,
+            root,
+            Path::new("."),
+            filesystem_sync::DEFAULT_SYNC_LIMITS,
+        ) {
+            eprintln!("failed to flush host files to VFS: {error}");
         }
-
-        walk_host(Path::new("."), root);
     }
 
     fn flush_from_vfs() {
-        let root = LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
-
-        fn walk_vfs(vfs_inode: usize, host_path: PathBuf) {
-            if let Ok(entries) = VIRTUAL_FILE_SYSTEM.lfs.read_dir(vfs_inode) {
-                for (name, child_inode) in entries {
-                    if name == "." || name == ".." {
-                        continue;
-                    }
-                    let child_path = host_path.join(&name);
-
-                    // Try to list as directory to check if it is one
-                    if VIRTUAL_FILE_SYSTEM.lfs.read_dir(child_inode).is_ok() {
-                        let _ = std::fs::create_dir_all(&child_path);
-                        walk_vfs(child_inode, child_path);
-                    } else {
-                        // Treat as file
-                        if let Ok(content) = VIRTUAL_FILE_SYSTEM.lfs.read_file(child_inode) {
-                            let _ = std::fs::write(&child_path, content);
-                        }
-                    }
-                }
-            }
+        let root = initialized_lfs_root();
+        if let Err(error) = filesystem_sync::sync_vfs_to_host(
+            &VIRTUAL_FILE_SYSTEM.lfs,
+            root,
+            Path::new("."),
+            filesystem_sync::DEFAULT_SYNC_LIMITS,
+            &[],
+        ) {
+            eprintln!("failed to flush VFS files to host: {error}");
         }
-
-        walk_vfs(root, PathBuf::from("."));
     }
 
     fn dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
@@ -722,6 +701,11 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
 
 type LFS = StandardDynamicLFS<ShellVirtualStdIO>;
 pub(crate) static LFS_ROOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn initialized_lfs_root() -> usize {
+    std::sync::LazyLock::force(&VIRTUAL_FILE_SYSTEM);
+    LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 pub mod command;
 pub mod process;
