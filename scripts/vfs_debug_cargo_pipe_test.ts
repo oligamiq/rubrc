@@ -1,5 +1,7 @@
-import { ConsoleStdout, File, OpenFile } from "@bjorn3/browser_wasi_shim";
+import { ConsoleStdout, Fd, File, OpenFile } from "@bjorn3/browser_wasi_shim";
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
+import { buildPreopenDirectory } from "./build_preopen.ts";
+import { prepareCachedSysroot } from "./sysroot_cache.ts";
 import { computeWorkerWatchdogMs } from "./vfs_debug_config.ts";
 
 const timeoutMs = 120000;
@@ -10,6 +12,32 @@ const workerWatchdogMs = computeWorkerWatchdogMs({
   graceMs: 60000,
 });
 
+const testDir = "./test_workspace_cargo_pipe";
+await Deno.remove(testDir, { recursive: true }).catch((error) => {
+  if (!(error instanceof Deno.errors.NotFound)) {
+    throw error;
+  }
+});
+const sysroot = await prepareCachedSysroot({
+  workspaceSysroot: `${testDir}/sysroot`,
+});
+console.log(
+  `Prepared ${sysroot.expandedSysroot} from ${sysroot.source}: ${sysroot.cacheArchive}`,
+);
+
+// buildPreopen uses the same shim through a URL import, so its nominal types differ.
+const preopen = await (async () => {
+  try {
+    return await buildPreopenDirectory(".", testDir) as unknown as Fd;
+  } finally {
+    await Deno.remove(testDir, { recursive: true }).catch((error) => {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    });
+  }
+})();
+
 const farm = new WASIFarm(
   new OpenFile(new File([])),
   ConsoleStdout.lineBuffered((message) =>
@@ -18,7 +46,10 @@ const farm = new WASIFarm(
   ConsoleStdout.lineBuffered((message) =>
     console.error(`[WASI stderr] ${message}`)
   ),
-  [],
+  [preopen],
+  {
+    allocator_size: 100 * 1024 * 1024,
+  },
 );
 
 const worker = new Worker(
@@ -58,7 +89,8 @@ const result = await new Promise<
       },
       {
         path: "app/Cargo.toml",
-        content: `[package]\nname = "app"\nversion = "0.1.0"\nedition = "2021"\n`,
+        content:
+          `[package]\nname = "app"\nversion = "0.1.0"\nedition = "2021"\n`,
       },
       { path: "app/src/main.rs", content: "fn main() {}\n" },
       { path: ".cargo/config.toml", content: "" },
@@ -85,13 +117,24 @@ if (result.output.includes("malformed output when learning about crate-type")) {
   Deno.exit(1);
 }
 
+if (result.output.includes("error[E0463]")) {
+  console.error(
+    "Cargo-spawned rustc could not find the wasm32-wasip1 standard library",
+  );
+  Deno.exit(1);
+}
+
 if (result.output.includes("failed to set cwd `/`")) {
-  console.error("spawned rustc used host cwd handling instead of virtual process cwd");
+  console.error(
+    "spawned rustc used host cwd handling instead of virtual process cwd",
+  );
   Deno.exit(1);
 }
 
 if (result.output.includes("incremental compilation")) {
-  console.error("Cargo/rustc attempted incremental compilation on the virtual filesystem");
+  console.error(
+    "Cargo/rustc attempted incremental compilation on the virtual filesystem",
+  );
   Deno.exit(1);
 }
 
@@ -100,7 +143,17 @@ if (result.output.includes("No such file or directory")) {
   Deno.exit(1);
 }
 
-if (!result.output.includes("[vfs-debug] wasi-ext-spawn:run-rustc:enter")) {
-  console.error("Cargo did not reach rustc spawn path");
+const rustcRuns = result.output.match(
+  /\[vfs-debug\] wasi-ext-spawn:run-rustc:enter/g,
+)?.length ?? 0;
+if (rustcRuns < 3) {
+  console.error(
+    `Cargo reached ${rustcRuns} rustc runs; compile spawn was not reached`,
+  );
+  Deno.exit(1);
+}
+
+if (!result.output.includes("Finished `dev` profile")) {
+  console.error("Cargo did not report a successful dev build");
   Deno.exit(1);
 }

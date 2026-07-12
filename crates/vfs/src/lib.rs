@@ -570,12 +570,15 @@ impl<'a> VirtualEnv<'a> for VirtualEnvState {
     }
 }
 
+const CARGO_BUILD_TARGET_ENV: &str = "CARGO_BUILD_TARGET=wasm32-wasip1";
+
 pub static VIRTUAL_SHELL_ENV: std::sync::LazyLock<parking_lot::Mutex<VirtualEnvState>> =
     std::sync::LazyLock::new(|| {
         parking_lot::Mutex::new(VirtualEnvState {
             env: vec![
                 "HOME=~/".to_string(),
                 "CARGO_INCREMENTAL=0".to_string(),
+                CARGO_BUILD_TARGET_ENV.to_string(),
                 // "RUST_SRC_PATH=/sysroot/lib/rustlib".to_string(),
                 "SYSROOT=/sysroot".to_string(),
                 "PATH=/bin".to_string(),
@@ -755,7 +758,12 @@ plug_fs!(
 #[const_struct]
 const VIRTUAL_ENV: VirtualEnvEmbeddedState = VirtualEnvEmbeddedState {
     // environ: &["RUST_MIN_STACK=16777216", "HOME=~/"],
-    environ: &["HOME=~/", "CARGO_INCREMENTAL=0", "PATH=/bin"],
+    environ: &[
+        "HOME=~/",
+        "CARGO_INCREMENTAL=0",
+        CARGO_BUILD_TARGET_ENV,
+        "PATH=/bin",
+    ],
 };
 
 plug_env!(
@@ -853,6 +861,8 @@ pub extern "C" fn wasi_ext_spawn(
     env_len: i32,
     cwd_ptr: i32,
     cwd_len: i32,
+    stdin_ptr: i32,
+    stdin_len: i32,
     out_exit_code: i32,
     out_stdout_ptr: i32,
     out_stdout_len: i32,
@@ -868,6 +878,7 @@ pub extern "C" fn wasi_ext_spawn(
     let args = cargo_opt::get_array(args_ptr as *const u8, args_len as usize);
     let env = cargo_opt::get_array(env_ptr as *const u8, env_len as usize);
     let cwd = cargo_opt::get_array(cwd_ptr as *const u8, cwd_len as usize);
+    let stdin = cargo_opt::get_array(stdin_ptr as *const u8, stdin_len as usize).to_vec();
     crate::debug_trace(&format!(
         "wasi-ext-spawn:enter program={program} args_len={args_len} env_len={env_len} cwd_len={cwd_len}"
     ));
@@ -951,7 +962,7 @@ pub extern "C" fn wasi_ext_spawn(
     argv.push("-Clinker-flavor=wasm-ld".to_string());
     argv.push("-Clinker=wasm-ld".to_string());
     command::set_rustc_opt_args(&argv);
-    let ((), child_output) = with_child_process_stdio(cwd.to_vec(), Vec::new(), run_rustc);
+    let ((), child_output) = with_child_process_stdio(cwd.to_vec(), stdin, run_rustc);
     command::VIRTUAL_ARGS.lock().args = old_args;
     let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
     crate::debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));

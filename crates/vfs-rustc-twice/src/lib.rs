@@ -624,6 +624,8 @@ pub extern "C" fn wasi_ext_spawn(
     env_len: i32,
     cwd_ptr: i32,
     cwd_len: i32,
+    _stdin_ptr: i32,
+    _stdin_len: i32,
     out_exit_code: i32,
     out_stdout_ptr: i32,
     out_stdout_len: i32,
