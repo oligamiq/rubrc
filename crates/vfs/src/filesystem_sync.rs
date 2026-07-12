@@ -34,6 +34,7 @@ pub(crate) enum SyncError {
     TooManyBytes,
     Io(String),
     Vfs(&'static str),
+    ExcludedStateConflict(PathBuf),
     InvalidPath(PathBuf),
     UnsupportedFileType(PathBuf),
 }
@@ -45,6 +46,10 @@ impl fmt::Display for SyncError {
             Self::TooManyBytes => write!(f, "filesystem sync exceeds the byte limit"),
             Self::Io(error) => write!(f, "filesystem sync I/O error: {error}"),
             Self::Vfs(operation) => write!(f, "filesystem sync VFS error during {operation}"),
+            Self::ExcludedStateConflict(path) => write!(
+                f,
+                "filesystem sync cannot replace an ancestor of excluded state: {path:?}"
+            ),
             Self::InvalidPath(path) => {
                 write!(f, "filesystem sync path is not valid UTF-8: {path:?}")
             }
@@ -104,6 +109,7 @@ impl SnapshotEntry {
 pub(crate) struct SyncBaseline {
     entries: BTreeMap<PathBuf, SnapshotEntry>,
     runtime_exclusions: Vec<PathBuf>,
+    excluded_ancestors: BTreeSet<PathBuf>,
 }
 
 impl Index<&str> for SyncBaseline {
@@ -141,12 +147,30 @@ fn is_runtime_excluded(path: &Path, runtime_exclusions: &[PathBuf]) -> bool {
         .any(|excluded| !excluded.as_os_str().is_empty() && path.starts_with(excluded))
 }
 
-fn contains_exclusion(path: &Path, runtime_exclusions: &[PathBuf]) -> bool {
-    EXCLUDED_ROOTS
+fn record_excluded_ancestors(snapshot: &mut SyncBaseline, excluded: &Path) {
+    let mut ancestor = excluded.parent();
+    while let Some(path) = ancestor.filter(|path| !path.as_os_str().is_empty()) {
+        snapshot.excluded_ancestors.insert(path.to_path_buf());
+        ancestor = path.parent();
+    }
+}
+
+fn preserves_excluded_state(path: &Path, current: &SyncBaseline, desired: &SyncBaseline) -> bool {
+    current.excluded_ancestors.contains(path) || desired.excluded_ancestors.contains(path)
+}
+
+fn blocked_excluded_replacements(
+    current: &SyncBaseline,
+    desired: &SyncBaseline,
+) -> BTreeSet<PathBuf> {
+    desired
+        .entries
         .iter()
-        .map(Path::new)
-        .chain(runtime_exclusions.iter().map(PathBuf::as_path))
-        .any(|excluded| excluded != path && excluded.starts_with(path))
+        .filter(|(_, entry)| !entry.is_directory())
+        .filter(|(path, entry)| current.entries.get(*path) != Some(*entry))
+        .filter(|(path, _)| preserves_excluded_state(path, current, desired))
+        .map(|(path, _)| path.clone())
+        .collect()
 }
 
 fn should_exclude(path: &Path, runtime_exclusions: &[PathBuf]) -> bool {
@@ -388,6 +412,7 @@ fn snapshot_host(
     let mut snapshot = SyncBaseline {
         entries: BTreeMap::new(),
         runtime_exclusions: runtime_exclusions.to_vec(),
+        excluded_ancestors: BTreeSet::new(),
     };
     let mut byte_count = 0;
     snapshot_host_dir(root, Path::new(""), &mut snapshot, &mut byte_count, limits)?;
@@ -410,6 +435,7 @@ fn snapshot_host_dir(
     for entry in entries {
         let relative_path = relative_dir.join(entry.file_name());
         if should_exclude(&relative_path, &snapshot.runtime_exclusions) {
+            record_excluded_ancestors(snapshot, &relative_path);
             continue;
         }
         if relative_path.to_str().is_none() {
@@ -456,6 +482,7 @@ fn snapshot_vfs(
     let mut snapshot = SyncBaseline {
         entries: BTreeMap::new(),
         runtime_exclusions: runtime_exclusions.to_vec(),
+        excluded_ancestors: BTreeSet::new(),
     };
     let mut byte_count = 0;
     snapshot_vfs_dir(
@@ -487,6 +514,7 @@ fn snapshot_vfs_dir(
         }
         let relative_path = relative_dir.join(validate_vfs_name(&name)?);
         if should_exclude(&relative_path, &snapshot.runtime_exclusions) {
+            record_excluded_ancestors(snapshot, &relative_path);
             continue;
         }
 
@@ -555,6 +583,7 @@ fn snapshot_vfs_branch(
     let mut snapshot = SyncBaseline {
         entries: BTreeMap::new(),
         runtime_exclusions: runtime_exclusions.to_vec(),
+        excluded_ancestors: BTreeSet::new(),
     };
     let mut inode = root;
     let mut relative_path = PathBuf::new();
@@ -609,13 +638,17 @@ fn apply_host_snapshot(
     current: &SyncBaseline,
     desired: &SyncBaseline,
 ) -> Result<(), SyncError> {
+    if let Some(path) = blocked_excluded_replacements(current, desired)
+        .into_iter()
+        .next()
+    {
+        return Err(SyncError::ExcludedStateConflict(path));
+    }
     let mut removals = current
         .entries
         .iter()
         .filter(|(path, entry)| {
-            !entry.is_directory()
-                || (!contains_exclusion(path, &current.runtime_exclusions)
-                    && !contains_exclusion(path, &desired.runtime_exclusions))
+            !entry.is_directory() || !preserves_excluded_state(path, current, desired)
         })
         .filter(|(path, entry)| {
             desired
@@ -646,7 +679,10 @@ fn apply_host_snapshot(
     }
 
     for (path, entry) in &desired.entries {
-        if !entry.is_directory() && current.entries.get(path) != Some(entry) {
+        if !entry.is_directory()
+            && current.entries.get(path) != Some(entry)
+            && !preserves_excluded_state(path, current, desired)
+        {
             std::fs::write(root.join(path), entry.bytes()).map_err(io_error)?;
         }
     }
@@ -659,13 +695,17 @@ fn apply_vfs_snapshot(
     current: &SyncBaseline,
     desired: &SyncBaseline,
 ) -> Result<(), SyncError> {
+    if let Some(path) = blocked_excluded_replacements(current, desired)
+        .into_iter()
+        .next()
+    {
+        return Err(SyncError::ExcludedStateConflict(path));
+    }
     let mut removals = current
         .entries
         .iter()
         .filter(|(path, entry)| {
-            !entry.is_directory()
-                || (!contains_exclusion(path, &current.runtime_exclusions)
-                    && !contains_exclusion(path, &desired.runtime_exclusions))
+            !entry.is_directory() || !preserves_excluded_state(path, current, desired)
         })
         .filter(|(path, entry)| {
             desired
@@ -701,7 +741,10 @@ fn apply_vfs_snapshot(
     }
 
     for (path, entry) in &desired.entries {
-        if entry.is_directory() || current.entries.get(path) == Some(entry) {
+        if entry.is_directory()
+            || current.entries.get(path) == Some(entry)
+            || preserves_excluded_state(path, current, desired)
+        {
             continue;
         }
         let (parent, name) = vfs_parent_and_name(lfs, root, path)?;
@@ -733,14 +776,12 @@ where
     F: FnMut(&Path),
 {
     let mut expected = current.clone();
-    let mut conflicts = BTreeSet::new();
+    let mut conflicts = blocked_excluded_replacements(current, desired);
     let mut removals = current
         .entries
         .iter()
         .filter(|(path, entry)| {
-            !entry.is_directory()
-                || (!contains_exclusion(path, &current.runtime_exclusions)
-                    && !contains_exclusion(path, &desired.runtime_exclusions))
+            !entry.is_directory() || !preserves_excluded_state(path, current, desired)
         })
         .filter(|(path, entry)| {
             desired
@@ -775,9 +816,9 @@ where
         if is_directory {
             lfs.remove_dir(parent, name)
                 .map_err(|_| SyncError::Vfs("remove_dir"))?;
-            expected
-                .entries
-                .retain(|existing, _| existing != &path && !existing.starts_with(&path));
+            for removed in descendant_paths(&expected.entries, &path) {
+                expected.entries.remove(&removed);
+            }
         } else {
             lfs.remove_file(parent, name)
                 .map_err(|_| SyncError::Vfs("remove_file"))?;
@@ -815,6 +856,7 @@ where
         if entry.is_directory()
             || current.entries.get(path) == Some(entry)
             || is_related_to_conflict(path, &conflicts)
+            || preserves_excluded_state(path, current, desired)
         {
             continue;
         }
@@ -847,9 +889,18 @@ where
 }
 
 fn is_related_to_conflict(path: &Path, conflicts: &BTreeSet<PathBuf>) -> bool {
+    let mut ancestor = Some(path);
+    while let Some(candidate) = ancestor.filter(|path| !path.as_os_str().is_empty()) {
+        if conflicts.contains(candidate) {
+            return true;
+        }
+        ancestor = candidate.parent();
+    }
+
     conflicts
-        .iter()
-        .any(|conflict| path.starts_with(conflict) || conflict.starts_with(path))
+        .range(path.join("\0")..)
+        .next()
+        .is_some_and(|conflict| conflict.starts_with(path))
 }
 
 fn affected_differences(
@@ -858,20 +909,49 @@ fn affected_differences(
     path: &Path,
     include_descendants: bool,
 ) -> Vec<PathBuf> {
-    expected
-        .entries
-        .keys()
-        .chain(live.entries.keys())
-        .filter(|candidate| {
-            *candidate == path
-                || path.starts_with(*candidate)
-                || (include_descendants && candidate.starts_with(path))
-        })
-        .filter(|candidate| expected.entries.get(*candidate) != live.entries.get(*candidate))
-        .cloned()
-        .collect::<BTreeSet<_>>()
+    affected_candidate_paths(expected, live, path, include_descendants)
         .into_iter()
+        .filter(|candidate| expected.entries.get(candidate) != live.entries.get(candidate))
         .collect()
+}
+
+fn affected_candidate_paths(
+    expected: &SyncBaseline,
+    live: &SyncBaseline,
+    path: &Path,
+    include_descendants: bool,
+) -> BTreeSet<PathBuf> {
+    let mut candidates = BTreeSet::new();
+    let mut ancestor = Some(path);
+    while let Some(candidate) = ancestor.filter(|path| !path.as_os_str().is_empty()) {
+        if expected.entries.contains_key(candidate) || live.entries.contains_key(candidate) {
+            candidates.insert(candidate.to_path_buf());
+        }
+        ancestor = candidate.parent();
+    }
+
+    if include_descendants {
+        for entries in [&expected.entries, &live.entries] {
+            candidates.extend(descendant_paths(entries, path));
+        }
+    }
+
+    candidates
+}
+
+fn descendant_paths(entries: &BTreeMap<PathBuf, SnapshotEntry>, path: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if entries.contains_key(path) {
+        paths.push(path.to_path_buf());
+    }
+    // NUL cannot occur in a filesystem name and sorts before every valid child name.
+    paths.extend(
+        entries
+            .range(path.join("\0")..)
+            .take_while(|(candidate, _)| candidate.starts_with(path))
+            .map(|(candidate, _)| candidate.clone()),
+    );
+    paths
 }
 
 fn vfs_parent_and_name<'a>(
@@ -936,6 +1016,7 @@ mod tests {
                 .map(|(path, bytes)| (PathBuf::from(path), SnapshotEntry::file(bytes.to_vec())))
                 .collect(),
             runtime_exclusions: Vec::new(),
+            excluded_ancestors: BTreeSet::new(),
         }
     }
 
@@ -952,6 +1033,7 @@ mod tests {
                 })
                 .collect(),
             runtime_exclusions: Vec::new(),
+            excluded_ancestors: BTreeSet::new(),
         }
     }
 
@@ -1236,6 +1318,30 @@ mod tests {
     }
 
     #[test]
+    fn mutation_recheck_candidates_exclude_unrelated_entries() {
+        let mut expected = SyncBaseline::default();
+        for index in 0..10_000 {
+            expected.entries.insert(
+                PathBuf::from(format!("unrelated/{index:05}.txt")),
+                SnapshotEntry::file(b"same".to_vec()),
+            );
+        }
+        expected.entries.insert(
+            PathBuf::from("changed/file.txt"),
+            SnapshotEntry::file(b"before".to_vec()),
+        );
+        let live = expected.clone();
+
+        let candidates =
+            affected_candidate_paths(&expected, &live, Path::new("changed/file.txt"), false);
+
+        assert_eq!(
+            candidates,
+            BTreeSet::from([PathBuf::from("changed/file.txt")])
+        );
+    }
+
+    #[test]
     fn mutation_time_recheck_reports_parent_removed_before_child_add() {
         let lfs = LFS::new();
         let root = lfs.add_preopen(".");
@@ -1302,14 +1408,18 @@ mod tests {
 
     #[test]
     fn preserves_parent_directories_of_runtime_exclusions() {
-        assert!(contains_exclusion(
-            Path::new("workspace"),
+        let root = temp_dir("runtime-exclusion-parent");
+        std::fs::create_dir_all(root.join("workspace/build-output")).unwrap();
+        let snapshot = snapshot_host(
+            &root,
+            DEFAULT_SYNC_LIMITS,
             &[PathBuf::from("workspace/build-output")],
-        ));
-        assert!(!contains_exclusion(
-            Path::new("src"),
-            &[PathBuf::from("workspace/build-output")],
-        ));
+        )
+        .unwrap();
+
+        assert!(snapshot.excluded_ancestors.contains(Path::new("workspace")));
+        assert!(!snapshot.excluded_ancestors.contains(Path::new("src")));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1328,6 +1438,112 @@ mod tests {
         assert!(root.join(".cargo/git/db").is_file());
         assert!(!root.join(".cargo/config.toml").exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn empty_fixed_exclusion_ancestor_can_be_replaced_by_host_file() {
+        let root = temp_dir("fixed-exclusion-replacement");
+        std::fs::create_dir(root.join(".cargo")).unwrap();
+        let current = snapshot_host(&root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        let desired = file_map([(".cargo", b"file")]);
+
+        apply_host_snapshot(&root, &current, &desired).unwrap();
+
+        assert_eq!(std::fs::read(root.join(".cargo")).unwrap(), b"file");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn empty_runtime_exclusion_ancestor_can_be_replaced_by_host_file() {
+        let root = temp_dir("runtime-exclusion-replacement");
+        std::fs::create_dir(root.join("workspace")).unwrap();
+        let exclusions = vec![PathBuf::from("workspace/build")];
+        let current = snapshot_host(&root, DEFAULT_SYNC_LIMITS, &exclusions).unwrap();
+        let mut desired = file_map([("workspace", b"file")]);
+        desired.runtime_exclusions = exclusions;
+
+        apply_host_snapshot(&root, &current, &desired).unwrap();
+
+        assert_eq!(std::fs::read(root.join("workspace")).unwrap(), b"file");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn empty_fixed_exclusion_ancestor_can_be_replaced_by_vfs_file() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        lfs.add_dir(root, ".cargo").unwrap();
+        let current = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        let desired = file_map([(".cargo", b"file")]);
+
+        apply_vfs_snapshot(&lfs, root, &current, &desired).unwrap();
+
+        let actual = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        assert_eq!(actual[".cargo"].bytes(), b"file");
+    }
+
+    #[test]
+    fn empty_runtime_exclusion_ancestor_can_be_replaced_by_vfs_file() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        lfs.add_dir(root, "workspace").unwrap();
+        let exclusions = vec![PathBuf::from("workspace/build")];
+        let current = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &exclusions).unwrap();
+        let mut desired = file_map([("workspace", b"file")]);
+        desired.runtime_exclusions = exclusions;
+
+        apply_vfs_snapshot(&lfs, root, &current, &desired).unwrap();
+
+        let actual = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        assert_eq!(actual["workspace"].bytes(), b"file");
+    }
+
+    #[test]
+    fn excluded_descendant_reports_blocked_host_ancestor_replacement() {
+        let root = temp_dir("blocked-host-exclusion-replacement");
+        std::fs::create_dir_all(root.join(".cargo/registry")).unwrap();
+        std::fs::write(root.join(".cargo/registry/cache"), b"cache").unwrap();
+        let current = snapshot_host(&root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        let desired = file_map([(".cargo", b"file")]);
+
+        let result = apply_host_snapshot(&root, &current, &desired);
+
+        assert_eq!(
+            result,
+            Err(SyncError::ExcludedStateConflict(PathBuf::from(".cargo")))
+        );
+        assert_eq!(
+            std::fs::read(root.join(".cargo/registry/cache")).unwrap(),
+            b"cache"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn excluded_descendant_conflicts_with_vfs_ancestor_replacement() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        let cargo = lfs.add_dir(root, ".cargo").unwrap();
+        let registry = lfs.add_dir(cargo, "registry").unwrap();
+        lfs.add_file(registry, "cache", b"cache".to_vec()).unwrap();
+        let current = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        let desired = file_map([(".cargo", b"file")]);
+
+        let conflicts = apply_vfs_snapshot_rechecked(
+            &lfs,
+            root,
+            &current,
+            &desired,
+            DEFAULT_SYNC_LIMITS,
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(conflicts, vec![PathBuf::from(".cargo")]);
+        let cargo = vfs_child(&lfs, root, ".cargo").unwrap();
+        let registry = vfs_child(&lfs, cargo, "registry").unwrap();
+        let cache = vfs_child(&lfs, registry, "cache").unwrap();
+        assert_eq!(lfs.read_file(cache).unwrap(), b"cache");
     }
 
     #[test]
