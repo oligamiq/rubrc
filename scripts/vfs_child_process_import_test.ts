@@ -179,6 +179,56 @@ Deno.test("child process imports reject malformed byte and scalar responses", ()
   }
 });
 
+Deno.test("child process imports reject lifecycle state 4 before writing metadata", () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const metadataPointers = [32, 36, 40, 44] as const;
+  const metadataBefore = [101, 102, 103, 104];
+  const view = new DataView(memory.buffer);
+  metadataPointers.forEach((pointer, index) =>
+    view.setUint32(pointer, metadataBefore[index], true)
+  );
+  const calls: unknown[] = [];
+  const imports = createChildProcessImports({ memory }, (_index, message) => {
+    calls.push(structuredClone(message));
+    const name = (message as { name: string }).name;
+    if (name === "childProcessRun") {
+      return { state: 4, status: 9, error_len: 3 };
+    }
+    if (name === "childProcessRecover") {
+      return { request_id: 8, state: 4, status: 9, error_len: 3 };
+    }
+    return { request_id: 8, state: 4, status: 0, error_len: 0 };
+  });
+
+  if (imports.requestStart(0, 0, 0, 0, 0, metadataPointers[0]) === 0) {
+    throw new Error("start accepted lifecycle state 4");
+  }
+  if (imports.requestWrite(8, 0, 0) === 0) {
+    throw new Error("write accepted lifecycle state 4");
+  }
+  if (imports.requestRun(8, metadataPointers[1], metadataPointers[2]) === 0) {
+    throw new Error("run accepted lifecycle state 4");
+  }
+  if (imports.requestRecover(...metadataPointers) === 0) {
+    throw new Error("recover accepted lifecycle state 4");
+  }
+
+  const metadataAfter = metadataPointers.map((pointer) =>
+    readU32(memory, pointer)
+  );
+  if (JSON.stringify(metadataAfter) !== JSON.stringify(metadataBefore)) {
+    throw new Error(`state 4 partially wrote metadata: ${metadataAfter}`);
+  }
+  const cleanupCalls = calls.filter((call) =>
+    (call as { name: string }).name === "childProcessEnd"
+  );
+  if (cleanupCalls.length !== 1) {
+    throw new Error(
+      `invalid start cleanup calls: ${JSON.stringify(cleanupCalls)}`,
+    );
+  }
+});
+
 Deno.test("child process run, recovery, reads, and end use scalar request state", () => {
   const memory = new WebAssembly.Memory({ initial: 8 });
   const calls: unknown[] = [];

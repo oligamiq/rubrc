@@ -4,6 +4,17 @@ type CallUnknownFn = (index: number, message: unknown) => unknown;
 const MAX_MODULE_CHUNK_SIZE = 256 * 1024;
 const MAX_ERROR_CHUNK_SIZE = 64 * 1024;
 
+export const CHILD_PROCESS_STATE = {
+  None: 0,
+  Uploading: 1,
+  Running: 2,
+  Completed: 3,
+} as const;
+
+const VALID_CHILD_PROCESS_STATES = new Set<number>(
+  Object.values(CHILD_PROCESS_STATE),
+);
+
 function toBytes(value: unknown): Uint8Array {
   if (value instanceof Uint8Array) return value;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
@@ -61,6 +72,16 @@ export function createChildProcessImports(
     return id;
   };
 
+  const lifecycleState = (value: unknown) => {
+    const state = toU32(value);
+    if (!VALID_CHILD_PROCESS_STATES.has(state)) {
+      throw new RangeError(
+        "child process bridge returned invalid lifecycle state",
+      );
+    }
+    return state;
+  };
+
   const checkedRange = (pointer: number, length: number) => {
     const byteLength = memory.memory.buffer.byteLength;
     if (
@@ -99,7 +120,7 @@ export function createChildProcessImports(
       throw new TypeError("child process bridge returned no metadata");
     }
     return [
-      toU32(response.state),
+      lifecycleState(response.state),
       toU32(response.status),
       toU32(response.error_len),
     ];
