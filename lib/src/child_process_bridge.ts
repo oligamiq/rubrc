@@ -2,6 +2,8 @@ import { Directory, File, type Inode } from "@bjorn3/browser_wasi_shim";
 
 const MAX_MODULE_BYTES = 16 * 1024 * 1024;
 const MAX_MODULE_CHUNK_BYTES = 256 * 1024;
+const MAX_ARGV_BYTES = 256 * 1024;
+const MAX_ENV_BYTES = 256 * 1024;
 const MAX_ERROR_CHUNK_BYTES = 64 * 1024;
 const MAX_FILESYSTEM_ENTRIES = 10_000;
 const MAX_FILESYSTEM_BYTES = 64 * 1024 * 1024;
@@ -76,7 +78,7 @@ interface RequestState {
   args: string[];
   env: string[];
   expectedModuleBytes: number;
-  moduleChunks: Uint8Array[];
+  module: Uint8Array<ArrayBuffer>;
   uploadedModuleBytes: number;
   baseline: DirectorySnapshot;
   timer: TimerHandle;
@@ -103,11 +105,26 @@ export function isChildProcessMessage(
     CHILD_PROCESS_MESSAGE_NAMES.some((candidate) => candidate === name);
 }
 
-function byteArray(value: unknown, field: string): Uint8Array<ArrayBuffer> {
+function byteArray(
+  value: unknown,
+  field: string,
+  maxBytes: number,
+  maxLabel: string,
+): Uint8Array<ArrayBuffer> {
   if (!Array.isArray(value)) {
     throw new TypeError(`child process ${field} must be a dense byte array`);
   }
-  for (let index = 0; index < value.length; index++) {
+  const length = value.length;
+  if (
+    typeof length !== "number" || !Number.isSafeInteger(length) || length < 0
+  ) {
+    throw new TypeError(`child process ${field} length must be a number`);
+  }
+  if (length > maxBytes) {
+    throw new RangeError(`child process ${field} exceeds ${maxLabel}`);
+  }
+  const result = new Uint8Array(length);
+  for (let index = 0; index < length; index++) {
     const byte = value[index];
     if (
       !Object.hasOwn(value, index) || !Number.isInteger(byte) || byte < 0 ||
@@ -115,8 +132,9 @@ function byteArray(value: unknown, field: string): Uint8Array<ArrayBuffer> {
     ) {
       throw new TypeError(`child process ${field} must be a dense byte array`);
     }
+    result[index] = byte;
   }
-  return Uint8Array.from(value as number[]);
+  return result;
 }
 
 function u32Arg(args: Record<string, unknown>, field: string): number {
@@ -131,77 +149,90 @@ function u32Arg(args: Record<string, unknown>, field: string): number {
 }
 
 function decodeList(value: unknown, field: string): string[] {
-  const bytes = byteArray(value, field);
+  const maxBytes = field === "argv" ? MAX_ARGV_BYTES : MAX_ENV_BYTES;
+  const bytes = byteArray(value, field, maxBytes, "256 KiB");
+  // Zero bytes encode no entries; producers must reject empty strings before joining.
   if (bytes.length === 0) return [];
-  return decoder.decode(bytes).split("\0");
+  const entries = decoder.decode(bytes).split("\0");
+  if (entries.some((entry) => entry.length === 0)) {
+    throw new TypeError(`child process ${field} contains an empty entry`);
+  }
+  return entries;
 }
 
 function snapshotFilesystem(root: Directory): DirectorySnapshot {
   let entries = 0;
   let bytes = 0;
-
-  const snapshotEntry = (entry: Inode): SnapshotEntry => {
-    entries++;
-    if (entries > MAX_FILESYSTEM_ENTRIES) {
-      throw new RangeError("child filesystem exceeds 10,000 entries");
-    }
-    if (entry instanceof File) {
-      bytes += entry.data.byteLength;
-      if (bytes > MAX_FILESYSTEM_BYTES) {
-        throw new RangeError("child filesystem exceeds 64 MiB");
-      }
-      return {
-        kind: "file",
-        inode: entry,
-        data: entry.data.slice(),
-        readonly: entry.readonly,
-      };
-    }
-    if (entry instanceof Directory) {
-      return {
-        kind: "directory",
-        inode: entry,
-        entries: new Map(
-          [...entry.contents].map((
-            [name, child],
-          ) => [name, snapshotEntry(child)]),
-        ),
-      };
-    }
-    throw new TypeError("child filesystem contains an unsupported inode");
-  };
-
-  return {
+  const rootSnapshot: DirectorySnapshot = {
     kind: "directory",
     inode: root,
-    entries: new Map(
-      [...root.contents].map(([name, entry]) => [name, snapshotEntry(entry)]),
-    ),
+    entries: new Map(),
   };
+  const visited = new Set<Inode>([root]);
+  const pending: Array<[Directory, DirectorySnapshot]> = [[root, rootSnapshot]];
+
+  while (pending.length > 0) {
+    const next = pending.pop();
+    if (!next) break;
+    const [directory, directorySnapshot] = next;
+    for (const [name, entry] of directory.contents) {
+      entries++;
+      if (entries > MAX_FILESYSTEM_ENTRIES) {
+        throw new RangeError("child filesystem exceeds 10,000 entries");
+      }
+      if (visited.has(entry)) {
+        throw new TypeError(
+          "child filesystem contains a cyclic or shared inode",
+        );
+      }
+      visited.add(entry);
+
+      let entrySnapshot: SnapshotEntry;
+      if (entry instanceof File) {
+        bytes += entry.data.byteLength;
+        if (bytes > MAX_FILESYSTEM_BYTES) {
+          throw new RangeError("child filesystem exceeds 64 MiB");
+        }
+        entrySnapshot = {
+          kind: "file",
+          inode: entry,
+          data: entry.data.slice(),
+          readonly: entry.readonly,
+        };
+      } else if (entry instanceof Directory) {
+        entrySnapshot = {
+          kind: "directory",
+          inode: entry,
+          entries: new Map(),
+        };
+        pending.push([entry, entrySnapshot]);
+      } else {
+        throw new TypeError("child filesystem contains an unsupported inode");
+      }
+      directorySnapshot.entries.set(name, entrySnapshot);
+    }
+  }
+
+  return rootSnapshot;
 }
 
 function restoreFilesystem(root: Directory, snapshot: DirectorySnapshot) {
-  const restoreEntry = (entry: SnapshotEntry): Inode => {
-    if (entry.kind === "file") {
-      entry.inode.data = entry.data.slice();
-      entry.inode.readonly = entry.readonly;
-      return entry.inode;
-    }
-    restoreDirectory(entry.inode, entry);
-    return entry.inode;
-  };
-
-  const restoreDirectory = (
-    directory: Directory,
-    directorySnapshot: DirectorySnapshot,
-  ) => {
+  const pending: Array<[Directory, DirectorySnapshot]> = [[root, snapshot]];
+  while (pending.length > 0) {
+    const next = pending.pop();
+    if (!next) break;
+    const [directory, directorySnapshot] = next;
     directory.contents.clear();
     for (const [name, entry] of directorySnapshot.entries) {
-      directory.contents.set(name, restoreEntry(entry));
+      if (entry.kind === "file") {
+        entry.inode.data = entry.data.slice();
+        entry.inode.readonly = entry.readonly;
+      } else {
+        pending.push([entry.inode, entry]);
+      }
+      directory.contents.set(name, entry.inode);
     }
-  };
-
-  restoreDirectory(root, snapshot);
+  }
 }
 
 function stateMetadata(request: RequestState): StateMetadata {
@@ -315,15 +346,17 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
       if (expectedModuleBytes > MAX_MODULE_BYTES) {
         throw new RangeError("child module exceeds 16 MiB");
       }
+      const decodedArgs = decodeList(args.argv, "argv");
+      const decodedEnv = decodeList(args.env, "env");
       const baseline = snapshotFilesystem(options.filesystemRoot);
       const id = nextRequestId++;
       const current: RequestState = {
         id,
         state: 1,
-        args: decodeList(args.argv, "argv"),
-        env: decodeList(args.env, "env"),
+        args: decodedArgs,
+        env: decodedEnv,
         expectedModuleBytes,
-        moduleChunks: [],
+        module: new Uint8Array(expectedModuleBytes),
         uploadedModuleBytes: 0,
         baseline,
         timer: 0,
@@ -340,9 +373,14 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
         throw new Error("child process is not uploading");
       }
       try {
-        const chunk = byteArray(args.chunk, "module chunk");
-        if (chunk.length > MAX_MODULE_CHUNK_BYTES) {
-          throw new RangeError("child module chunk exceeds 256 KiB");
+        const chunk = byteArray(
+          args.chunk,
+          "module chunk",
+          MAX_MODULE_CHUNK_BYTES,
+          "256 KiB",
+        );
+        if (chunk.length === 0) {
+          throw new RangeError("child module chunk must not be empty");
         }
         if (
           chunk.length >
@@ -350,7 +388,7 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
         ) {
           throw new RangeError("child module upload exceeds declared length");
         }
-        current.moduleChunks.push(chunk);
+        current.module.set(chunk, current.uploadedModuleBytes);
         current.uploadedModuleBytes += chunk.length;
         refreshUploadTimer(current);
         return { request_id: current.id, ...stateMetadata(current) };
@@ -373,13 +411,8 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
         throw error;
       }
       timers.clearTimeout(current.timer);
-      const module = new Uint8Array(current.expectedModuleBytes);
-      let offset = 0;
-      for (const chunk of current.moduleChunks) {
-        module.set(chunk, offset);
-        offset += chunk.length;
-      }
-      current.moduleChunks = [];
+      const module = current.module;
+      current.module = new Uint8Array();
       current.state = 2;
       const runResult = new Promise<StateMetadata>((resolve) => {
         current.resolveRun = resolve;

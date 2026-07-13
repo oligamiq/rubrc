@@ -61,8 +61,10 @@ function message<Name extends ChildProcessMessage["name"]>(
 class FakeClock {
   #nextId = 1;
   #callbacks = new Map<number, () => void>();
+  scheduled = 0;
 
   setTimeout = (callback: () => void, _delay: number) => {
+    this.scheduled++;
     const id = this.#nextId++;
     this.#callbacks.set(id, callback);
     return id;
@@ -76,6 +78,10 @@ class FakeClock {
     const callbacks = [...this.#callbacks.values()];
     this.#callbacks.clear();
     callbacks.forEach((callback) => callback());
+  }
+
+  get pending() {
+    return this.#callbacks.size;
   }
 }
 
@@ -304,6 +310,202 @@ Deno.test("bridge enforces module and chunk bounds and exact upload length", asy
       .state,
     0,
   );
+});
+
+Deno.test("zero-length writes abort without refreshing upload inactivity", async () => {
+  const root = new Directory(new Map([["stable", new File([1])]]));
+  const { bridge, clock } = fakeSetup(root);
+  const started = await bridge(message("childProcessStart", {
+    argv: [],
+    env: [],
+    module_len: 1,
+  })) as { request_id: number };
+  const scheduledBefore = clock.scheduled;
+  root.contents.set("stable", new File([2]));
+
+  await assertRejects(
+    () =>
+      bridge(message("childProcessWrite", {
+        request_id: started.request_id,
+        chunk: [],
+      })),
+    "empty",
+  );
+
+  assertEquals(
+    clock.scheduled,
+    scheduledBefore,
+    "empty write refreshed timeout",
+  );
+  assertEquals(clock.pending, 0, "empty write retained upload timeout");
+  assertEquals(Array.from((root.contents.get("stable") as File).data), [1]);
+  assertEquals(await bridge(message("childProcessRecover", {})), {
+    request_id: 0,
+    state: 0,
+    status: 0,
+    error_len: 0,
+  });
+});
+
+Deno.test("tiny positive writes assemble one exact bounded module", async () => {
+  const { bridge, clock, workers } = fakeSetup();
+  const module = new Uint8Array(4096);
+  for (let index = 0; index < module.length; index++) {
+    module[index] = index % 251;
+  }
+  const started = await bridge(message("childProcessStart", {
+    argv: Array.from(encoder.encode("child")),
+    env: [],
+    module_len: module.length,
+  })) as { request_id: number };
+  for (const byte of module) {
+    await bridge(message("childProcessWrite", {
+      request_id: started.request_id,
+      chunk: [byte],
+    }));
+  }
+  assertEquals(clock.pending, 1, "positive progress retained multiple timers");
+  assertEquals(
+    clock.scheduled,
+    module.length + 1,
+    "positive progress did not refresh timer",
+  );
+  const run = bridge(
+    message("childProcessRun", { request_id: started.request_id }),
+  );
+  assertEquals(
+    Array.from(
+      new Uint8Array((workers[0].posted as { module: ArrayBuffer }).module),
+    ),
+    Array.from(module),
+    "tiny writes changed module bytes",
+  );
+  workers[0].finish({ status: 0, graceful: true });
+  await run;
+});
+
+Deno.test("raw argv env and module chunk caps reject before element traversal", async () => {
+  const hostile = () => {
+    const value: number[] = [];
+    value.length = 256 * 1024 + 1;
+    Object.defineProperty(value, 0, {
+      get() {
+        throw new Error("hostile array was traversed");
+      },
+    });
+    return value;
+  };
+
+  await assertRejects(
+    () =>
+      fakeSetup().bridge(message("childProcessStart", {
+        argv: hostile(),
+        env: [],
+        module_len: 0,
+      })),
+    "argv exceeds 256 KiB",
+  );
+  await assertRejects(
+    () =>
+      fakeSetup().bridge(message("childProcessStart", {
+        argv: [],
+        env: hostile(),
+        module_len: 0,
+      })),
+    "env exceeds 256 KiB",
+  );
+
+  const { bridge } = fakeSetup();
+  const started = await bridge(message("childProcessStart", {
+    argv: [],
+    env: [],
+    module_len: 16 * 1024 * 1024,
+  })) as { request_id: number };
+  await assertRejects(
+    () =>
+      bridge(message("childProcessWrite", {
+        request_id: started.request_id,
+        chunk: hostile(),
+      })),
+    "module chunk exceeds 256 KiB",
+  );
+});
+
+Deno.test("byte conversion ignores caller-controlled array iterators", async () => {
+  const chunk = [91];
+  chunk[Symbol.iterator] = () => {
+    throw new Error("caller iterator was traversed");
+  };
+  const { bridge } = fakeSetup();
+  const started = await bridge(message("childProcessStart", {
+    argv: [],
+    env: [],
+    module_len: 1,
+  })) as { request_id: number };
+
+  await bridge(message("childProcessWrite", {
+    request_id: started.request_id,
+    chunk,
+  }));
+});
+
+Deno.test("byte conversion rejects non-numeric proxy array lengths", async () => {
+  const fakeLength = {
+    valueOf: () => 1,
+    [Symbol.iterator]: () => {
+      throw new Error("proxy length iterator was traversed");
+    },
+  };
+  const chunk = new Proxy([91], {
+    get(target, property, receiver) {
+      if (property === "length") return fakeLength;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const { bridge } = fakeSetup();
+  const started = await bridge(message("childProcessStart", {
+    argv: [],
+    env: [],
+    module_len: 1,
+  })) as { request_id: number };
+
+  await assertRejects(
+    () =>
+      bridge(message("childProcessWrite", {
+        request_id: started.request_id,
+        chunk,
+      })),
+    "module chunk length must be a number",
+  );
+});
+
+Deno.test("null-delimited metadata rejects empty argv and env entries", async () => {
+  await assertRejects(
+    () =>
+      fakeSetup().bridge(message("childProcessStart", {
+        argv: Array.from(encoder.encode("child\0")),
+        env: [],
+        module_len: 0,
+      })),
+    "argv contains an empty entry",
+  );
+  await assertRejects(
+    () =>
+      fakeSetup().bridge(message("childProcessStart", {
+        argv: [],
+        env: Array.from(encoder.encode("A=B\0")),
+        module_len: 0,
+      })),
+    "env contains an empty entry",
+  );
+
+  const { bridge } = fakeSetup();
+  const started = await bridge(message("childProcessStart", {
+    argv: [],
+    env: [],
+    module_len: 0,
+  })) as { request_id: number };
+  await bridge(message("childProcessEnd", { request_id: started.request_id }));
 });
 
 Deno.test("inactive upload restores its deep filesystem baseline", async () => {
@@ -536,6 +738,63 @@ Deno.test("filesystem snapshot rejects entry and byte budgets before allocation"
         message("childProcessStart", { argv: [], env: [], module_len: 0 }),
       ),
     "64 MiB",
+  );
+});
+
+Deno.test("filesystem snapshot handles a 9000-directory chain iteratively", async () => {
+  const root = new Directory(new Map());
+  let current = root;
+  for (let index = 0; index < 9000; index++) {
+    const child = new Directory(new Map());
+    current.contents.set("next", child);
+    current = child;
+  }
+  const { bridge } = fakeSetup(root);
+  const started = await bridge(message("childProcessStart", {
+    argv: [],
+    env: [],
+    module_len: 0,
+  })) as { request_id: number };
+  await bridge(message("childProcessEnd", { request_id: started.request_id }));
+  assert(
+    root.contents.get("next") instanceof Directory,
+    "deep rollback lost root",
+  );
+});
+
+Deno.test("filesystem snapshot rejects cyclic and shared inode graphs recoverably", async () => {
+  const cyclicRoot = new Directory(new Map());
+  cyclicRoot.contents.set("loop", cyclicRoot);
+  const cyclic = fakeSetup(cyclicRoot);
+  await assertRejects(
+    () =>
+      cyclic.bridge(message("childProcessStart", {
+        argv: [],
+        env: [],
+        module_len: 0,
+      })),
+    "cyclic or shared",
+  );
+  cyclicRoot.contents.clear();
+  const recovered = await cyclic.bridge(message("childProcessStart", {
+    argv: [],
+    env: [],
+    module_len: 0,
+  })) as { request_id: number };
+  await cyclic.bridge(
+    message("childProcessEnd", { request_id: recovered.request_id }),
+  );
+
+  const shared = new Directory(new Map());
+  const sharedRoot = new Directory(new Map([["a", shared], ["b", shared]]));
+  await assertRejects(
+    () =>
+      fakeSetup(sharedRoot).bridge(message("childProcessStart", {
+        argv: [],
+        env: [],
+        module_len: 0,
+      })),
+    "cyclic or shared",
   );
 });
 
