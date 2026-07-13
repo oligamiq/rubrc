@@ -265,8 +265,7 @@ fn reconcile_diff_with_limits(
             continue;
         }
 
-        tree.entries
-            .retain(|existing, _| existing != &path && !existing.starts_with(&path));
+        remove_subtree_entries(&mut tree.entries, &path);
         if let Some(entry) = child.entries.get(&path) {
             tree.entries.insert(path, entry.clone());
         }
@@ -816,9 +815,7 @@ where
         if is_directory {
             lfs.remove_dir(parent, name)
                 .map_err(|_| SyncError::Vfs("remove_dir"))?;
-            for removed in descendant_paths(&expected.entries, &path) {
-                expected.entries.remove(&removed);
-            }
+            remove_subtree_entries(&mut expected.entries, &path);
         } else {
             lfs.remove_file(parent, name)
                 .map_err(|_| SyncError::Vfs("remove_file"))?;
@@ -909,10 +906,26 @@ fn affected_differences(
     path: &Path,
     include_descendants: bool,
 ) -> Vec<PathBuf> {
-    affected_candidate_paths(expected, live, path, include_descendants)
+    let mut differences = affected_candidate_paths(expected, live, path, include_descendants)
         .into_iter()
         .filter(|candidate| expected.entries.get(candidate) != live.entries.get(candidate))
-        .collect()
+        .collect::<BTreeSet<_>>();
+    if include_descendants {
+        differences.extend(
+            affected_set_paths(
+                &expected.excluded_ancestors,
+                &live.excluded_ancestors,
+                path,
+                true,
+            )
+            .into_iter()
+            .filter(|candidate| {
+                expected.excluded_ancestors.contains(candidate)
+                    != live.excluded_ancestors.contains(candidate)
+            }),
+        );
+    }
+    differences.into_iter().collect()
 }
 
 fn affected_candidate_paths(
@@ -952,6 +965,37 @@ fn descendant_paths(entries: &BTreeMap<PathBuf, SnapshotEntry>, path: &Path) -> 
             .map(|(candidate, _)| candidate.clone()),
     );
     paths
+}
+
+fn affected_set_paths(
+    expected: &BTreeSet<PathBuf>,
+    live: &BTreeSet<PathBuf>,
+    path: &Path,
+    include_descendants: bool,
+) -> BTreeSet<PathBuf> {
+    let mut candidates = BTreeSet::new();
+    if expected.contains(path) || live.contains(path) {
+        candidates.insert(path.to_path_buf());
+    }
+
+    if include_descendants {
+        for paths in [expected, live] {
+            candidates.extend(
+                paths
+                    .range(path.join("\0")..)
+                    .take_while(|candidate| candidate.starts_with(path))
+                    .cloned(),
+            );
+        }
+    }
+
+    candidates
+}
+
+fn remove_subtree_entries(entries: &mut BTreeMap<PathBuf, SnapshotEntry>, path: &Path) {
+    for removed in descendant_paths(entries, path) {
+        entries.remove(&removed);
+    }
 }
 
 fn vfs_parent_and_name<'a>(
@@ -1294,6 +1338,137 @@ mod tests {
     }
 
     #[test]
+    fn mutation_time_recheck_preserves_new_fixed_excluded_descendant() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        let cargo = lfs.add_dir(root, ".cargo").unwrap();
+        let baseline = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &[]).unwrap();
+        let desired = file_map([(".cargo", b"file")]);
+        let mut created = false;
+
+        let conflicts = apply_vfs_snapshot_rechecked(
+            &lfs,
+            root,
+            &baseline,
+            &desired,
+            DEFAULT_SYNC_LIMITS,
+            |path| {
+                if path == Path::new(".cargo") && !created {
+                    let registry = lfs.add_dir(cargo, "registry").unwrap();
+                    lfs.add_file(registry, "cache", b"cache".to_vec()).unwrap();
+                    created = true;
+                }
+            },
+        )
+        .unwrap();
+
+        assert_eq!(conflicts, vec![PathBuf::from(".cargo")]);
+        let registry = vfs_child(&lfs, cargo, "registry").unwrap();
+        let cache = vfs_child(&lfs, registry, "cache").unwrap();
+        assert_eq!(lfs.read_file(cache).unwrap(), b"cache");
+    }
+
+    #[test]
+    fn mutation_time_recheck_preserves_new_runtime_excluded_descendant() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        let workspace = lfs.add_dir(root, "workspace").unwrap();
+        let exclusions = vec![PathBuf::from("workspace/build")];
+        let baseline = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &exclusions).unwrap();
+        let mut desired = file_map([("workspace", b"file")]);
+        desired.runtime_exclusions = exclusions;
+        let mut created = false;
+
+        let conflicts = apply_vfs_snapshot_rechecked(
+            &lfs,
+            root,
+            &baseline,
+            &desired,
+            DEFAULT_SYNC_LIMITS,
+            |path| {
+                if path == Path::new("workspace") && !created {
+                    let build = lfs.add_dir(workspace, "build").unwrap();
+                    lfs.add_file(build, "output", b"output".to_vec()).unwrap();
+                    created = true;
+                }
+            },
+        )
+        .unwrap();
+
+        assert_eq!(conflicts, vec![PathBuf::from("workspace")]);
+        let build = vfs_child(&lfs, workspace, "build").unwrap();
+        let output = vfs_child(&lfs, build, "output").unwrap();
+        assert_eq!(lfs.read_file(output).unwrap(), b"output");
+    }
+
+    #[test]
+    fn mutation_time_file_recheck_ignores_unobserved_excluded_siblings() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        let workspace = lfs.add_dir(root, "workspace").unwrap();
+        let build = lfs.add_dir(workspace, "build").unwrap();
+        lfs.add_file(build, "output", b"output".to_vec()).unwrap();
+        let src = lfs.add_dir(workspace, "src").unwrap();
+        lfs.add_file(src, "main.rs", b"before".to_vec()).unwrap();
+        let exclusions = vec![PathBuf::from("workspace/build")];
+        let baseline = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &exclusions).unwrap();
+        let mut desired = baseline.clone();
+        desired.entries.insert(
+            PathBuf::from("workspace/src/main.rs"),
+            SnapshotEntry::file(b"after".to_vec()),
+        );
+
+        let conflicts = apply_vfs_snapshot_rechecked(
+            &lfs,
+            root,
+            &baseline,
+            &desired,
+            DEFAULT_SYNC_LIMITS,
+            |_| {},
+        )
+        .unwrap();
+
+        assert!(conflicts.is_empty());
+        let main = vfs_child(&lfs, src, "main.rs").unwrap();
+        assert_eq!(lfs.read_file(main).unwrap(), b"after");
+    }
+
+    #[test]
+    fn mutation_time_directory_recheck_ignores_unobserved_excluded_siblings() {
+        let lfs = LFS::new();
+        let root = lfs.add_preopen(".");
+        let workspace = lfs.add_dir(root, "workspace").unwrap();
+        let build = lfs.add_dir(workspace, "build").unwrap();
+        lfs.add_file(build, "output", b"output".to_vec()).unwrap();
+        let src = lfs.add_dir(workspace, "src").unwrap();
+        lfs.add_file(src, "main.rs", b"source".to_vec()).unwrap();
+        let exclusions = vec![PathBuf::from("workspace/build")];
+        let baseline = snapshot_vfs(&lfs, root, DEFAULT_SYNC_LIMITS, &exclusions).unwrap();
+        let mut desired = baseline.clone();
+        remove_subtree_entries(&mut desired.entries, Path::new("workspace/src"));
+
+        let conflicts = apply_vfs_snapshot_rechecked(
+            &lfs,
+            root,
+            &baseline,
+            &desired,
+            DEFAULT_SYNC_LIMITS,
+            |_| {},
+        )
+        .unwrap();
+
+        assert!(conflicts.is_empty());
+        assert!(
+            lfs.read_dir(workspace)
+                .unwrap()
+                .iter()
+                .all(|(name, _)| name != "src")
+        );
+        let output = vfs_child(&lfs, build, "output").unwrap();
+        assert_eq!(lfs.read_file(output).unwrap(), b"output");
+    }
+
+    #[test]
     fn mutation_recheck_snapshots_only_the_affected_branch() {
         let lfs = LFS::new();
         let root = lfs.add_preopen(".");
@@ -1339,6 +1514,28 @@ mod tests {
             candidates,
             BTreeSet::from([PathBuf::from("changed/file.txt")])
         );
+    }
+
+    #[test]
+    fn reconciliation_subtree_removal_is_bounded_to_changed_branch() {
+        let mut entries = BTreeMap::new();
+        for index in 0..10_000 {
+            entries.insert(
+                PathBuf::from(format!("unrelated/{index:05}.txt")),
+                SnapshotEntry::file(b"same".to_vec()),
+            );
+        }
+        entries.insert(PathBuf::from("changed"), SnapshotEntry::directory());
+        entries.insert(
+            PathBuf::from("changed/child.txt"),
+            SnapshotEntry::file(b"child".to_vec()),
+        );
+
+        remove_subtree_entries(&mut entries, Path::new("changed"));
+
+        assert_eq!(entries.len(), 10_000);
+        assert!(!entries.contains_key(Path::new("changed")));
+        assert!(!entries.contains_key(Path::new("changed/child.txt")));
     }
 
     #[test]
