@@ -1,4 +1,5 @@
 import type { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
+import { createChildProcessImports } from "./child_process_import.ts";
 import { createHttpImports } from "./http_import.ts";
 import { type ImportObject, instantiate } from "./vfs.js";function snakeToCamel(snakeCaseString) {
 	return snakeCaseString
@@ -138,6 +139,7 @@ export const custom_instantiate = async (
             view8.set(chunk_bytes, data_ptr);
           },
         },
+        ChildProcess: createChildProcessImports(memory, call_unknown_fn),
         Http: createHttpImports(memory, call_unknown_fn),
         Terminal: {
           terminalWrite: (session_id: number, data_ptr: number, data_len: number) => {

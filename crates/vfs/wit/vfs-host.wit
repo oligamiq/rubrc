@@ -29,6 +29,15 @@ interface bridge {
     response-read-error: static func(request-id: u32, data-ptr: s32, data-len: s32) -> s32;
     response-end: static func(request-id: u32) -> s32;
   }
+
+  resource child-process {
+    request-start: static func(argv-ptr: s32, argv-len: s32, env-ptr: s32, env-len: s32, module-len: s32, out-request-id: s32) -> s32;
+    request-write: static func(request-id: u32, data-ptr: s32, data-len: s32) -> s32;
+    request-run: static func(request-id: u32, out-status: s32, out-error-len: s32) -> s32;
+    request-read-error: static func(request-id: u32, data-ptr: s32, data-len: s32) -> s32;
+    request-recover: static func(out-request-id: s32, out-state: s32, out-status: s32, out-error-len: s32) -> s32;
+    request-end: static func(request-id: u32) -> s32;
+  }
 }
 
 world vfs-host {
