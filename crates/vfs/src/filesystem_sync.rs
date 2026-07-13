@@ -242,15 +242,9 @@ fn reconcile_diff_with_limits(
         .keys()
         .chain(current_vfs.entries.keys())
         .filter(|path| current_vfs.entries.get(*path) != baseline.entries.get(*path))
-        .filter(|path| {
-            changed
-                .iter()
-                .any(|change| path.starts_with(change) || change.starts_with(*path))
-        })
+        .filter(|path| has_ancestor_or_descendant(path, &changed))
         .cloned()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
+        .collect::<BTreeSet<_>>();
 
     let mut tree = current_vfs.clone();
     tree.runtime_exclusions = baseline.runtime_exclusions.clone();
@@ -258,10 +252,7 @@ fn reconcile_diff_with_limits(
     changes.sort_by_key(|path| path.components().count());
 
     for path in changes {
-        if conflicts
-            .iter()
-            .any(|conflict| path.starts_with(conflict) || conflict.starts_with(&path))
-        {
+        if has_ancestor_or_descendant(&path, &conflicts) {
             continue;
         }
 
@@ -273,7 +264,10 @@ fn reconcile_diff_with_limits(
 
     let (entry_count, byte_count) = snapshot_size(&tree);
     check_configured_limits(entry_count, byte_count, limits)?;
-    Ok(ReconcileResult { tree, conflicts })
+    Ok(ReconcileResult {
+        tree,
+        conflicts: conflicts.into_iter().collect(),
+    })
 }
 
 fn reconcile_authoritative(
@@ -793,7 +787,7 @@ where
     removals.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
 
     for (path, is_directory) in removals {
-        if is_related_to_conflict(&path, &conflicts) {
+        if has_ancestor_or_descendant(&path, &conflicts) {
             continue;
         }
         before_mutation(&path);
@@ -831,7 +825,7 @@ where
         .collect::<Vec<_>>();
     directories.sort_by_key(|path| path.components().count());
     for path in directories {
-        if is_related_to_conflict(&path, &conflicts) {
+        if has_ancestor_or_descendant(&path, &conflicts) {
             continue;
         }
         before_mutation(&path);
@@ -852,7 +846,7 @@ where
     for (path, entry) in &desired.entries {
         if entry.is_directory()
             || current.entries.get(path) == Some(entry)
-            || is_related_to_conflict(path, &conflicts)
+            || has_ancestor_or_descendant(path, &conflicts)
             || preserves_excluded_state(path, current, desired)
         {
             continue;
@@ -885,19 +879,19 @@ where
     Ok(conflicts.into_iter().collect())
 }
 
-fn is_related_to_conflict(path: &Path, conflicts: &BTreeSet<PathBuf>) -> bool {
+fn has_ancestor_or_descendant(path: &Path, paths: &BTreeSet<PathBuf>) -> bool {
     let mut ancestor = Some(path);
     while let Some(candidate) = ancestor.filter(|path| !path.as_os_str().is_empty()) {
-        if conflicts.contains(candidate) {
+        if paths.contains(candidate) {
             return true;
         }
         ancestor = candidate.parent();
     }
 
-    conflicts
+    paths
         .range(path.join("\0")..)
         .next()
-        .is_some_and(|conflict| conflict.starts_with(path))
+        .is_some_and(|candidate| candidate.starts_with(path))
 }
 
 fn affected_differences(
@@ -1536,6 +1530,30 @@ mod tests {
         assert_eq!(entries.len(), 10_000);
         assert!(!entries.contains_key(Path::new("changed")));
         assert!(!entries.contains_key(Path::new("changed/child.txt")));
+    }
+
+    #[test]
+    fn reconciliation_relation_lookup_ignores_unrelated_paths() {
+        let mut paths = (0..10_000)
+            .map(|index| PathBuf::from(format!("unrelated/{index:05}.txt")))
+            .collect::<BTreeSet<_>>();
+
+        assert!(!has_ancestor_or_descendant(
+            Path::new("changed/file.txt"),
+            &paths
+        ));
+
+        paths.insert(PathBuf::from("changed"));
+        assert!(has_ancestor_or_descendant(
+            Path::new("changed/file.txt"),
+            &paths
+        ));
+        paths.remove(Path::new("changed"));
+        paths.insert(PathBuf::from("changed/file.txt/child"));
+        assert!(has_ancestor_or_descendant(
+            Path::new("changed/file.txt"),
+            &paths
+        ));
     }
 
     #[test]
