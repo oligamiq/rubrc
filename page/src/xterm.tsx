@@ -14,6 +14,11 @@ import {
 import type { Ctx } from "./ctx";
 import { rust_file } from "./config";
 import { createHttpBridge, isHttpBridgeMessage } from "../../lib/src/http_bridge";
+import {
+  createChildProcessBridge,
+  createChildProcessWasiSession,
+  isChildProcessMessage,
+} from "../../lib/src/child_process_bridge";
 import { createCratesProxyFetch } from "../../lib/src/proxy";
 
 wait_async_polyfill();
@@ -327,11 +332,31 @@ edition = "2021"
     proxyBaseUrl: "https://proxy.rubrc.workers.dev",
   });
   const httpBridge = createHttpBridge(cratesProxyFetch);
+  let farm: WASIFarm;
+  const stdin = new XtermStdio(term);
+  const stdout = new XtermStdio(term);
+  const stderr = new XtermStderr(term);
+  const childBridge = createChildProcessBridge({
+    createWasiSession: () =>
+      createChildProcessWasiSession(
+        stdin,
+        stdout,
+        stderr,
+        [new PreopenDirectory("/", root_dir.dir.contents)],
+      ),
+    workerUrl: new URL(
+      "./worker_process/vfs_bindings/child_process_worker.ts",
+      import.meta.url,
+    ),
+    filesystemRoot: root_dir.dir,
+    uploadTimeoutMs: 30000,
+    executionTimeoutMs: 120000,
+  });
 
-  const farm = new WASIFarm(
-    new XtermStdio(term),
-    new XtermStdio(term),
-    new XtermStderr(term),
+  farm = new WASIFarm(
+    stdin,
+    stdout,
+    stderr,
     [root_dir],
     {
       allocator_size: 100 * 1024 * 1024, // 100MB
@@ -339,6 +364,8 @@ edition = "2021"
       unknown_fn: async (unknown: any) => {
         if (isHttpBridgeMessage(unknown)) {
           return await httpBridge(unknown);
+        } else if (isChildProcessMessage(unknown)) {
+          return await childBridge(unknown);
         } else if (unknown.name === "downloadFileStart") {
           download_name = unknown.args.name;
           download_chunks = [];

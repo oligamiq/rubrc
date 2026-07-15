@@ -1,5 +1,18 @@
 /** @module Interface vfs:host/bridge **/
 
+export class ChildProcess {
+  /**
+   * This type does not have a public constructor.
+   */
+  private constructor();
+  static requestStart(argvPtr: number, argvLen: number, envPtr: number, envLen: number, moduleLen: number, outRequestId: number): number;
+  static requestWrite(requestId: number, dataPtr: number, dataLen: number): number;
+  static requestRun(requestId: number, outStatus: number, outErrorLen: number): number;
+  static requestReadError(requestId: number, dataPtr: number, dataLen: number): number;
+  static requestRecover(outRequestId: number, outState: number, outStatus: number, outErrorLen: number): number;
+  static requestEnd(requestId: number): number;
+}
+
 export class Downloader {
   /**
    * This type does not have a public constructor.

@@ -23,4 +23,6 @@ export class Wasip1 {
   static pathOpenImport(fd: number, dirflags: number, pathPtr: number, pathLen: number, oflags: number, fsRightsBase: bigint, fsRightsInheriting: bigint, fdflags: number, fdOutPtr: number): number;
   static pathCreateDirectoryImport(fd: number, pathPtr: number, pathLen: number): number;
   static pathFilestatGetImport(fd: number, lookupflags: number, pathPtr: number, pathLen: number, filestatPtr: number): number;
+  static pathRemoveDirectoryImport(fd: number, pathPtr: number, pathLen: number): number;
+  static pathUnlinkFileImport(fd: number, pathPtr: number, pathLen: number): number;
 }

@@ -1,4 +1,10 @@
-import { Directory, File, type Inode } from "@bjorn3/browser_wasi_shim";
+import {
+  Directory,
+  type Fd,
+  File,
+  type Inode,
+} from "@bjorn3/browser_wasi_shim";
+import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
 
 const MAX_MODULE_BYTES = 16 * 1024 * 1024;
 const MAX_MODULE_CHUNK_BYTES = 256 * 1024;
@@ -42,13 +48,48 @@ interface ChildProcessTimers {
 }
 
 export interface ChildProcessBridgeOptions {
-  getWasiRef: () => unknown;
+  createWasiSession: () => ChildProcessWasiSession;
   workerUrl: string | URL;
   filesystemRoot: Directory;
   uploadTimeoutMs: number;
   executionTimeoutMs: number;
   createWorker?: (url: string | URL, options: WorkerOptions) => ChildWorker;
   timers?: ChildProcessTimers;
+}
+
+export interface ChildProcessWasiSession {
+  wasiRef: unknown;
+  dispose(): void;
+}
+
+export function createChildProcessWasiSession(
+  stdin: Fd,
+  stdout: Fd,
+  stderr: Fd,
+  fds: Fd[],
+): ChildProcessWasiSession {
+  const farm = new WASIFarm(stdin, stdout, stderr, fds, {
+    allocator_size: 100 * 1024 * 1024,
+  });
+  const wasiRef = farm.get_ref();
+  let disposed = false;
+  return {
+    wasiRef,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      const { park } = farm as unknown as {
+        park: {
+          destroy(): void;
+          listen_base_handle?: Promise<void> | null;
+          listen_fds?: Array<Promise<void> | null>;
+        } | null;
+      };
+      park?.listen_base_handle?.catch?.(() => {});
+      for (const listener of park?.listen_fds ?? []) listener?.catch?.(() => {});
+      park?.destroy();
+    },
+  };
 }
 
 interface FileSnapshot {
@@ -64,7 +105,12 @@ interface DirectorySnapshot {
   entries: Map<string, SnapshotEntry>;
 }
 
-type SnapshotEntry = FileSnapshot | DirectorySnapshot;
+interface ExcludedSnapshot {
+  kind: "excluded";
+  inode: Inode;
+}
+
+type SnapshotEntry = FileSnapshot | DirectorySnapshot | ExcludedSnapshot;
 
 interface WorkerResult {
   status: number;
@@ -83,6 +129,7 @@ interface RequestState {
   baseline: DirectorySnapshot;
   timer: TimerHandle;
   worker?: ChildWorker;
+  wasiSession?: ChildProcessWasiSession;
   result?: WorkerResult;
   errorBytes?: Uint8Array;
   errorOffset: number;
@@ -176,6 +223,10 @@ function snapshotFilesystem(root: Directory): DirectorySnapshot {
     if (!next) break;
     const [directory, directorySnapshot] = next;
     for (const [name, entry] of directory.contents) {
+      if (directorySnapshot === rootSnapshot && name === "sysroot") {
+        directorySnapshot.entries.set(name, { kind: "excluded", inode: entry });
+        continue;
+      }
       entries++;
       if (entries > MAX_FILESYSTEM_ENTRIES) {
         throw new RangeError("child filesystem exceeds 10,000 entries");
@@ -227,7 +278,7 @@ function restoreFilesystem(root: Directory, snapshot: DirectorySnapshot) {
       if (entry.kind === "file") {
         entry.inode.data = entry.data.slice();
         entry.inode.readonly = entry.readonly;
-      } else {
+      } else if (entry.kind === "directory") {
         pending.push([entry.inode, entry]);
       }
       directory.contents.set(name, entry.inode);
@@ -308,11 +359,22 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
     timers.clearTimeout(current.timer);
     current.worker?.terminate();
     current.worker = undefined;
-    if (!result.graceful) restore(current);
-    current.result = result;
-    current.errorBytes = result.error === undefined
+    let finalResult = result;
+    try {
+      current.wasiSession?.dispose();
+    } catch (error) {
+      finalResult = {
+        status: 126,
+        error: `Failed to dispose child WASI session: ${String(error)}`,
+        graceful: false,
+      };
+    }
+    current.wasiSession = undefined;
+    if (!finalResult.graceful) restore(current);
+    current.result = finalResult;
+    current.errorBytes = finalResult.error === undefined
       ? new Uint8Array()
-      : encoder.encode(result.error);
+      : encoder.encode(finalResult.error);
     current.errorOffset = 0;
     current.state = 3;
     const resolve = current.resolveRun;
@@ -324,6 +386,12 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
     timers.clearTimeout(current.timer);
     current.worker?.terminate();
     current.worker = undefined;
+    try {
+      current.wasiSession?.dispose();
+    } catch {
+      // Filesystem recovery must proceed even if host resource cleanup fails.
+    }
+    current.wasiSession = undefined;
     restore(current);
     request = undefined;
     if (current.resolveRun) {
@@ -453,11 +521,12 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
             graceful: false,
           });
         }, options.executionTimeoutMs);
-        const wasiRef = options.getWasiRef();
+        const wasiSession = options.createWasiSession();
+        current.wasiSession = wasiSession;
         worker.postMessage(
           {
             module: module.buffer,
-            wasiRef,
+            wasiRef: wasiSession.wasiRef,
             args: current.args,
             env: current.env,
           },

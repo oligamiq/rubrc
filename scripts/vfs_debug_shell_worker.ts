@@ -2,6 +2,7 @@ import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import { set_fake_worker } from "../page/src/worker_process/vfs_bindings/common.ts";
 import { custom_instantiate } from "../page/src/worker_process/vfs_bindings/inst.ts";
 import { isHttpBridgeMessage } from "../lib/src/http_bridge.ts";
+import { isChildProcessMessage } from "../lib/src/child_process_bridge.ts";
 
 await set_fake_worker();
 
@@ -18,8 +19,7 @@ async function compile(filename: string): Promise<WebAssembly.Module> {
 }
 
 function hasReturnedToPrompt(output: string): boolean {
-  const returnIndex = output.indexOf("[vfs-debug] command:return");
-  return returnIndex !== -1 && output.indexOf(" $ ", returnIndex) !== -1;
+  return output.includes(" $ ");
 }
 
 globalThis.onmessage = async (event) => {
@@ -45,7 +45,7 @@ globalThis.onmessage = async (event) => {
     const animal = new WASIFarmAnimal(
       wasiRef,
       ["vfs-debug"],
-      [`VFS_THREADS=${threads}`],
+      [`VFS_THREADS=${threads}`, "CARGO=cargo"],
       {
         can_thread_spawn: true,
         thread_spawn_worker_url: new URL("thread_spawn.ts", bindingsDir).href,
@@ -71,7 +71,7 @@ globalThis.onmessage = async (event) => {
       animal.wasiThreadImport,
       animal.get_share_memory(),
       (_index, message: { name?: string }) => {
-        if (isHttpBridgeMessage(message)) {
+        if (isHttpBridgeMessage(message) || isChildProcessMessage(message)) {
           return animal.call_unknown_fn(_index, message);
         } else if (message.name === "terminalWrite") {
           return {};

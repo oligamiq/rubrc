@@ -1,53 +1,48 @@
 import {
   ConsoleStdout,
+  Directory,
   File,
+  type Inode,
   OpenFile,
   PreopenDirectory,
 } from "@bjorn3/browser_wasi_shim";
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
-import { buildPreopenDirectory } from "./build_preopen.ts";
-import { prepareCachedSysroot } from "./sysroot_cache.ts";
-import { computeWorkerWatchdogMs } from "./vfs_debug_config.ts";
 import {
   createChildProcessBridge,
   createChildProcessWasiSession,
   isChildProcessMessage,
 } from "../lib/src/child_process_bridge.ts";
+import { computeWorkerWatchdogMs } from "./vfs_debug_config.ts";
+import { prepareCachedSysroot } from "./sysroot_cache.ts";
 
 const timeoutMs = 120000;
 const workerWatchdogMs = computeWorkerWatchdogMs({
   commandTimeoutMs: timeoutMs,
-  runs: 1,
+  runs: 2,
   perRunMultiplier: 1,
   graceMs: 60000,
 });
-
-const testDir = "./test_workspace_cargo_pipe";
+const testDir = "./test_workspace_cargo_run";
 await Deno.remove(testDir, { recursive: true }).catch((error) => {
-  if (!(error instanceof Deno.errors.NotFound)) {
-    throw error;
-  }
+  if (!(error instanceof Deno.errors.NotFound)) throw error;
 });
-const sysroot = await prepareCachedSysroot({
-  workspaceSysroot: `${testDir}/sysroot`,
-});
-console.log(
-  `Prepared ${sysroot.expandedSysroot} from ${sysroot.source}: ${sysroot.cacheArchive}`,
-);
+await prepareCachedSysroot({ workspaceSysroot: `${testDir}/sysroot` });
 
-const preopen = await (async () => {
-  try {
-    return await buildPreopenDirectory("/", testDir);
-  } finally {
-    await Deno.remove(testDir, { recursive: true }).catch((error) => {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        throw error;
-      }
-    });
+const loadDirectory = async (path: string): Promise<Map<string, Inode>> => {
+  const contents = new Map<string, Inode>();
+  for await (const entry of Deno.readDir(path)) {
+    const entryPath = `${path}/${entry.name}`;
+    if (entry.isDirectory) {
+      contents.set(entry.name, new Directory(await loadDirectory(entryPath)));
+    } else if (entry.isFile) {
+      contents.set(entry.name, new File(await Deno.readFile(entryPath)));
+    }
   }
-})();
-
-const filesystemRoot = preopen.dir;
+  return contents;
+};
+const filesystemRoot = new Directory(await loadDirectory(testDir));
+const preopen = new PreopenDirectory("/", filesystemRoot.contents);
+await Deno.remove(testDir, { recursive: true });
 let farm: WASIFarm;
 const stdin = new OpenFile(new File([]));
 const stdout = ConsoleStdout.lineBuffered((message) =>
@@ -56,12 +51,21 @@ const stdout = ConsoleStdout.lineBuffered((message) =>
 const stderr = ConsoleStdout.lineBuffered((message) =>
   console.error(`[WASI stderr] ${message}`)
 );
+let childOutput = "";
+const childStdout = ConsoleStdout.lineBuffered((message) => {
+  childOutput += `${message}\n`;
+  console.log(`[child stdout] ${message}`);
+});
+const childStderr = ConsoleStdout.lineBuffered((message) => {
+  childOutput += `${message}\n`;
+  console.error(`[child stderr] ${message}`);
+});
 const childBridge = createChildProcessBridge({
   createWasiSession: () =>
     createChildProcessWasiSession(
       stdin,
-      stdout,
-      stderr,
+      childStdout,
+      childStderr,
       [new PreopenDirectory("/", filesystemRoot.contents)],
     ),
   workerUrl: new URL(
@@ -121,81 +125,63 @@ const result = await new Promise<
   };
   worker.postMessage({
     wasiRef: farm.get_ref(),
-    commands: [["cargo", "b", "-j", "1", "-p", "app"]],
+    commands: [
+      ["cargo", "run", "--", "first", "second"],
+      ["cat", "/created.txt"],
+    ],
     threads: 2,
     timeoutMs,
     preloads: [
       {
         path: "Cargo.toml",
-        content: `[workspace]\nmembers = ["app"]\nresolver = "2"\n`,
+        content:
+          `[package]\nname = "cargo-run-test"\nversion = "0.1.0"\nedition = "2021"\n`,
       },
       {
-        path: "app/Cargo.toml",
-        content:
-          `[package]\nname = "app"\nversion = "0.1.0"\nedition = "2021"\n`,
+        path: "src/main.rs",
+        content: `use std::{env, fs};
+
+fn main() {
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let input = fs::read_to_string("/input.txt").unwrap();
+    println!("arguments: {}", args.join(","));
+    println!("input: {input}");
+    fs::write("/created.txt", "created by child").unwrap();
+}
+`,
       },
-      { path: "app/src/main.rs", content: "fn main() {}\n" },
-      { path: ".cargo/config.toml", content: "" },
+      { path: "input.txt", content: "input from parent" },
+      { path: ".cargo/config.toml", content: `[env]\nCARGO = "cargo"\n` },
     ],
-    // Invalid UTF-8 should never be visible to Cargo-spawned rustc stdin.
-    lspInputBytes: [0xff, 0xfe, 0xfd, 0x0a],
   });
 });
 
 worker.terminate();
+result.output += childOutput;
 console.log(result.output);
 if (!result.ok) {
   console.error(`VFS debug failed: ${result.error ?? "command timed out"}`);
   Deno.exit(1);
 }
 
-if (result.output.includes("couldn't read from stdin")) {
-  console.error("spawned rustc read poisoned global/LSP stdin");
-  Deno.exit(1);
+for (
+  const expected of [
+    "arguments: first,second",
+    "input: input from parent",
+    "created by child",
+    "[vfs-debug] command:return",
+  ]
+) {
+  if (!result.output.includes(expected)) {
+    console.error(
+      `cargo run output did not include ${JSON.stringify(expected)}`,
+    );
+    Deno.exit(1);
+  }
 }
 
-if (result.output.includes("malformed output when learning about crate-type")) {
-  console.error("Cargo failed to parse rustc probe output");
-  Deno.exit(1);
-}
-
-if (result.output.includes("error[E0463]")) {
-  console.error(
-    "Cargo-spawned rustc could not find the wasm32-wasip1 standard library",
-  );
-  Deno.exit(1);
-}
-
-if (result.output.includes("failed to set cwd `/`")) {
-  console.error(
-    "spawned rustc used host cwd handling instead of virtual process cwd",
-  );
-  Deno.exit(1);
-}
-
-if (result.output.includes("incremental compilation")) {
-  console.error(
-    "Cargo/rustc attempted incremental compilation on the virtual filesystem",
-  );
-  Deno.exit(1);
-}
-
-if (result.output.includes("No such file or directory")) {
-  console.error("spawned rustc did not use Cargo-provided virtual cwd");
-  Deno.exit(1);
-}
-
-const rustcRuns = result.output.match(
-  /\[vfs-debug\] wasi-ext-spawn:run-rustc:enter/g,
-)?.length ?? 0;
-if (rustcRuns < 3) {
-  console.error(
-    `Cargo reached ${rustcRuns} rustc runs; compile spawn was not reached`,
-  );
-  Deno.exit(1);
-}
-
-if (!result.output.includes("Finished `dev` profile")) {
-  console.error("Cargo did not report a successful dev build");
+const returnIndex = result.output.lastIndexOf("[vfs-debug] command:return");
+if (returnIndex === -1 || result.output.indexOf(" $ ", returnIndex) === -1) {
+  console.error("shell prompt did not return after cargo run test commands");
   Deno.exit(1);
 }

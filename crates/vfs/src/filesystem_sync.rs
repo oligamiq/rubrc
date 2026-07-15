@@ -352,6 +352,74 @@ pub(crate) fn import_host_authoritative(
     Ok(desired)
 }
 
+pub(crate) fn import_host_sysroot(
+    lfs: &LFS,
+    root: usize,
+    host_root: &Path,
+    limits: SyncLimits,
+) -> Result<(), SyncError> {
+    let limits = SyncLimits {
+        max_entries: limits.max_entries,
+        max_bytes: 256 * 1024 * 1024,
+    };
+    let host_sysroot = host_root.join("sysroot");
+    if !host_sysroot.is_dir() {
+        return Ok(());
+    }
+
+    fn import_dir(
+        lfs: &LFS,
+        vfs_parent: usize,
+        host_dir: &Path,
+        entries: &mut usize,
+        bytes: &mut usize,
+        limits: SyncLimits,
+    ) -> Result<(), SyncError> {
+        let mut children = std::fs::read_dir(host_dir)
+            .map_err(io_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(io_error)?;
+        children.sort_by_key(|entry| entry.file_name());
+        for child in children {
+            let name = child
+                .file_name()
+                .into_string()
+                .map_err(|name| SyncError::InvalidPath(PathBuf::from(name)))?;
+            *entries += 1;
+            check_configured_limits(*entries, *bytes, limits)?;
+            let file_type = child.file_type().map_err(io_error)?;
+            if file_type.is_dir() {
+                let inode = lfs
+                    .add_dir(vfs_parent, &name)
+                    .map_err(|_| SyncError::Vfs("add_dir"))?;
+                import_dir(lfs, inode, &child.path(), entries, bytes, limits)?;
+            } else if file_type.is_file() {
+                let data = std::fs::read(child.path()).map_err(io_error)?;
+                *bytes = check_file_size(*bytes, data.len(), limits)?;
+                lfs.add_file(vfs_parent, &name, data)
+                    .map_err(|_| SyncError::Vfs("add_file"))?;
+            } else {
+                return Err(SyncError::UnsupportedFileType(child.path()));
+            }
+        }
+        Ok(())
+    }
+
+    let sysroot = lfs
+        .add_dir(root, "sysroot")
+        .map_err(|_| SyncError::Vfs("add_dir"))?;
+    let mut entries = 1;
+    let mut bytes = 0;
+    import_dir(
+        lfs,
+        sysroot,
+        &host_sysroot,
+        &mut entries,
+        &mut bytes,
+        limits,
+    )
+}
+
 pub(crate) fn runtime_exclusions_from_child(
     cargo_target_dir: Option<&Path>,
     executable: &Path,

@@ -115,8 +115,12 @@ function fakeSetup(root = new Directory(new Map())) {
   const workers: FakeWorker[] = [];
   const clock = new FakeClock();
   const wasiRef = { inherited: "farm-ref" };
+  let disposedSessions = 0;
   const options: ChildProcessBridgeOptions = {
-    getWasiRef: () => wasiRef,
+    createWasiSession: () => ({
+      wasiRef,
+      dispose: () => disposedSessions++,
+    }),
     workerUrl,
     filesystemRoot: root,
     uploadTimeoutMs: 30_000,
@@ -131,6 +135,9 @@ function fakeSetup(root = new Directory(new Map())) {
   return {
     bridge: createChildProcessBridge(options),
     clock,
+    get disposedSessions() {
+      return disposedSessions;
+    },
     root,
     wasiRef,
     workers,
@@ -174,7 +181,7 @@ async function compileWat(name: string, wat: string) {
 
 function realBridge(root: PreopenDirectory, farm: WASIFarm, timeout = 120_000) {
   return createChildProcessBridge({
-    getWasiRef: () => farm.get_ref(),
+    createWasiSession: () => ({ wasiRef: farm.get_ref(), dispose: () => {} }),
     workerUrl,
     filesystemRoot: root.dir,
     uploadTimeoutMs: 30_000,
@@ -200,7 +207,7 @@ Deno.test("child process message guard accepts only protocol messages", () => {
 Deno.test("bridge rejects timeout values that overflow platform timers", () => {
   const root = new Directory(new Map());
   const base = {
-    getWasiRef: () => ({}),
+    createWasiSession: () => ({ wasiRef: {}, dispose: () => {} }),
     workerUrl,
     filesystemRoot: root,
     uploadTimeoutMs: 30_000,
@@ -215,8 +222,9 @@ Deno.test("bridge rejects timeout values that overflow platform timers", () => {
   throw new Error("overflowing execution timeout was accepted");
 });
 
-Deno.test("bridge uploads one child, runs with inherited ref, and retains completion", async () => {
-  const { bridge, wasiRef, workers } = fakeSetup();
+Deno.test("bridge uploads one child, runs with an isolated session, and retains completion", async () => {
+  const setup = fakeSetup();
+  const { bridge, wasiRef, workers } = setup;
   const module = new Uint8Array(256 * 1024 + 2).fill(7);
   const requestId = await start(bridge, module);
   await assertRejects(
@@ -237,6 +245,7 @@ Deno.test("bridge uploads one child, runs with inherited ref, and retains comple
   workers[0].finish({ status: 0, graceful: true });
   assertEquals(await run, { state: 3, status: 0, error_len: 0 });
   assert(workers[0].terminated, "completed Worker was not terminated");
+  assertEquals(setup.disposedSessions, 1, "completed session was not disposed");
   assertEquals(
     await bridge(message("childProcessRecover", {})),
     { request_id: requestId, state: 3, status: 0, error_len: 0 },
@@ -659,7 +668,7 @@ Deno.test("synchronous Worker completion resolves run without a race", async () 
     worker.finish({ status: 7, graceful: true });
   };
   const bridge = createChildProcessBridge({
-    getWasiRef: () => ({}),
+    createWasiSession: () => ({ wasiRef: {}, dispose: () => {} }),
     workerUrl,
     filesystemRoot: root,
     uploadTimeoutMs: 30_000,
@@ -683,7 +692,7 @@ Deno.test("Worker setup failure rolls back and returns readable terminal metadat
   const originalFile = new File([1]);
   const root = new Directory(new Map([["stable", originalFile]]));
   const bridge = createChildProcessBridge({
-    getWasiRef: () => {
+    createWasiSession: () => {
       root.contents.set("stable", new File([2]));
       throw new Error("farm unavailable");
     },

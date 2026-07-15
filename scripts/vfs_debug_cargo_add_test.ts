@@ -1,10 +1,21 @@
-import { ConsoleStdout, File, OpenFile } from "@bjorn3/browser_wasi_shim";
+import {
+  ConsoleStdout,
+  Directory,
+  File,
+  OpenFile,
+  PreopenDirectory,
+} from "@bjorn3/browser_wasi_shim";
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
 import {
   createHttpBridge,
   isHttpBridgeMessage,
 } from "../lib/src/http_bridge.ts";
 import { computeWorkerWatchdogMs } from "./vfs_debug_config.ts";
+import {
+  createChildProcessBridge,
+  createChildProcessWasiSession,
+  isChildProcessMessage,
+} from "../lib/src/child_process_bridge.ts";
 
 const timeoutMs = 120000;
 const cargoArgs = Deno.args.length === 0 ? ["add", "hello"] : Deno.args;
@@ -27,19 +38,42 @@ const countingFetch: typeof fetch = (input, init) => {
   return fetch(input, init);
 };
 const httpBridge = createHttpBridge(countingFetch);
+const filesystemRoot = new Directory(new Map());
+const preopen = new PreopenDirectory("/", filesystemRoot.contents);
+let farm: WASIFarm;
+const stdin = new OpenFile(new File([]));
+const stdout = ConsoleStdout.lineBuffered((message) =>
+  console.log(`[WASI stdout] ${message}`)
+);
+const stderr = ConsoleStdout.lineBuffered((message) =>
+  console.error(`[WASI stderr] ${message}`)
+);
+const childBridge = createChildProcessBridge({
+  createWasiSession: () =>
+    createChildProcessWasiSession(
+      stdin,
+      stdout,
+      stderr,
+      [new PreopenDirectory("/", filesystemRoot.contents)],
+    ),
+  workerUrl: new URL(
+    "../page/src/worker_process/vfs_bindings/child_process_worker.ts",
+    import.meta.url,
+  ),
+  filesystemRoot,
+  uploadTimeoutMs: 30000,
+  executionTimeoutMs: timeoutMs,
+});
 
-const farm = new WASIFarm(
-  new OpenFile(new File([])),
-  ConsoleStdout.lineBuffered((message) =>
-    console.log(`[WASI stdout] ${message}`)
-  ),
-  ConsoleStdout.lineBuffered((message) =>
-    console.error(`[WASI stderr] ${message}`)
-  ),
-  [],
+farm = new WASIFarm(
+  stdin,
+  stdout,
+  stderr,
+  [preopen],
   {
     unknown_fn: (message: unknown) => {
       if (isHttpBridgeMessage(message)) return httpBridge(message);
+      if (isChildProcessMessage(message)) return childBridge(message);
       const name = (message as { name?: string })?.name;
       if (name === "terminalWrite" || name === "sysrootStartFetch") return {};
       if (name === "sysrootGetNextFileMeta") {

@@ -1,7 +1,10 @@
 import { join } from "https://deno.land/std@0.224.0/path/mod.ts";
-import { File, PreopenDirectory, Directory } from "https://esm.sh/@bjorn3/browser_wasi_shim@0.3.0";
+import { Directory, File, PreopenDirectory } from "@bjorn3/browser_wasi_shim";
 
-export async function buildPreopenDirectory(name: string, path: string): Promise<PreopenDirectory> {
+export async function buildPreopenDirectory(
+  name: string,
+  path: string,
+): Promise<PreopenDirectory> {
   const contents = new Map();
   async function walk(dirPath: string, currentMap: Map<string, any>) {
     for await (const entry of Deno.readDir(dirPath)) {
