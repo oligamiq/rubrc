@@ -204,6 +204,14 @@ own `WASIFarmAnimal` from that reference. Synchronous filesystem and terminal
 operations use the shim's existing farm transport; this design adds no direct
 Atomics or SharedArrayBuffer implementation.
 
+Version 0.4.0 of `@oligami/browser_wasi_shim-threads` multiplexes multiple
+animals through one farm. The host bridge therefore obtains the parent
+`WASIFarm.get_ref()` lazily when each child starts and posts that reference
+directly to the child Worker. It does not create a child farm, WASI session,
+second root wrapper, or private park. Per-request cleanup terminates only the
+child Worker; the WebShell parent continues to own the shared farm and its
+lifetime.
+
 ### Standard I/O
 
 The child uses the existing WASIFarm descriptor mappings. No parallel output
@@ -218,6 +226,7 @@ management as other processes attached to the farm.
 - Execution timeout: 120 seconds.
 - Upload inactivity timeout: 30 seconds.
 - Active dynamic children: 1.
+- Retained runner error: 64 KiB.
 - Module upload chunk: 256 KiB.
 - Runner-error read chunk: 64 KiB.
 

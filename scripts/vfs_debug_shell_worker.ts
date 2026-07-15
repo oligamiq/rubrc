@@ -19,7 +19,10 @@ async function compile(filename: string): Promise<WebAssembly.Module> {
 }
 
 function hasReturnedToPrompt(output: string): boolean {
-  return output.includes(" $ ");
+  const returnMarker = "[vfs-debug] command:return";
+  const returnIndex = output.indexOf(returnMarker);
+  return returnIndex !== -1 &&
+    output.indexOf(" $ ", returnIndex + returnMarker.length) !== -1;
 }
 
 globalThis.onmessage = async (event) => {
@@ -95,7 +98,11 @@ globalThis.onmessage = async (event) => {
     root.debugSetTerminalCapture(true);
 
     const memory = animal.get_share_memory().memory;
-    const dispatchBytes = (sessionId: number, eventType: number, bytes: Uint8Array) => {
+    const dispatchBytes = (
+      sessionId: number,
+      eventType: number,
+      bytes: Uint8Array,
+    ) => {
       const ptr = root.allocBuf(bytes.length);
       try {
         new Uint8Array(memory.buffer).set(bytes, ptr);

@@ -13,7 +13,6 @@ import {
 import { computeWorkerWatchdogMs } from "./vfs_debug_config.ts";
 import {
   createChildProcessBridge,
-  createChildProcessWasiSession,
   isChildProcessMessage,
 } from "../lib/src/child_process_bridge.ts";
 
@@ -42,13 +41,7 @@ const stderr = ConsoleStdout.lineBuffered((message) =>
   console.error(`[WASI stderr] ${message}`)
 );
 const childBridge = createChildProcessBridge({
-  createWasiSession: () =>
-    createChildProcessWasiSession(
-      stdin,
-      stdout,
-      stderr,
-      [new PreopenDirectory("/", filesystemRoot.contents)],
-    ),
+  getWasiRef: () => farm.get_ref(),
   workerUrl: new URL(
     "../page/src/worker_process/vfs_bindings/child_process_worker.ts",
     import.meta.url,

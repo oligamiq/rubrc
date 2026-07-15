@@ -1,10 +1,4 @@
-import {
-  Directory,
-  type Fd,
-  File,
-  type Inode,
-} from "@bjorn3/browser_wasi_shim";
-import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
+import { Directory, File, type Inode } from "@bjorn3/browser_wasi_shim";
 
 const MAX_MODULE_BYTES = 16 * 1024 * 1024;
 const MAX_MODULE_CHUNK_BYTES = 256 * 1024;
@@ -48,48 +42,13 @@ interface ChildProcessTimers {
 }
 
 export interface ChildProcessBridgeOptions {
-  createWasiSession: () => ChildProcessWasiSession;
+  getWasiRef: () => unknown;
   workerUrl: string | URL;
   filesystemRoot: Directory;
   uploadTimeoutMs: number;
   executionTimeoutMs: number;
   createWorker?: (url: string | URL, options: WorkerOptions) => ChildWorker;
   timers?: ChildProcessTimers;
-}
-
-export interface ChildProcessWasiSession {
-  wasiRef: unknown;
-  dispose(): void;
-}
-
-export function createChildProcessWasiSession(
-  stdin: Fd,
-  stdout: Fd,
-  stderr: Fd,
-  fds: Fd[],
-): ChildProcessWasiSession {
-  const farm = new WASIFarm(stdin, stdout, stderr, fds, {
-    allocator_size: 100 * 1024 * 1024,
-  });
-  const wasiRef = farm.get_ref();
-  let disposed = false;
-  return {
-    wasiRef,
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      const { park } = farm as unknown as {
-        park: {
-          destroy(): void;
-          listen_base_handle?: Promise<void> | null;
-          listen_fds?: Array<Promise<void> | null>;
-        } | null;
-      };
-      park?.listen_base_handle?.catch?.(() => {});
-      for (const listener of park?.listen_fds ?? []) listener?.catch?.(() => {});
-      park?.destroy();
-    },
-  };
 }
 
 interface FileSnapshot {
@@ -129,7 +88,6 @@ interface RequestState {
   baseline: DirectorySnapshot;
   timer: TimerHandle;
   worker?: ChildWorker;
-  wasiSession?: ChildProcessWasiSession;
   result?: WorkerResult;
   errorBytes?: Uint8Array;
   errorOffset: number;
@@ -359,22 +317,14 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
     timers.clearTimeout(current.timer);
     current.worker?.terminate();
     current.worker = undefined;
-    let finalResult = result;
-    try {
-      current.wasiSession?.dispose();
-    } catch (error) {
-      finalResult = {
-        status: 126,
-        error: `Failed to dispose child WASI session: ${String(error)}`,
-        graceful: false,
-      };
-    }
-    current.wasiSession = undefined;
-    if (!finalResult.graceful) restore(current);
-    current.result = finalResult;
-    current.errorBytes = finalResult.error === undefined
+    if (!result.graceful) restore(current);
+    current.result = { status: result.status, graceful: result.graceful };
+    const errorBytes = result.error === undefined
       ? new Uint8Array()
-      : encoder.encode(finalResult.error);
+      : encoder.encode(result.error);
+    current.errorBytes = errorBytes.length <= MAX_ERROR_CHUNK_BYTES
+      ? errorBytes
+      : errorBytes.slice(0, MAX_ERROR_CHUNK_BYTES);
     current.errorOffset = 0;
     current.state = 3;
     const resolve = current.resolveRun;
@@ -386,12 +336,6 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
     timers.clearTimeout(current.timer);
     current.worker?.terminate();
     current.worker = undefined;
-    try {
-      current.wasiSession?.dispose();
-    } catch {
-      // Filesystem recovery must proceed even if host resource cleanup fails.
-    }
-    current.wasiSession = undefined;
     restore(current);
     request = undefined;
     if (current.resolveRun) {
@@ -521,12 +465,10 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
             graceful: false,
           });
         }, options.executionTimeoutMs);
-        const wasiSession = options.createWasiSession();
-        current.wasiSession = wasiSession;
         worker.postMessage(
           {
             module: module.buffer,
-            wasiRef: wasiSession.wasiRef,
+            wasiRef: options.getWasiRef(),
             args: current.args,
             env: current.env,
           },

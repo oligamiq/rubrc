@@ -16,7 +16,6 @@ import { rust_file } from "./config";
 import { createHttpBridge, isHttpBridgeMessage } from "../../lib/src/http_bridge";
 import {
   createChildProcessBridge,
-  createChildProcessWasiSession,
   isChildProcessMessage,
 } from "../../lib/src/child_process_bridge";
 import { createCratesProxyFetch } from "../../lib/src/proxy";
@@ -337,13 +336,7 @@ edition = "2021"
   const stdout = new XtermStdio(term);
   const stderr = new XtermStderr(term);
   const childBridge = createChildProcessBridge({
-    createWasiSession: () =>
-      createChildProcessWasiSession(
-        stdin,
-        stdout,
-        stderr,
-        [new PreopenDirectory("/", root_dir.dir.contents)],
-      ),
+    getWasiRef: () => farm.get_ref(),
     workerUrl: new URL(
       "./worker_process/vfs_bindings/child_process_worker.ts",
       import.meta.url,

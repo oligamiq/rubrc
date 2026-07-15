@@ -10,7 +10,6 @@ import { prepareCachedSysroot } from "./sysroot_cache.ts";
 import { computeWorkerWatchdogMs } from "./vfs_debug_config.ts";
 import {
   createChildProcessBridge,
-  createChildProcessWasiSession,
   isChildProcessMessage,
 } from "../lib/src/child_process_bridge.ts";
 
@@ -57,13 +56,7 @@ const stderr = ConsoleStdout.lineBuffered((message) =>
   console.error(`[WASI stderr] ${message}`)
 );
 const childBridge = createChildProcessBridge({
-  createWasiSession: () =>
-    createChildProcessWasiSession(
-      stdin,
-      stdout,
-      stderr,
-      [new PreopenDirectory("/", filesystemRoot.contents)],
-    ),
+  getWasiRef: () => farm.get_ref(),
   workerUrl: new URL(
     "../page/src/worker_process/vfs_bindings/child_process_worker.ts",
     import.meta.url,
@@ -197,5 +190,11 @@ if (rustcRuns < 3) {
 
 if (!result.output.includes("Finished `dev` profile")) {
   console.error("Cargo did not report a successful dev build");
+  Deno.exit(1);
+}
+
+const returnIndex = result.output.lastIndexOf("[vfs-debug] command:return");
+if (returnIndex === -1 || result.output.indexOf(" $ ", returnIndex) === -1) {
+  console.error("shell prompt did not return after cargo build");
   Deno.exit(1);
 }

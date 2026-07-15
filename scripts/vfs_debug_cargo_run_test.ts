@@ -9,7 +9,6 @@ import {
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
 import {
   createChildProcessBridge,
-  createChildProcessWasiSession,
   isChildProcessMessage,
 } from "../lib/src/child_process_bridge.ts";
 import { computeWorkerWatchdogMs } from "./vfs_debug_config.ts";
@@ -45,29 +44,17 @@ const preopen = new PreopenDirectory("/", filesystemRoot.contents);
 await Deno.remove(testDir, { recursive: true });
 let farm: WASIFarm;
 const stdin = new OpenFile(new File([]));
-const stdout = ConsoleStdout.lineBuffered((message) =>
-  console.log(`[WASI stdout] ${message}`)
-);
-const stderr = ConsoleStdout.lineBuffered((message) =>
-  console.error(`[WASI stderr] ${message}`)
-);
-let childOutput = "";
-const childStdout = ConsoleStdout.lineBuffered((message) => {
-  childOutput += `${message}\n`;
-  console.log(`[child stdout] ${message}`);
+let farmOutput = "";
+const stdout = ConsoleStdout.lineBuffered((message) => {
+  farmOutput += `${message}\n`;
+  console.log(`[WASI stdout] ${message}`);
 });
-const childStderr = ConsoleStdout.lineBuffered((message) => {
-  childOutput += `${message}\n`;
-  console.error(`[child stderr] ${message}`);
+const stderr = ConsoleStdout.lineBuffered((message) => {
+  farmOutput += `${message}\n`;
+  console.error(`[WASI stderr] ${message}`);
 });
 const childBridge = createChildProcessBridge({
-  createWasiSession: () =>
-    createChildProcessWasiSession(
-      stdin,
-      childStdout,
-      childStderr,
-      [new PreopenDirectory("/", filesystemRoot.contents)],
-    ),
+  getWasiRef: () => farm.get_ref(),
   workerUrl: new URL(
     "../page/src/worker_process/vfs_bindings/child_process_worker.ts",
     import.meta.url,
@@ -126,8 +113,8 @@ const result = await new Promise<
   worker.postMessage({
     wasiRef: farm.get_ref(),
     commands: [
-      ["cargo", "run", "--", "first", "second"],
-      ["cat", "/created.txt"],
+      ["cargo", "run", "--", "first", "$", "second"],
+      ["cargo", "run", "--", "exit7"],
     ],
     threads: 2,
     timeoutMs,
@@ -143,6 +130,9 @@ const result = await new Promise<
 
 fn main() {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    if args == ["exit7"] {
+        std::process::exit(7);
+    }
     let input = fs::read_to_string("/input.txt").unwrap();
     println!("arguments: {}", args.join(","));
     println!("input: {input}");
@@ -157,7 +147,7 @@ fn main() {
 });
 
 worker.terminate();
-result.output += childOutput;
+result.output += farmOutput;
 console.log(result.output);
 if (!result.ok) {
   console.error(`VFS debug failed: ${result.error ?? "command timed out"}`);
@@ -166,10 +156,10 @@ if (!result.ok) {
 
 for (
   const expected of [
-    "arguments: first,second",
+    "arguments: first,$,second",
     "input: input from parent",
-    "created by child",
     "[vfs-debug] command:return",
+    "[vfs-debug] wasi-ext-spawn:return status=7",
   ]
 ) {
   if (!result.output.includes(expected)) {
@@ -180,8 +170,34 @@ for (
   }
 }
 
-const returnIndex = result.output.lastIndexOf("[vfs-debug] command:return");
-if (returnIndex === -1 || result.output.indexOf(" $ ", returnIndex) === -1) {
-  console.error("shell prompt did not return after cargo run test commands");
+const created = filesystemRoot.contents.get("created.txt");
+if (
+  !(created instanceof File) ||
+  new TextDecoder().decode(created.data) !== "created by child"
+) {
+  console.error("cargo run child filesystem change was not preserved");
   Deno.exit(1);
+}
+
+const commandReturn = "[vfs-debug] command:return";
+for (let run = 1; run <= 2; run++) {
+  const runStart = result.output.indexOf(
+    `[vfs-debug-driver] run:${run}/2:enter`,
+  );
+  const runEnd = result.output.indexOf(
+    `[vfs-debug-driver] run:${run}/2:return`,
+    runStart,
+  );
+  const returnIndex = result.output.indexOf(commandReturn, runStart);
+  const promptIndex = result.output.indexOf(
+    " $ ",
+    returnIndex + commandReturn.length,
+  );
+  if (
+    runStart === -1 || runEnd === -1 || returnIndex === -1 ||
+    promptIndex === -1 || returnIndex > runEnd || promptIndex > runEnd
+  ) {
+    console.error(`run ${run} did not return to a later shell prompt`);
+    Deno.exit(1);
+  }
 }

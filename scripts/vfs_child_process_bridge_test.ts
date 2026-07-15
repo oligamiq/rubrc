@@ -12,6 +12,7 @@ import {
   createChildProcessBridge,
   isChildProcessMessage,
 } from "../lib/src/child_process_bridge.ts";
+import * as childProcessBridgeModule from "../lib/src/child_process_bridge.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -115,12 +116,12 @@ function fakeSetup(root = new Directory(new Map())) {
   const workers: FakeWorker[] = [];
   const clock = new FakeClock();
   const wasiRef = { inherited: "farm-ref" };
-  let disposedSessions = 0;
+  let wasiRefCalls = 0;
   const options: ChildProcessBridgeOptions = {
-    createWasiSession: () => ({
-      wasiRef,
-      dispose: () => disposedSessions++,
-    }),
+    getWasiRef: () => {
+      wasiRefCalls++;
+      return wasiRef;
+    },
     workerUrl,
     filesystemRoot: root,
     uploadTimeoutMs: 30_000,
@@ -135,8 +136,8 @@ function fakeSetup(root = new Directory(new Map())) {
   return {
     bridge: createChildProcessBridge(options),
     clock,
-    get disposedSessions() {
-      return disposedSessions;
+    get wasiRefCalls() {
+      return wasiRefCalls;
     },
     root,
     wasiRef,
@@ -181,7 +182,7 @@ async function compileWat(name: string, wat: string) {
 
 function realBridge(root: PreopenDirectory, farm: WASIFarm, timeout = 120_000) {
   return createChildProcessBridge({
-    createWasiSession: () => ({ wasiRef: farm.get_ref(), dispose: () => {} }),
+    getWasiRef: () => farm.get_ref(),
     workerUrl,
     filesystemRoot: root.dir,
     uploadTimeoutMs: 30_000,
@@ -207,7 +208,7 @@ Deno.test("child process message guard accepts only protocol messages", () => {
 Deno.test("bridge rejects timeout values that overflow platform timers", () => {
   const root = new Directory(new Map());
   const base = {
-    createWasiSession: () => ({ wasiRef: {}, dispose: () => {} }),
+    getWasiRef: () => ({}),
     workerUrl,
     filesystemRoot: root,
     uploadTimeoutMs: 30_000,
@@ -222,11 +223,13 @@ Deno.test("bridge rejects timeout values that overflow platform timers", () => {
   throw new Error("overflowing execution timeout was accepted");
 });
 
-Deno.test("bridge uploads one child, runs with an isolated session, and retains completion", async () => {
+Deno.test("bridge lazily reuses the parent farm ref for sequential children", async () => {
   const setup = fakeSetup();
   const { bridge, wasiRef, workers } = setup;
   const module = new Uint8Array(256 * 1024 + 2).fill(7);
+  assertEquals(setup.wasiRefCalls, 0, "farm ref was read during setup");
   const requestId = await start(bridge, module);
+  assertEquals(setup.wasiRefCalls, 0, "farm ref was read during upload");
   await assertRejects(
     () =>
       bridge(
@@ -236,6 +239,7 @@ Deno.test("bridge uploads one child, runs with an isolated session, and retains 
   );
 
   const run = bridge(message("childProcessRun", { request_id: requestId }));
+  assertEquals(setup.wasiRefCalls, 1, "farm ref was not read at run time");
   assertEquals(workers[0].posted, {
     module: module.buffer,
     wasiRef,
@@ -245,7 +249,6 @@ Deno.test("bridge uploads one child, runs with an isolated session, and retains 
   workers[0].finish({ status: 0, graceful: true });
   assertEquals(await run, { state: 3, status: 0, error_len: 0 });
   assert(workers[0].terminated, "completed Worker was not terminated");
-  assertEquals(setup.disposedSessions, 1, "completed session was not disposed");
   assertEquals(
     await bridge(message("childProcessRecover", {})),
     { request_id: requestId, state: 3, status: 0, error_len: 0 },
@@ -261,6 +264,19 @@ Deno.test("bridge uploads one child, runs with an isolated session, and retains 
     await bridge(message("childProcessEnd", { request_id: requestId })),
     {},
   );
+  const secondRequestId = await start(bridge, Uint8Array.of(1));
+  const secondRun = bridge(message("childProcessRun", {
+    request_id: secondRequestId,
+  }));
+  assertEquals(setup.wasiRefCalls, 2, "second child did not read parent ref");
+  assertEquals(
+    (workers[1].posted as { wasiRef: unknown }).wasiRef,
+    wasiRef,
+    "second child did not reuse parent ref",
+  );
+  workers[1].finish({ status: 0, graceful: true });
+  assertEquals(await secondRun, { state: 3, status: 0, error_len: 0 });
+  await bridge(message("childProcessEnd", { request_id: secondRequestId }));
   assertEquals(
     await bridge(message("childProcessEnd", { request_id: requestId })),
     {},
@@ -268,6 +284,13 @@ Deno.test("bridge uploads one child, runs with an isolated session, and retains 
   assertEquals(
     await bridge(message("childProcessRecover", {})),
     { request_id: 0, state: 0, status: 0, error_len: 0 },
+  );
+});
+
+Deno.test("bridge exports no isolated child farm session helper", () => {
+  assert(
+    !Object.hasOwn(childProcessBridgeModule, "createChildProcessWasiSession"),
+    "isolated child WASI session helper is still exported",
   );
 });
 
@@ -553,7 +576,7 @@ Deno.test("inactive upload restores its deep filesystem baseline", async () => {
   );
 });
 
-Deno.test("trap rolls back files while retaining bounded runner error", async () => {
+Deno.test("trap rolls back files while capping retained runner error at 64 KiB", async () => {
   const root = new Directory(
     new Map([
       ["data.txt", new File(encoder.encode("before"))],
@@ -564,16 +587,17 @@ Deno.test("trap rolls back files while retaining bounded runner error", async ()
   const run = bridge(message("childProcessRun", { request_id: requestId }));
   root.contents.set("data.txt", new File(encoder.encode("partial")));
   root.contents.set("orphan.txt", new File([]));
+  const runnerError = "x".repeat(64 * 1024 + 1);
   workers[0].finish({
     status: 126,
-    error: "unreachable trap",
+    error: runnerError,
     graceful: false,
   });
   const result = await run as { status: number; error_len: number };
   assertEquals(result, {
     state: 3,
     status: 126,
-    error_len: encoder.encode("unreachable trap").length,
+    error_len: 64 * 1024,
   });
   assertEquals([...root.contents.keys()], ["data.txt"]);
   assertEquals(
@@ -586,7 +610,7 @@ Deno.test("trap rolls back files while retaining bounded runner error", async ()
   })) as { chunk: number[] };
   assertEquals(
     decoder.decode(Uint8Array.from(error.chunk)),
-    "unreachable trap",
+    runnerError.slice(0, 64 * 1024),
   );
   await assertRejects(
     () =>
@@ -668,7 +692,7 @@ Deno.test("synchronous Worker completion resolves run without a race", async () 
     worker.finish({ status: 7, graceful: true });
   };
   const bridge = createChildProcessBridge({
-    createWasiSession: () => ({ wasiRef: {}, dispose: () => {} }),
+    getWasiRef: () => ({}),
     workerUrl,
     filesystemRoot: root,
     uploadTimeoutMs: 30_000,
@@ -692,7 +716,7 @@ Deno.test("Worker setup failure rolls back and returns readable terminal metadat
   const originalFile = new File([1]);
   const root = new Directory(new Map([["stable", originalFile]]));
   const bridge = createChildProcessBridge({
-    createWasiSession: () => {
+    getWasiRef: () => {
       root.contents.set("stable", new File([2]));
       throw new Error("farm unavailable");
     },

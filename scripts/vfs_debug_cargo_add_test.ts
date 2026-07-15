@@ -13,7 +13,6 @@ import {
 import { computeWorkerWatchdogMs } from "./vfs_debug_config.ts";
 import {
   createChildProcessBridge,
-  createChildProcessWasiSession,
   isChildProcessMessage,
 } from "../lib/src/child_process_bridge.ts";
 
@@ -49,13 +48,7 @@ const stderr = ConsoleStdout.lineBuffered((message) =>
   console.error(`[WASI stderr] ${message}`)
 );
 const childBridge = createChildProcessBridge({
-  createWasiSession: () =>
-    createChildProcessWasiSession(
-      stdin,
-      stdout,
-      stderr,
-      [new PreopenDirectory("/", filesystemRoot.contents)],
-    ),
+  getWasiRef: () => farm.get_ref(),
   workerUrl: new URL(
     "../page/src/worker_process/vfs_bindings/child_process_worker.ts",
     import.meta.url,
@@ -135,8 +128,13 @@ if (!result.ok) {
   Deno.exit(1);
 }
 
-if (!result.output.includes("[vfs-debug] command:return")) {
+const returnIndex = result.output.lastIndexOf("[vfs-debug] command:return");
+if (returnIndex === -1) {
   console.error("cargo add did not return from the command");
+  Deno.exit(1);
+}
+if (result.output.indexOf(" $ ", returnIndex) === -1) {
+  console.error("shell prompt did not return after cargo add");
   Deno.exit(1);
 }
 if (!/Adding hello v\S+ to dependencies/.test(result.output)) {
