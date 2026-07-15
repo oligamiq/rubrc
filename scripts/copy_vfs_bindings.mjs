@@ -16,7 +16,13 @@ const targetDir = process.env.VFS_BINDINGS_TARGET_DIR ??
   fileURLToPath(
     new URL("../page/src/worker_process/vfs_bindings", import.meta.url),
   );
-const preservedFiles = ["inst.ts", "http_import.ts", "bun.lock"];
+const preservedFiles = [
+  "inst.ts",
+  "http_import.ts",
+  "child_process_import.ts",
+  "child_process_worker.ts",
+  "bun.lock",
+];
 
 if (!existsSync(sourceDir) || !statSync(sourceDir).isDirectory()) {
   throw new Error(`VFS bindings source directory does not exist: ${sourceDir}`);
@@ -33,6 +39,12 @@ for (const fileName of preservedFiles) {
 rmSync(targetDir, { recursive: true, force: true });
 mkdirSync(targetDir, { recursive: true });
 cpSync(sourceDir, targetDir, { recursive: true });
+
+const vfsPath = join(targetDir, "vfs.js");
+if (existsSync(vfsPath) && statSync(vfsPath).isFile()) {
+  const vfs = readFileSync(vfsPath, "utf8");
+  writeFileSync(vfsPath, vfs.replace(/[ \t]+(?=\r?$)/gm, ""));
+}
 
 for (const [fileName, contents] of preserved) {
   writeFileSync(join(targetDir, fileName), contents);
