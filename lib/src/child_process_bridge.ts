@@ -92,6 +92,7 @@ interface RequestState {
   errorBytes?: Uint8Array;
   errorOffset: number;
   resolveRun?: (metadata: StateMetadata) => void;
+  recovery?: StateMetadata;
 }
 
 interface StateMetadata {
@@ -306,14 +307,16 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
   const refreshUploadTimer = (current: RequestState) => {
     timers.clearTimeout(current.timer);
     current.timer = timers.setTimeout(() => {
-      if (request !== current || current.state !== 1) return;
+      if (
+        request !== current || current.state !== 1 || current.recovery
+      ) return;
       restore(current);
       request = undefined;
     }, options.uploadTimeoutMs);
   };
 
   const complete = (current: RequestState, result: WorkerResult) => {
-    if (request !== current || current.state !== 2) return;
+    if (request !== current || current.state !== 2 || current.recovery) return;
     timers.clearTimeout(current.timer);
     current.worker?.terminate();
     current.worker = undefined;
@@ -338,6 +341,20 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
     current.worker = undefined;
     restore(current);
     request = undefined;
+    if (current.resolveRun) {
+      const resolve = current.resolveRun;
+      current.resolveRun = undefined;
+      resolve({ state: 3, status: 126, error_len: 0 });
+    }
+  };
+
+  const retainActiveRecovery = (current: RequestState) => {
+    if (current.recovery) return;
+    current.recovery = stateMetadata(current);
+    timers.clearTimeout(current.timer);
+    current.worker?.terminate();
+    current.worker = undefined;
+    restore(current);
     if (current.resolveRun) {
       const resolve = current.resolveRun;
       current.resolveRun = undefined;
@@ -381,7 +398,7 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
 
     if (message.name === "childProcessWrite") {
       const current = requestFor(args);
-      if (current.state !== 1) {
+      if (current.state !== 1 || current.recovery) {
         throw new Error("child process is not uploading");
       }
       try {
@@ -412,7 +429,7 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
 
     if (message.name === "childProcessRun") {
       const current = requestFor(args);
-      if (current.state !== 1) {
+      if (current.state !== 1 || current.recovery) {
         throw new Error("child process is not uploading");
       }
       if (current.uploadedModuleBytes !== current.expectedModuleBytes) {
@@ -509,11 +526,13 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
     if (message.name === "childProcessRecover") {
       if (!request) return { request_id: 0, state: 0, status: 0, error_len: 0 };
       const current = request;
-      const recovered = { request_id: current.id, ...stateMetadata(current) };
-      if (current.state !== 3) {
-        abortActive(current);
+      if (!current.recovery && current.state !== 3) {
+        retainActiveRecovery(current);
       }
-      return recovered;
+      return {
+        request_id: current.id,
+        ...(current.recovery ?? stateMetadata(current)),
+      };
     }
 
     if (message.name === "childProcessEnd") {
@@ -523,7 +542,9 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
         throw new Error(`Unknown child process request ID: ${id}`);
       }
       const current = request;
-      if (current.state === 3) {
+      if (current.recovery) {
+        request = undefined;
+      } else if (current.state === 3) {
         timers.clearTimeout(current.timer);
         current.worker?.terminate();
         request = undefined;

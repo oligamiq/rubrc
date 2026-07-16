@@ -63,6 +63,7 @@ class FakeClock {
   #nextId = 1;
   #callbacks = new Map<number, () => void>();
   scheduled = 0;
+  cleared = 0;
 
   setTimeout = (callback: () => void, _delay: number) => {
     this.scheduled++;
@@ -72,6 +73,7 @@ class FakeClock {
   };
 
   clearTimeout = (id: number | ReturnType<typeof setTimeout>) => {
+    this.cleared++;
     if (typeof id === "number") this.#callbacks.delete(id);
   };
 
@@ -98,6 +100,7 @@ class FakeWorker {
   onmessageerror: ((event: MessageEvent) => void) | null = null;
   posted: unknown;
   terminated = false;
+  terminateCalls = 0;
 
   postMessage(value: unknown) {
     this.posted = structuredClone(value);
@@ -105,6 +108,7 @@ class FakeWorker {
 
   terminate() {
     this.terminated = true;
+    this.terminateCalls++;
   }
 
   finish(result: WorkerResult) {
@@ -643,45 +647,101 @@ Deno.test("execution timeout terminates and rolls back the running child", async
   );
 });
 
-Deno.test("recovery reports and aborts uploading and running orphans", async () => {
-  const uploading = fakeSetup();
-  const uploaded = await uploading.bridge(message("childProcessStart", {
+Deno.test("uploading recovery rolls back once and retains the slot until end", async () => {
+  const root = new Directory(new Map([["stable", new File([1])]]));
+  const { bridge, clock } = fakeSetup(root);
+  const uploaded = await bridge(message("childProcessStart", {
     argv: [],
     env: [],
     module_len: 1,
   })) as { request_id: number };
-  assertEquals(await uploading.bridge(message("childProcessRecover", {})), {
+  root.contents.set("stable", new File([2]));
+
+  const recovered = {
     request_id: uploaded.request_id,
     state: 1,
     status: 0,
     error_len: 0,
-  });
-  assertEquals(await uploading.bridge(message("childProcessRecover", {})), {
-    request_id: 0,
-    state: 0,
-    status: 0,
-    error_len: 0,
-  });
+  };
+  assertEquals(await bridge(message("childProcessRecover", {})), recovered);
+  assertEquals(Array.from((root.contents.get("stable") as File).data), [1]);
+  assertEquals(clock.pending, 0, "upload recovery retained its timer");
+  const clearedAfterFirstRecovery = clock.cleared;
 
-  const running = fakeSetup();
-  const requestId = await start(running.bridge, Uint8Array.of(0));
-  const pendingRun = running.bridge(
+  root.contents.set("stable", new File([3]));
+  assertEquals(await bridge(message("childProcessRecover", {})), recovered);
+  assertEquals(
+    Array.from((root.contents.get("stable") as File).data),
+    [3],
+    "repeated upload recovery restored the baseline again",
+  );
+  assertEquals(clock.cleared, clearedAfterFirstRecovery);
+  await assertRejects(
+    () =>
+      bridge(
+        message("childProcessStart", { argv: [], env: [], module_len: 0 }),
+      ),
+    "already active",
+  );
+
+  await bridge(message("childProcessEnd", { request_id: uploaded.request_id }));
+  await bridge(message("childProcessEnd", { request_id: uploaded.request_id }));
+  const next = await bridge(message("childProcessStart", {
+    argv: [],
+    env: [],
+    module_len: 0,
+  })) as { request_id: number };
+  await bridge(message("childProcessEnd", { request_id: next.request_id }));
+});
+
+Deno.test("running recovery rolls back once and retains the slot until end", async () => {
+  const root = new Directory(new Map([["stable", new File([1])]]));
+  const { bridge, clock, workers } = fakeSetup(root);
+  const requestId = await start(bridge, Uint8Array.of(0));
+  const pendingRun = bridge(
     message("childProcessRun", { request_id: requestId }),
   );
-  assertEquals(await running.bridge(message("childProcessRecover", {})), {
+  root.contents.set("stable", new File([2]));
+
+  const recovered = {
     request_id: requestId,
     state: 2,
     status: 0,
     error_len: 0,
-  });
-  assert(running.workers[0].terminated, "recovered Worker was not terminated");
+  };
+  assertEquals(await bridge(message("childProcessRecover", {})), recovered);
+  assert(workers[0].terminated, "recovered Worker was not terminated");
+  assertEquals(workers[0].terminateCalls, 1);
+  assertEquals(Array.from((root.contents.get("stable") as File).data), [1]);
+  assertEquals(clock.pending, 0, "running recovery retained its timer");
   assertEquals(await pendingRun, { state: 3, status: 126, error_len: 0 });
-  assertEquals(await running.bridge(message("childProcessRecover", {})), {
-    request_id: 0,
-    state: 0,
-    status: 0,
-    error_len: 0,
-  });
+  const clearedAfterFirstRecovery = clock.cleared;
+
+  root.contents.set("stable", new File([3]));
+  assertEquals(await bridge(message("childProcessRecover", {})), recovered);
+  assertEquals(
+    Array.from((root.contents.get("stable") as File).data),
+    [3],
+    "repeated running recovery restored the baseline again",
+  );
+  assertEquals(workers[0].terminateCalls, 1);
+  assertEquals(clock.cleared, clearedAfterFirstRecovery);
+  await assertRejects(
+    () =>
+      bridge(
+        message("childProcessStart", { argv: [], env: [], module_len: 0 }),
+      ),
+    "already active",
+  );
+
+  await bridge(message("childProcessEnd", { request_id: requestId }));
+  await bridge(message("childProcessEnd", { request_id: requestId }));
+  const next = await bridge(message("childProcessStart", {
+    argv: [],
+    env: [],
+    module_len: 0,
+  })) as { request_id: number };
+  await bridge(message("childProcessEnd", { request_id: next.request_id }));
 });
 
 Deno.test("synchronous Worker completion resolves run without a race", async () => {
