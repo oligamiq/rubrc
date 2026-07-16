@@ -67,6 +67,7 @@ Deno.test("vfs copy script preserves local binding overrides and lockfile", () =
       "http_import.ts",
       "child_process_import.ts",
       "child_process_worker.ts",
+      "package.json",
       "bun.lock",
     ] as const
   ) {
@@ -98,6 +99,10 @@ Deno.test("vfs copy script normalizes generated JS and preserves authored overla
     );
     Deno.writeTextFileSync(`${sourceDir}/other.js`, "other generated  \n");
     Deno.writeTextFileSync(`${sourceDir}/inst.ts`, "generated inst");
+    Deno.writeTextFileSync(
+      `${sourceDir}/package.json`,
+      '{"dependencies":{"@oligami/browser_wasi_shim-threads":"^0.3"}}',
+    );
     Deno.writeTextFileSync(`${targetDir}/inst.ts`, "custom inst  \n");
     Deno.writeTextFileSync(
       `${targetDir}/http_import.ts`,
@@ -112,6 +117,10 @@ Deno.test("vfs copy script normalizes generated JS and preserves authored overla
       "custom child worker\t\n",
     );
     Deno.writeTextFileSync(`${targetDir}/bun.lock`, "locked deps");
+    Deno.writeTextFileSync(
+      `${targetDir}/package.json`,
+      '{"dependencies":{"@oligami/browser_wasi_shim-threads":"^0.4.0"}}',
+    );
     Deno.writeTextFileSync(`${targetDir}/stale.txt`, "stale");
 
     const result = new Deno.Command("node", {
@@ -163,6 +172,12 @@ Deno.test("vfs copy script normalizes generated JS and preserves authored overla
     }
     if (Deno.readTextFileSync(`${targetDir}/bun.lock`) !== "locked deps") {
       throw new Error("copy script must preserve bun.lock");
+    }
+    if (
+      Deno.readTextFileSync(`${targetDir}/package.json`) !==
+        '{"dependencies":{"@oligami/browser_wasi_shim-threads":"^0.4.0"}}'
+    ) {
+      throw new Error("copy script must preserve package.json");
     }
     let staleExists = true;
     try {

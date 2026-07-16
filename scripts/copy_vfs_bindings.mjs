@@ -21,6 +21,7 @@ const preservedFiles = [
   "http_import.ts",
   "child_process_import.ts",
   "child_process_worker.ts",
+  "package.json",
   "bun.lock",
 ];
 
