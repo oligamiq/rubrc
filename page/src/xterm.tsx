@@ -353,6 +353,7 @@ edition = "2021"
     [root_dir],
     {
       allocator_size: 100 * 1024 * 1024, // 100MB
+      base_call_allocator_size: 64 * 1024 * 1024, // 64 MiB
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
       unknown_fn: async (unknown: any) => {
         if (isHttpBridgeMessage(unknown)) {
