@@ -103,6 +103,17 @@ Deno.test("vfs copy script normalizes generated JS and preserves authored overla
       `${sourceDir}/package.json`,
       '{"dependencies":{"@oligami/browser_wasi_shim-threads":"^0.3"}}',
     );
+    Deno.writeTextFileSync(
+      `${sourceDir}/deno.lock`,
+      '{"specifiers":{"npm:@oligami/browser_wasi_shim-threads@0.3":"0.3.7"}}',
+    );
+    const generatedDenoPackage =
+      `${sourceDir}/node_modules/.deno/@oligami+browser_wasi_shim-threads@0.3.7/node_modules/@oligami/browser_wasi_shim-threads`;
+    Deno.mkdirSync(generatedDenoPackage, { recursive: true });
+    Deno.writeTextFileSync(
+      `${generatedDenoPackage}/package.json`,
+      '{"name":"@oligami/browser_wasi_shim-threads","version":"0.3.7"}',
+    );
     Deno.writeTextFileSync(`${targetDir}/inst.ts`, "custom inst  \n");
     Deno.writeTextFileSync(
       `${targetDir}/http_import.ts`,
@@ -119,7 +130,7 @@ Deno.test("vfs copy script normalizes generated JS and preserves authored overla
     Deno.writeTextFileSync(`${targetDir}/bun.lock`, "locked deps");
     Deno.writeTextFileSync(
       `${targetDir}/package.json`,
-      '{"dependencies":{"@oligami/browser_wasi_shim-threads":"^0.4.0"}}',
+      '{"dependencies":{"@oligami/browser_wasi_shim-threads":"^0.4.1"}}',
     );
     Deno.writeTextFileSync(`${targetDir}/stale.txt`, "stale");
 
@@ -175,9 +186,19 @@ Deno.test("vfs copy script normalizes generated JS and preserves authored overla
     }
     if (
       Deno.readTextFileSync(`${targetDir}/package.json`) !==
-        '{"dependencies":{"@oligami/browser_wasi_shim-threads":"^0.4.0"}}'
+        '{"dependencies":{"@oligami/browser_wasi_shim-threads":"^0.4.1"}}'
     ) {
       throw new Error("copy script must preserve package.json");
+    }
+    for (const generatedPath of ["node_modules", "deno.lock"] as const) {
+      try {
+        Deno.statSync(`${targetDir}/${generatedPath}`);
+        throw new Error(
+          `copy script must exclude generated Deno ${generatedPath}`,
+        );
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      }
     }
     let staleExists = true;
     try {

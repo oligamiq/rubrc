@@ -40,6 +40,9 @@ for (const fileName of preservedFiles) {
 rmSync(targetDir, { recursive: true, force: true });
 mkdirSync(targetDir, { recursive: true });
 cpSync(sourceDir, targetDir, { recursive: true });
+for (const generatedPath of ["deno.lock", "node_modules"]) {
+  rmSync(join(targetDir, generatedPath), { recursive: true, force: true });
+}
 
 const vfsPath = join(targetDir, "vfs.js");
 if (existsSync(vfsPath) && statSync(vfsPath).isFile()) {
