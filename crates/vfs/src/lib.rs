@@ -312,7 +312,10 @@ impl Guest for Wit {
         ) {
             eprintln!("failed to initialize VFS sysroot from host: {error}");
         }
-        recover_child_process();
+        if let Err(error) = recover_child_process() {
+            eprintln!("failed to recover child process: {error}");
+            return;
+        }
 
         vfs_shell::_reset();
         println!("###");
@@ -1318,6 +1321,107 @@ fn bounded_child_error(message: impl AsRef<[u8]>) -> Vec<u8> {
     message
 }
 
+fn bounded_child_result(result: Result<(Vec<u8>, i32), String>) -> (Vec<u8>, i32) {
+    match result {
+        Ok(result) => result,
+        Err(error) => (bounded_child_error(error), 126),
+    }
+}
+
+struct RequestGuard<End>
+where
+    End: FnMut(u32) -> i32,
+{
+    request_id: u32,
+    end: End,
+    end_on_drop: bool,
+}
+
+impl<End> RequestGuard<End>
+where
+    End: FnMut(u32) -> i32,
+{
+    fn new(request_id: u32, end: End) -> Self {
+        Self {
+            request_id,
+            end,
+            end_on_drop: true,
+        }
+    }
+
+    fn retain_on_drop(&mut self) {
+        self.end_on_drop = false;
+    }
+
+    fn finish(mut self) -> Result<(), String> {
+        self.end_on_drop = false;
+        if (self.end)(self.request_id) != 0 {
+            return Err("failed to end child process request".to_string());
+        }
+        Ok(())
+    }
+}
+
+impl<End> Drop for RequestGuard<End>
+where
+    End: FnMut(u32) -> i32,
+{
+    fn drop(&mut self) {
+        if self.end_on_drop {
+            self.end_on_drop = false;
+            let _ = (self.end)(self.request_id);
+        }
+    }
+}
+
+fn append_child_conflicts(stderr: &mut Vec<u8>, conflicts: &[PathBuf]) {
+    if conflicts.is_empty() {
+        return;
+    }
+
+    let mut diagnostic = b"warning: child filesystem synchronization conflicts; concurrent VFS edits were preserved:\n".to_vec();
+    for path in conflicts {
+        let line = format!("  {}\n", path.display());
+        if diagnostic.len().saturating_add(line.len()) > MAX_CHILD_ERROR_BYTES {
+            let omitted = b"  ... additional conflicts omitted\n";
+            if diagnostic.len().saturating_add(omitted.len()) <= MAX_CHILD_ERROR_BYTES {
+                diagnostic.extend_from_slice(omitted);
+            }
+            break;
+        }
+        diagnostic.extend_from_slice(line.as_bytes());
+    }
+    diagnostic.truncate(MAX_CHILD_ERROR_BYTES);
+
+    if !stderr.is_empty() && !stderr.ends_with(b"\n") {
+        diagnostic.insert(0, b'\n');
+        diagnostic.truncate(MAX_CHILD_ERROR_BYTES);
+    }
+    let child_limit = MAX_CHILD_ERROR_BYTES - diagnostic.len();
+    stderr.truncate(child_limit);
+    stderr.extend_from_slice(&diagnostic);
+}
+
+fn finish_child_request<End, Sync>(
+    request: RequestGuard<End>,
+    mut stderr: Vec<u8>,
+    status: i32,
+    sync: Sync,
+) -> Result<(Vec<u8>, i32), String>
+where
+    End: FnMut(u32) -> i32,
+    Sync: FnOnce() -> Result<Vec<PathBuf>, String>,
+{
+    let conflicts = sync()?;
+    if !conflicts.is_empty() {
+        crate::debug_trace(&format!("child-process:filesystem-conflicts {conflicts:?}"));
+        append_child_conflicts(&mut stderr, &conflicts);
+    }
+    request.finish()?;
+    stderr.truncate(MAX_CHILD_ERROR_BYTES);
+    Ok((stderr, status))
+}
+
 fn run_wasi_child(program: &str, args: &[u8], env: &[u8], cwd: &[u8]) -> (Vec<u8>, i32) {
     use crate::vfs::host::bridge::ChildProcess;
 
@@ -1336,8 +1440,11 @@ fn run_wasi_child(program: &str, args: &[u8], env: &[u8], cwd: &[u8]) -> (Vec<u8
         let cargo_target_dir = env
             .iter()
             .find_map(|entry| entry.strip_prefix("CARGO_TARGET_DIR="));
+        let cargo_cwd =
+            std::str::from_utf8(cwd).map_err(|_| "child cwd is not valid UTF-8".to_string())?;
         let exclusions = filesystem_sync::runtime_exclusions_from_child(
             cargo_target_dir.map(Path::new),
+            Path::new(cargo_cwd),
             &executable,
         );
         let root = initialized_lfs_root();
@@ -1363,30 +1470,7 @@ fn run_wasi_child(program: &str, args: &[u8], env: &[u8], cwd: &[u8]) -> (Vec<u8
             return Err("failed to start child process request".to_string());
         }
 
-        struct RequestGuard {
-            request_id: u32,
-            active: bool,
-        }
-        impl RequestGuard {
-            fn finish(mut self) -> Result<(), String> {
-                if ChildProcess::request_end(self.request_id) != 0 {
-                    return Err("failed to end child process request".to_string());
-                }
-                self.active = false;
-                Ok(())
-            }
-        }
-        impl Drop for RequestGuard {
-            fn drop(&mut self) {
-                if self.active {
-                    let _ = ChildProcess::request_end(self.request_id);
-                }
-            }
-        }
-        let request = RequestGuard {
-            request_id,
-            active: true,
-        };
+        let mut request = RequestGuard::new(request_id, ChildProcess::request_end);
 
         for chunk in module.chunks(MAX_CHILD_MODULE_CHUNK_BYTES) {
             if ChildProcess::request_write(request_id, chunk.as_ptr() as i32, chunk.len() as i32)
@@ -1405,6 +1489,11 @@ fn run_wasi_child(program: &str, args: &[u8], env: &[u8], cwd: &[u8]) -> (Vec<u8
         ) != 0
         {
             return Err("failed to run child process".to_string());
+        }
+
+        let graceful = error_len == 0;
+        if graceful {
+            request.retain_on_drop();
         }
 
         let error_len = usize::try_from(error_len)
@@ -1426,64 +1515,88 @@ fn run_wasi_child(program: &str, args: &[u8], env: &[u8], cwd: &[u8]) -> (Vec<u8
             error
         };
 
-        if error_len == 0 {
-            let conflicts = filesystem_sync::sync_host_to_vfs(
-                &VIRTUAL_FILE_SYSTEM.lfs,
-                root,
-                Path::new("/"),
-                &baseline,
-                filesystem_sync::DEFAULT_SYNC_LIMITS,
-            )
-            .map_err(|error| format!("failed to import child filesystem: {error}"))?;
-            if !conflicts.is_empty() {
-                crate::debug_trace(&format!("child-process:filesystem-conflicts {conflicts:?}"));
-            }
+        if graceful {
+            return finish_child_request(request, child_error, status as i32, || {
+                filesystem_sync::sync_host_to_vfs(
+                    &VIRTUAL_FILE_SYSTEM.lfs,
+                    root,
+                    Path::new("/"),
+                    &baseline,
+                    filesystem_sync::DEFAULT_SYNC_LIMITS,
+                )
+                .map_err(|error| format!("failed to import child filesystem: {error}"))
+            });
         }
         request.finish()?;
         child_error.truncate(MAX_CHILD_ERROR_BYTES);
         Ok((child_error, status as i32))
     })();
 
-    match result {
-        Ok(result) => result,
-        Err(error) => (bounded_child_error(error), 126),
-    }
+    bounded_child_result(result)
 }
 
-fn recover_child_process() {
-    use crate::vfs::host::bridge::ChildProcess;
-
-    let mut request_id = 0u32;
-    let mut state = 0u32;
-    let mut status = 0u32;
-    let mut error_len = 0u32;
-    if ChildProcess::request_recover(
-        (&mut request_id as *mut u32) as i32,
-        (&mut state as *mut u32) as i32,
-        (&mut status as *mut u32) as i32,
-        (&mut error_len as *mut u32) as i32,
-    ) != 0
-        || request_id == 0
-    {
-        return;
-    }
+fn recover_child_process_with<Recover, Import, End>(
+    recover: Recover,
+    import: Import,
+    end: End,
+) -> Result<(), String>
+where
+    Recover: FnOnce() -> Result<Option<(u32, u32)>, String>,
+    Import: FnOnce() -> Result<(), String>,
+    End: FnOnce(u32) -> Result<(), String>,
+{
+    let Some((request_id, state)) = recover()? else {
+        return Ok(());
+    };
 
     if should_import_recovered_child(state) {
-        let root = initialized_lfs_root();
-        if let Err(error) = filesystem_sync::import_host_authoritative(
-            &VIRTUAL_FILE_SYSTEM.lfs,
-            root,
-            Path::new("/"),
-            filesystem_sync::DEFAULT_SYNC_LIMITS,
-        ) {
-            crate::debug_trace(&format!("child-process:recovery-import-failed {error}"));
-        }
-    } else if state != CHILD_STATE_UPLOADING && state != CHILD_STATE_RUNNING {
+        import()?;
+    } else {
         crate::debug_trace(&format!("child-process:recovery-invalid-state {state}"));
     }
-    if ChildProcess::request_end(request_id) != 0 {
-        crate::debug_trace(&format!("child-process:recovery-end-failed {request_id}"));
-    }
+    end(request_id)
+}
+
+fn recover_child_process() -> Result<(), String> {
+    use crate::vfs::host::bridge::ChildProcess;
+
+    recover_child_process_with(
+        || {
+            let mut request_id = 0u32;
+            let mut state = 0u32;
+            let mut status = 0u32;
+            let mut error_len = 0u32;
+            if ChildProcess::request_recover(
+                (&mut request_id as *mut u32) as i32,
+                (&mut state as *mut u32) as i32,
+                (&mut status as *mut u32) as i32,
+                (&mut error_len as *mut u32) as i32,
+            ) != 0
+            {
+                return Err("failed to recover child process request".to_string());
+            }
+            Ok((request_id != 0).then_some((request_id, state)))
+        },
+        || {
+            let root = initialized_lfs_root();
+            filesystem_sync::import_host_authoritative(
+                &VIRTUAL_FILE_SYSTEM.lfs,
+                root,
+                Path::new("/"),
+                filesystem_sync::DEFAULT_SYNC_LIMITS,
+            )
+            .map(|_| ())
+            .map_err(|error| format!("failed to import recovered child filesystem: {error}"))
+        },
+        |request_id| {
+            if ChildProcess::request_end(request_id) != 0 {
+                return Err(format!(
+                    "failed to end recovered child process request {request_id}"
+                ));
+            }
+            Ok(())
+        },
+    )
 }
 
 fn should_import_recovered_child(state: u32) -> bool {
@@ -1742,10 +1855,14 @@ fn write_cargo_result(
 mod http_tests {
     use super::{
         CHILD_STATE_COMPLETED, CHILD_STATE_RUNNING, CHILD_STATE_UPLOADING, DEBUG_TERMINAL_OUTPUT,
-        Guest, MAX_CHILD_MODULE_BYTES, Wit, allocate_cargo_owned, checked_child_module_size,
-        decode_cargo_spawn_list, format_http_response, resolve_child_program,
-        should_import_recovered_child,
+        Guest, MAX_CHILD_ERROR_BYTES, MAX_CHILD_MODULE_BYTES, RequestGuard, Wit,
+        allocate_cargo_owned, bounded_child_result, checked_child_module_size,
+        decode_cargo_spawn_list, finish_child_request, format_http_response,
+        recover_child_process_with, resolve_child_program, should_import_recovered_child,
     };
+    use std::cell::Cell;
+    use std::path::PathBuf;
+    use std::rc::Rc;
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -1861,5 +1978,107 @@ mod http_tests {
         assert!(should_import_recovered_child(CHILD_STATE_COMPLETED));
         assert!(!should_import_recovered_child(0));
         assert!(!should_import_recovered_child(4));
+    }
+
+    #[test]
+    fn graceful_reverse_sync_failure_retains_request_and_bounds_error() {
+        let active = Rc::new(Cell::new(true));
+        let end_calls = Rc::new(Cell::new(0));
+        let active_for_end = Rc::clone(&active);
+        let end_calls_for_end = Rc::clone(&end_calls);
+        let mut request = RequestGuard::new(41, move |_| {
+            end_calls_for_end.set(end_calls_for_end.get() + 1);
+            active_for_end.set(false);
+            0
+        });
+        request.retain_on_drop();
+
+        let result = finish_child_request(request, Vec::new(), 7, || {
+            Err("reverse sync failed ".repeat(MAX_CHILD_ERROR_BYTES))
+        });
+        let (stderr, status) = bounded_child_result(result);
+
+        assert_eq!(status, 126);
+        assert_eq!(stderr.len(), MAX_CHILD_ERROR_BYTES);
+        assert_eq!(end_calls.get(), 0);
+        assert!(active.get(), "completed request was acknowledged");
+        let start_new_request = || !active.get();
+        assert!(
+            !start_new_request(),
+            "a new request started before reconciliation"
+        );
+    }
+
+    #[test]
+    fn successful_reverse_sync_acknowledges_once_and_reports_conflict() {
+        let end_calls = Rc::new(Cell::new(0));
+        let end_calls_for_end = Rc::clone(&end_calls);
+        let mut request = RequestGuard::new(42, move |_| {
+            end_calls_for_end.set(end_calls_for_end.get() + 1);
+            0
+        });
+        request.retain_on_drop();
+
+        let (stderr, status) = finish_child_request(request, b"child stderr\n".to_vec(), 7, || {
+            Ok(vec![PathBuf::from("workspace/src/main.rs")])
+        })
+        .unwrap();
+
+        let stderr = String::from_utf8(stderr).unwrap();
+        assert_eq!(status, 7);
+        assert!(stderr.contains("workspace/src/main.rs"));
+        assert_eq!(end_calls.get(), 1);
+    }
+
+    #[test]
+    fn conflict_diagnostic_keeps_total_stderr_within_limit() {
+        let mut request = RequestGuard::new(43, |_| 0);
+        request.retain_on_drop();
+
+        let (stderr, status) =
+            finish_child_request(request, vec![b'x'; MAX_CHILD_ERROR_BYTES], 19, || {
+                Ok(vec![PathBuf::from("conflicted.txt")])
+            })
+            .unwrap();
+
+        assert_eq!(status, 19);
+        assert_eq!(stderr.len(), MAX_CHILD_ERROR_BYTES);
+        assert!(
+            String::from_utf8_lossy(&stderr).contains("conflicted.txt"),
+            "bounded stderr omitted the conflict diagnostic"
+        );
+    }
+
+    #[test]
+    fn recovery_import_failure_retains_authoritative_request() {
+        for state in [
+            CHILD_STATE_UPLOADING,
+            CHILD_STATE_RUNNING,
+            CHILD_STATE_COMPLETED,
+        ] {
+            let active = Rc::new(Cell::new(true));
+            let end_calls = Rc::new(Cell::new(0));
+            let active_for_end = Rc::clone(&active);
+            let end_calls_for_end = Rc::clone(&end_calls);
+
+            let result = recover_child_process_with(
+                || Ok(Some((91, state))),
+                || Err("injected authoritative import failure".to_string()),
+                move |_| {
+                    end_calls_for_end.set(end_calls_for_end.get() + 1);
+                    active_for_end.set(false);
+                    Ok(())
+                },
+            );
+
+            assert!(result.is_err());
+            assert_eq!(end_calls.get(), 0, "state {state} was acknowledged");
+            assert!(active.get(), "state {state} allowed a new request");
+            let start_new_request = || !active.get();
+            assert!(
+                !start_new_request(),
+                "state {state} started a new request before recovery"
+            );
+        }
     }
 }

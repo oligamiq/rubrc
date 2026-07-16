@@ -422,20 +422,29 @@ pub(crate) fn import_host_sysroot(
 
 pub(crate) fn runtime_exclusions_from_child(
     cargo_target_dir: Option<&Path>,
+    cargo_cwd: &Path,
     executable: &Path,
 ) -> Vec<PathBuf> {
-    let target = cargo_target_dir.map(normalize_relative).or_else(|| {
-        let binary = executable.file_name()?.to_str()?;
-        if !binary.ends_with(".wasm") {
-            return None;
-        }
-        let profile = executable.parent()?;
-        let triple = profile.parent()?;
-        if triple.file_name()? != "wasm32-wasip1" {
-            return None;
-        }
-        Some(normalize_relative(triple.parent()?))
-    });
+    let target = cargo_target_dir
+        .map(|target| {
+            if target.is_absolute() {
+                normalize_relative(target)
+            } else {
+                normalize_relative(&cargo_cwd.join(target))
+            }
+        })
+        .or_else(|| {
+            let binary = executable.file_name()?.to_str()?;
+            if !binary.ends_with(".wasm") {
+                return None;
+            }
+            let profile = executable.parent()?;
+            let triple = profile.parent()?;
+            if triple.file_name()? != "wasm32-wasip1" {
+                return None;
+            }
+            Some(normalize_relative(triple.parent()?))
+        });
 
     target
         .filter(|path| !path.as_os_str().is_empty())
@@ -1256,6 +1265,10 @@ mod tests {
         let result = reconcile_diff(&baseline, &child, &current_vfs).unwrap();
         assert_eq!(result.conflicts, vec![PathBuf::from("shared.txt")]);
         assert_eq!(result.tree["shared.txt"].bytes(), b"editor");
+
+        let mut stderr = Vec::new();
+        crate::append_child_conflicts(&mut stderr, &result.conflicts);
+        assert!(String::from_utf8(stderr).unwrap().contains("shared.txt"));
     }
 
     #[test]
@@ -1672,9 +1685,34 @@ mod tests {
         assert_eq!(
             runtime_exclusions_from_child(
                 Some(Path::new("./build/../cargo-target")),
+                Path::new("/"),
                 Path::new("ignored.wasm"),
             ),
             vec![PathBuf::from("cargo-target")]
+        );
+    }
+
+    #[test]
+    fn resolves_relative_cargo_target_directory_from_nested_cargo_cwd() {
+        assert_eq!(
+            runtime_exclusions_from_child(
+                Some(Path::new("../build")),
+                Path::new("/workspace/project"),
+                Path::new("workspace/project/ignored.wasm"),
+            ),
+            vec![PathBuf::from("workspace/build")]
+        );
+    }
+
+    #[test]
+    fn keeps_absolute_cargo_target_directory_root_relative_from_nested_cwd() {
+        assert_eq!(
+            runtime_exclusions_from_child(
+                Some(Path::new("/custom/target")),
+                Path::new("/workspace/project"),
+                Path::new("workspace/project/ignored.wasm"),
+            ),
+            vec![PathBuf::from("custom/target")]
         );
     }
 
@@ -1683,6 +1721,7 @@ mod tests {
         assert_eq!(
             runtime_exclusions_from_child(
                 None,
+                Path::new("/workspace/project"),
                 Path::new("build-output/wasm32-wasip1/debug/app.wasm"),
             ),
             vec![PathBuf::from("build-output")]
