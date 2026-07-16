@@ -24,7 +24,7 @@
     "@codingame/monaco-vscode-languages-service-override": "^25.1.2",
     "@codingame/monaco-vscode-model-service-override": "^25.1.2",
     "@codingame/monaco-vscode-theme-defaults-default-extension": "^25.1.2",
-    "@oligami/browser_wasi_shim-threads": "^0.3.7",
+    "@oligami/browser_wasi_shim-threads": "^0.4.0",
     "@oligami/shared-object": "0.1.1",
     "@tailwindcss/vite": "^4.3.0",
     "@thisbeyond/solid-select": "^0.15.1",

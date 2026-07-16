@@ -5,7 +5,7 @@
     "": {
       "dependencies": {
         "@bjorn3/browser_wasi_shim": "^0.4",
-        "@oligami/browser_wasi_shim-threads": "^0.3",
+        "@oligami/browser_wasi_shim-threads": "^0.4.0",
         "@xterm/xterm": "^5.5",
         "xterm-addon-fit": "^0.8.0",
       },
@@ -34,7 +34,7 @@
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.6", "", { "dependencies": { "@tybys/wasm-util": "^0.10.3" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-ZLv/JdUfkvOy9eCnnBaGfiO+XimbjebAeO+MRQqD/B+FR1tnRN0tpKSJHRbE8sFfS6aqsXZ67TQjfwfsxULVbg=="],
 
-    "@oligami/browser_wasi_shim-threads": ["@oligami/browser_wasi_shim-threads@0.3.7", "", { "dependencies": { "@bjorn3/browser_wasi_shim": "^0.4.2" } }, "sha512-UKKPxtcaKOVTquQ8TUGVnqUBYCWq8lWvs9KQoC24SKdRODoN+S/Af6mR5VWJyOlG3lYKcaze7DnTYCYTM/f4tA=="],
+    "@oligami/browser_wasi_shim-threads": ["@oligami/browser_wasi_shim-threads@0.4.0", "", { "dependencies": { "@bjorn3/browser_wasi_shim": "^0.4.2" } }, "sha512-QhGfp9o168ydSIwdh1hVGmBpzEBnkARHFNp4aHqAfVBmpBFvuxjR27EWZuRmCh0TMtC8AbchxwEpUQh4DwRnHQ=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.138.0", "", {}, "sha512-1a7ZKmrRTCoN1XMZ4L0PyyqrMnrNlLyPuOkdSX2MZg7IiIGRUyurNhAm73ptDOraoBcIordsIGKNPKUzy3ZmfA=="],
 
