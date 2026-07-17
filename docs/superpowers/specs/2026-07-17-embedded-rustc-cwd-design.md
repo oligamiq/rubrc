@@ -38,6 +38,7 @@ pub struct CwdAwareFileSystem<F> {
     root_inode: InodeId,
     root_fd: Fd,
     target_cwds: parking_lot::RwLock<HashMap<TypeId, TargetCwdEntry>>,
+    fd_allocation: parking_lot::Mutex<()>,
 }
 ```
 
@@ -77,6 +78,8 @@ Empty or malformed paths are forwarded to the inner filesystem, which retains ow
 Each intercepted path method holds the target-cwd read lock from lookup through completion of the delegated inner filesystem call. Guard cleanup requires the write lock, so it cannot remove a temporary FD after routing has selected it but before the inner filesystem reads it. Two-directory operations hold one read guard while routing and dispatching both path pairs.
 
 The wrapper also intercepts `fd_close_raw` and `fd_renumber_raw`. Each operation holds the target-cwd read lock from the protected-FD check through completion of any delegated inner mutation. The recorded root FD and every active temporary cwd FD are protected from close, replacement, and renumbering while owned by the wrapper. Attempts return a deterministic WASI error without mutating the inner FD map. All other FD operations delegate unchanged.
+
+`path_open_raw`, successful unprotected renumbering, and temporary cwd FD allocation also share `fd_allocation`. This closes the inner allocator's gap between incrementing `next_fd` and inserting into `fd_map`. Before allocation, the wrapper advances past occupied descriptors; renumbering raises the allocator high-water mark. Descriptor `u32::MAX` is reserved so the allocator cannot wrap to stdio FDs; allocation or renumbering that would reach it returns exhaustion.
 
 ## Cwd Lifecycle
 
@@ -135,6 +138,7 @@ During `VIRTUAL_FILE_SYSTEM` initialization:
 - Cwd mappings are keyed by target `TypeId`; names are diagnostic only.
 - Path routing holds a mapping read lock through inner dispatch; install and cleanup hold the write lock.
 - Close and renumber hold the mapping read lock through protection checks and delegated mutation, preventing races with cwd installation or cleanup.
+- Cwd allocation, `path_open_raw`, and renumbering hold the FD-allocation mutex through allocator inspection and inner mutation.
 - The wrapper rejects close or renumber operations involving the root FD or an active cwd FD.
 - Rustc invocation remains serialized by `RUSTC_RUN_LOCK`.
 - Other targets can continue using the root and their explicit FDs while rustc runs.
