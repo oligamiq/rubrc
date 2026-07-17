@@ -46,8 +46,8 @@ jobs:
       - name: Build
         run: |
           bun i
+          bun run build:prod
           cd page
-          bun run build
           bunx mini-coi -sw dist/mini-coi.js
           sed -i '/<head>/a \    <script src="./mini-coi.js" scope="./"></script>' dist/index.html
       - name: Upload artifact
