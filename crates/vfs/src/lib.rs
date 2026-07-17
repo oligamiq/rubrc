@@ -1,9 +1,13 @@
 use const_struct::*;
+use std::any::TypeId;
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
+use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use wasi_virt_layer::__private::wasip1::{self, Ciovec, Dircookie, Fd, Size};
+use wasi_virt_layer::memory::{WasmAccessName, WasmPathAccess, WasmPathComponent};
 use wasi_virt_layer::wasi::file::Wasip1LFSBase;
 use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
 
@@ -719,6 +723,586 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
 }
 
 type LFS = StandardDynamicLFS<ShellVirtualStdIO>;
+
+#[derive(Debug)]
+struct TargetCwdEntry {
+    target_name: &'static str,
+    cwd_fd: Fd,
+}
+
+#[derive(Debug)]
+pub struct CwdAwareFileSystem<F> {
+    inner: F,
+    root_inode: InodeId,
+    root_fd: Fd,
+    target_cwds: parking_lot::RwLock<HashMap<TypeId, TargetCwdEntry>>,
+    fd_allocation: parking_lot::Mutex<()>,
+}
+
+impl<F> CwdAwareFileSystem<F> {
+    fn new(inner: F, root_inode: InodeId, root_fd: Fd) -> Self {
+        Self {
+            inner,
+            root_inode,
+            root_fd,
+            target_cwds: parking_lot::RwLock::new(HashMap::new()),
+            fd_allocation: parking_lot::Mutex::new(()),
+        }
+    }
+}
+
+impl<F> Deref for CwdAwareFileSystem<F> {
+    type Target = F;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+pub struct TargetCwdGuard<'a, F> {
+    fs: &'a CwdAwareFileSystem<F>,
+    target_id: Option<TypeId>,
+    cwd_fd: Option<Fd>,
+    remove_fd: fn(&F, Fd),
+}
+
+impl<F> Drop for TargetCwdGuard<'_, F> {
+    fn drop(&mut self) {
+        let Some(target_id) = self.target_id.take() else {
+            return;
+        };
+        let cwd_fd = self.cwd_fd.take().expect("active cwd guard has an fd");
+        let mut target_cwds = self.fs.target_cwds.write();
+        let entry = target_cwds
+            .remove(&target_id)
+            .expect("active cwd guard has a target mapping");
+        assert_eq!(
+            entry.cwd_fd, cwd_fd,
+            "cwd descriptor changed for target {}",
+            entry.target_name
+        );
+        (self.remove_fd)(&self.fs.inner, cwd_fd);
+    }
+}
+
+fn remove_dynamic_fd(inner: &StandardDynamicFileSystem<LFS>, fd: Fd) {
+    inner.remove_fd(fd);
+}
+
+impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
+    pub fn enter_target_cwd<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        cwd: &[u8],
+    ) -> Result<TargetCwdGuard<'_, StandardDynamicFileSystem<LFS>>, String> {
+        let cwd = std::str::from_utf8(cwd).map_err(|_| "cwd is not valid UTF-8".to_string())?;
+        if cwd.is_empty() {
+            return Err("cwd is empty".to_string());
+        }
+
+        let mut components = Vec::new();
+        for component in Path::new(cwd).components() {
+            match component {
+                Component::RootDir | Component::CurDir => {}
+                Component::Normal(component) => components.push(
+                    component
+                        .to_str()
+                        .ok_or_else(|| "cwd component is not valid UTF-8".to_string())?,
+                ),
+                Component::ParentDir => {
+                    components
+                        .pop()
+                        .ok_or_else(|| "cwd escapes the filesystem root".to_string())?;
+                }
+                Component::Prefix(_) => return Err("cwd contains a path prefix".to_string()),
+            }
+        }
+
+        let target_id = TypeId::of::<Wasm>();
+        let mut target_cwds = self.target_cwds.write();
+        if target_cwds.contains_key(&target_id) {
+            return Err(format!("target {} already has an active cwd", Wasm::NAME));
+        }
+
+        let mut inode = self.root_inode;
+        for component in components {
+            let entries = self
+                .lfs
+                .read_dir(inode)
+                .map_err(|_| format!("cannot read cwd component {component}"))?;
+            let child = entries
+                .into_iter()
+                .find_map(|(name, inode)| (name == component).then_some(inode))
+                .ok_or_else(|| format!("cwd component does not exist: {component}"))?;
+            let metadata = self
+                .lfs
+                .metadata(child)
+                .map_err(|_| format!("cannot inspect cwd component {component}"))?;
+            if metadata.filetype == wasip1::FILETYPE_SYMBOLIC_LINK {
+                return Err(format!("cwd component is a symbolic link: {component}"));
+            }
+            if metadata.filetype != wasip1::FILETYPE_DIRECTORY {
+                return Err(format!("cwd component is not a directory: {component}"));
+            }
+            inode = child;
+        }
+
+        if inode == self.root_inode {
+            return Ok(TargetCwdGuard {
+                fs: self,
+                target_id: None,
+                cwd_fd: None,
+                remove_fd: remove_dynamic_fd,
+            });
+        }
+
+        let _allocation = self.fd_allocation.lock();
+        self.prepare_fd_allocation()
+            .map_err(|()| "file descriptor table exhausted".to_string())?;
+        let cwd_fd = self.add_fd(inode, !0, !0);
+        target_cwds.insert(
+            target_id,
+            TargetCwdEntry {
+                target_name: Wasm::NAME,
+                cwd_fd,
+            },
+        );
+        Ok(TargetCwdGuard {
+            fs: self,
+            target_id: Some(target_id),
+            cwd_fd: Some(cwd_fd),
+            remove_fd: remove_dynamic_fd,
+        })
+    }
+
+    fn prepare_fd_allocation(&self) -> Result<(), ()> {
+        let mut next_fd = self.inner.next_fd.load(Ordering::SeqCst);
+        while next_fd != u32::MAX && self.inner.fd_map.contains_key(&next_fd) {
+            next_fd += 1;
+        }
+        self.inner.next_fd.store(next_fd, Ordering::SeqCst);
+        (next_fd != u32::MAX).then_some(()).ok_or(())
+    }
+
+    fn routed_fd<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        target_cwds: &parking_lot::RwLockReadGuard<'_, HashMap<TypeId, TargetCwdEntry>>,
+        fd: Fd,
+        path_ptr: *const u8,
+        path_len: usize,
+    ) -> Fd {
+        if fd != self.root_fd {
+            return fd;
+        }
+        let Some(entry) = target_cwds.get(&TypeId::of::<Wasm>()) else {
+            return fd;
+        };
+        if matches!(
+            WasmPathAccess::<Wasm>::new(path_ptr, path_len)
+                .components()
+                .next(),
+            Some(WasmPathComponent::RootDir) | None
+        ) {
+            fd
+        } else {
+            entry.cwd_fd
+        }
+    }
+
+    fn is_protected_fd(
+        &self,
+        target_cwds: &parking_lot::RwLockReadGuard<'_, HashMap<TypeId, TargetCwdEntry>>,
+        fd: Fd,
+    ) -> bool {
+        fd == self.root_fd || target_cwds.values().any(|entry| entry.cwd_fd == fd)
+    }
+}
+
+impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
+    fn fd_write_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        iovs_ptr: *const Ciovec,
+        iovs_len: usize,
+        nwritten: *mut Size,
+    ) -> wasip1::Errno {
+        self.inner
+            .fd_write_raw::<Wasm>(fd, iovs_ptr, iovs_len, nwritten)
+    }
+
+    fn fd_pwrite_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        iovs_ptr: *const Ciovec,
+        iovs_len: usize,
+        offset: u64,
+        nwritten: *mut Size,
+    ) -> wasip1::Errno {
+        self.inner
+            .fd_pwrite_raw::<Wasm>(fd, iovs_ptr, iovs_len, offset, nwritten)
+    }
+
+    fn fd_advise_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        offset: u64,
+        len: u64,
+        advice: wasip1::Advice,
+    ) -> wasip1::Errno {
+        self.inner.fd_advise_raw::<Wasm>(fd, offset, len, advice)
+    }
+
+    fn fd_allocate_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        offset: u64,
+        len: u64,
+    ) -> wasip1::Errno {
+        self.inner.fd_allocate_raw::<Wasm>(fd, offset, len)
+    }
+
+    fn fd_datasync_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+    ) -> wasip1::Errno {
+        self.inner.fd_datasync_raw::<Wasm>(fd)
+    }
+
+    fn fd_sync_raw<Wasm: WasmAccess + WasmAccessName + 'static>(&self, fd: Fd) -> wasip1::Errno {
+        self.inner.fd_sync_raw::<Wasm>(fd)
+    }
+
+    fn fd_tell_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        offset_ret: *mut u64,
+    ) -> wasip1::Errno {
+        self.inner.fd_tell_raw::<Wasm>(fd, offset_ret)
+    }
+
+    fn fd_fdstat_set_flags_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        flags: wasip1::Fdflags,
+    ) -> wasip1::Errno {
+        self.inner.fd_fdstat_set_flags_raw::<Wasm>(fd, flags)
+    }
+
+    fn fd_fdstat_set_rights_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        fs_rights_base: wasip1::Rights,
+        fs_rights_inheriting: wasip1::Rights,
+    ) -> wasip1::Errno {
+        self.inner
+            .fd_fdstat_set_rights_raw::<Wasm>(fd, fs_rights_base, fs_rights_inheriting)
+    }
+
+    fn fd_filestat_set_size_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        size: u64,
+    ) -> wasip1::Errno {
+        self.inner.fd_filestat_set_size_raw::<Wasm>(fd, size)
+    }
+
+    fn fd_filestat_set_times_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        atim: wasip1::Timestamp,
+        mtim: wasip1::Timestamp,
+        fst_flags: wasip1::Fstflags,
+    ) -> wasip1::Errno {
+        self.inner
+            .fd_filestat_set_times_raw::<Wasm>(fd, atim, mtim, fst_flags)
+    }
+
+    fn path_filestat_set_times_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        flags: wasip1::Lookupflags,
+        path_ptr: *const u8,
+        path_len: usize,
+        atim: wasip1::Timestamp,
+        mtim: wasip1::Timestamp,
+        fst_flags: wasip1::Fstflags,
+    ) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        let fd = self.routed_fd::<Wasm>(&target_cwds, fd, path_ptr, path_len);
+        self.inner.path_filestat_set_times_raw::<Wasm>(
+            fd, flags, path_ptr, path_len, atim, mtim, fst_flags,
+        )
+    }
+
+    fn path_symlink_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        old_path_ptr: *const u8,
+        old_path_len: usize,
+        fd: Fd,
+        new_path_ptr: *const u8,
+        new_path_len: usize,
+    ) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        let fd = self.routed_fd::<Wasm>(&target_cwds, fd, new_path_ptr, new_path_len);
+        self.inner.path_symlink_raw::<Wasm>(
+            old_path_ptr,
+            old_path_len,
+            fd,
+            new_path_ptr,
+            new_path_len,
+        )
+    }
+
+    fn fd_renumber_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        to: Fd,
+    ) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        let _allocation = self.fd_allocation.lock();
+        if self.is_protected_fd(&target_cwds, fd) || self.is_protected_fd(&target_cwds, to) {
+            return wasip1::ERRNO_NOTCAPABLE;
+        }
+        if to == u32::MAX {
+            return wasip1::ERRNO_MFILE;
+        }
+        let errno = self.inner.fd_renumber_raw::<Wasm>(fd, to);
+        if errno == wasip1::ERRNO_SUCCESS {
+            self.inner.next_fd.fetch_max(to + 1, Ordering::SeqCst);
+        }
+        errno
+    }
+
+    fn fd_readdir_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        buf: *mut u8,
+        buf_len: usize,
+        cookie: Dircookie,
+        nread: *mut Size,
+    ) -> wasip1::Errno {
+        self.inner
+            .fd_readdir_raw::<Wasm>(fd, buf, buf_len, cookie, nread)
+    }
+
+    fn path_filestat_get_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        flags: wasip1::Lookupflags,
+        path_ptr: *const u8,
+        path_len: usize,
+        filestat: *mut wasip1::Filestat,
+    ) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        let fd = self.routed_fd::<Wasm>(&target_cwds, fd, path_ptr, path_len);
+        self.inner
+            .path_filestat_get_raw::<Wasm>(fd, flags, path_ptr, path_len, filestat)
+    }
+
+    fn fd_prestat_get_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        prestat: *mut wasip1::Prestat,
+    ) -> wasip1::Errno {
+        self.inner.fd_prestat_get_raw::<Wasm>(fd, prestat)
+    }
+
+    fn fd_prestat_dir_name_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        dir_path_ptr: *mut u8,
+        dir_path_len: usize,
+    ) -> wasip1::Errno {
+        self.inner
+            .fd_prestat_dir_name_raw::<Wasm>(fd, dir_path_ptr, dir_path_len)
+    }
+
+    fn fd_close_raw<Wasm: WasmAccess + WasmAccessName + 'static>(&self, fd: Fd) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        if self.is_protected_fd(&target_cwds, fd) {
+            return wasip1::ERRNO_NOTCAPABLE;
+        }
+        self.inner.fd_close_raw::<Wasm>(fd)
+    }
+
+    fn fd_filestat_get_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        filestat: *mut wasip1::Filestat,
+    ) -> wasip1::Errno {
+        self.inner.fd_filestat_get_raw::<Wasm>(fd, filestat)
+    }
+
+    fn fd_fdstat_get_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        fdstat: *mut wasip1::Fdstat,
+    ) -> wasip1::Errno {
+        self.inner.fd_fdstat_get_raw::<Wasm>(fd, fdstat)
+    }
+
+    fn fd_read_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        iovs_ptr: *const Ciovec,
+        iovs_len: usize,
+        nread: *mut Size,
+    ) -> wasip1::Errno {
+        self.inner
+            .fd_read_raw::<Wasm>(fd, iovs_ptr, iovs_len, nread)
+    }
+
+    fn fd_pread_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        iovs_ptr: *const Ciovec,
+        iovs_len: usize,
+        offset: u64,
+        nread: *mut Size,
+    ) -> wasip1::Errno {
+        self.inner
+            .fd_pread_raw::<Wasm>(fd, iovs_ptr, iovs_len, offset, nread)
+    }
+
+    fn fd_seek_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        offset: i64,
+        whence: wasip1::Whence,
+        new_offset_ptr: *mut i64,
+    ) -> wasip1::Errno {
+        self.inner
+            .fd_seek_raw::<Wasm>(fd, offset, whence, new_offset_ptr)
+    }
+
+    fn path_open_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        dir_fd: Fd,
+        dir_flags: wasip1::Fdflags,
+        path_ptr: *const u8,
+        path_len: usize,
+        o_flags: wasip1::Oflags,
+        fs_rights_base: wasip1::Rights,
+        fs_rights_inheriting: wasip1::Rights,
+        fd_flags: wasip1::Fdflags,
+        fd_ret: *mut wasip1::Fd,
+    ) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        let _allocation = self.fd_allocation.lock();
+        if self.prepare_fd_allocation().is_err() {
+            return wasip1::ERRNO_MFILE;
+        }
+        let dir_fd = self.routed_fd::<Wasm>(&target_cwds, dir_fd, path_ptr, path_len);
+        self.inner.path_open_raw::<Wasm>(
+            dir_fd,
+            dir_flags,
+            path_ptr,
+            path_len,
+            o_flags,
+            fs_rights_base,
+            fs_rights_inheriting,
+            fd_flags,
+            fd_ret,
+        )
+    }
+
+    fn path_readlink_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        path_ptr: *const u8,
+        path_len: usize,
+        buf: *mut u8,
+        buf_len: usize,
+        buf_nread: *mut Size,
+    ) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        let fd = self.routed_fd::<Wasm>(&target_cwds, fd, path_ptr, path_len);
+        self.inner
+            .path_readlink_raw::<Wasm>(fd, path_ptr, path_len, buf, buf_len, buf_nread)
+    }
+
+    fn path_create_directory_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        path_ptr: *const u8,
+        path_len: usize,
+    ) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        let fd = self.routed_fd::<Wasm>(&target_cwds, fd, path_ptr, path_len);
+        self.inner
+            .path_create_directory_raw::<Wasm>(fd, path_ptr, path_len)
+    }
+
+    fn path_link_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        old_fd: Fd,
+        old_flags: wasip1::Lookupflags,
+        old_path_ptr: *const u8,
+        old_path_len: usize,
+        new_fd: Fd,
+        new_path_ptr: *const u8,
+        new_path_len: usize,
+    ) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        let old_fd = self.routed_fd::<Wasm>(&target_cwds, old_fd, old_path_ptr, old_path_len);
+        let new_fd = self.routed_fd::<Wasm>(&target_cwds, new_fd, new_path_ptr, new_path_len);
+        self.inner.path_link_raw::<Wasm>(
+            old_fd,
+            old_flags,
+            old_path_ptr,
+            old_path_len,
+            new_fd,
+            new_path_ptr,
+            new_path_len,
+        )
+    }
+
+    fn path_remove_directory_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        path_ptr: *const u8,
+        path_len: usize,
+    ) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        let fd = self.routed_fd::<Wasm>(&target_cwds, fd, path_ptr, path_len);
+        self.inner
+            .path_remove_directory_raw::<Wasm>(fd, path_ptr, path_len)
+    }
+
+    fn path_rename_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        old_fd: Fd,
+        old_path_ptr: *const u8,
+        old_path_len: usize,
+        new_fd: Fd,
+        new_path_ptr: *const u8,
+        new_path_len: usize,
+    ) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        let old_fd = self.routed_fd::<Wasm>(&target_cwds, old_fd, old_path_ptr, old_path_len);
+        let new_fd = self.routed_fd::<Wasm>(&target_cwds, new_fd, new_path_ptr, new_path_len);
+        self.inner.path_rename_raw::<Wasm>(
+            old_fd,
+            old_path_ptr,
+            old_path_len,
+            new_fd,
+            new_path_ptr,
+            new_path_len,
+        )
+    }
+
+    fn path_unlink_file_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        path_ptr: *const u8,
+        path_len: usize,
+    ) -> wasip1::Errno {
+        let target_cwds = self.target_cwds.read();
+        let fd = self.routed_fd::<Wasm>(&target_cwds, fd, path_ptr, path_len);
+        self.inner
+            .path_unlink_file_raw::<Wasm>(fd, path_ptr, path_len)
+    }
+}
+
 pub(crate) static LFS_ROOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn initialized_lfs_root() -> usize {
@@ -730,18 +1314,19 @@ pub mod command;
 pub mod process;
 pub mod shell;
 
-pub static VIRTUAL_FILE_SYSTEM: std::sync::LazyLock<StandardDynamicFileSystem<LFS>> =
-    std::sync::LazyLock::new(|| {
-        let lfs = StandardDynamicLFS::new();
-        let root_inode = lfs.add_preopen(".");
-        if let Ok(bin_inode) = lfs.add_dir(root_inode, "bin") {
-            let _ = lfs.add_file(bin_inode, "cargo", b"#!/bin/sh\nexit 0\n".to_vec());
-        }
-        LFS_ROOT.store(root_inode, std::sync::atomic::Ordering::SeqCst);
-        let vfs = StandardDynamicFileSystem::new(lfs);
-        vfs.add_fd(root_inode, !0, !0);
-        vfs
-    });
+pub static VIRTUAL_FILE_SYSTEM: std::sync::LazyLock<
+    CwdAwareFileSystem<StandardDynamicFileSystem<LFS>>,
+> = std::sync::LazyLock::new(|| {
+    let lfs = StandardDynamicLFS::new();
+    let root_inode = lfs.add_preopen(".");
+    if let Ok(bin_inode) = lfs.add_dir(root_inode, "bin") {
+        let _ = lfs.add_file(bin_inode, "cargo", b"#!/bin/sh\nexit 0\n".to_vec());
+    }
+    LFS_ROOT.store(root_inode, std::sync::atomic::Ordering::SeqCst);
+    let vfs = StandardDynamicFileSystem::new(lfs);
+    let root_fd = vfs.add_fd(root_inode, !0, !0);
+    CwdAwareFileSystem::new(vfs, root_inode, root_fd)
+});
 
 import_wasm!(vfs_shell);
 import_wasm!(lsp_opt);
@@ -1849,6 +2434,405 @@ fn write_cargo_result(
     lsp_opt::memcpy(out_stderr_ptr as *mut u8, &stderr_ptr.to_ne_bytes());
     lsp_opt::memcpy(out_stderr_len as *mut u8, &stderr_len.to_ne_bytes());
     lsp_opt::memcpy(out_status as *mut u8, &status.to_ne_bytes());
+}
+
+#[cfg(test)]
+mod cwd_aware_fs_tests {
+    use super::*;
+    use std::sync::{LazyLock, mpsc};
+    use std::time::Duration;
+    use wasi_virt_layer::memory::{WasmAccessName, WasmAccessRaw};
+
+    macro_rules! direct_memory_wasm {
+        ($name:ident, $display_name:literal) => {
+            #[derive(Debug)]
+            struct $name;
+
+            impl WasmAccessName for $name {
+                const NAME: &'static str = $display_name;
+            }
+
+            impl WasmAccessRaw for $name {
+                fn memcpy_raw(offset: *mut u8, src: *const u8, len: usize) {
+                    unsafe { std::ptr::copy_nonoverlapping(src, offset, len) };
+                }
+
+                fn memcpy_to_raw(offset: *mut u8, src: *const u8, len: usize) {
+                    unsafe { std::ptr::copy_nonoverlapping(src, offset, len) };
+                }
+
+                fn _main_raw() -> wasip1::Errno {
+                    wasip1::ERRNO_SUCCESS
+                }
+                fn _reset_raw() {}
+                fn _start_raw() {}
+
+                fn memory_director_raw(ptr: isize) -> isize {
+                    ptr
+                }
+            }
+        };
+    }
+
+    direct_memory_wasm!(MappedWasm, "same-name");
+    direct_memory_wasm!(SameNameWasm, "same-name");
+    direct_memory_wasm!(UnmappedWasm, "unmapped");
+
+    type TestLfs = StandardDynamicLFS<ShellVirtualStdIO>;
+    type TestFs = CwdAwareFileSystem<StandardDynamicFileSystem<TestLfs>>;
+
+    struct Fixture {
+        fs: TestFs,
+        root_fd: Fd,
+        explicit_fd: Fd,
+    }
+
+    fn fixture() -> Fixture {
+        let lfs = TestLfs::new();
+        let root = lfs.add_preopen(".");
+        lfs.add_file(root, "shared.txt", b"root".to_vec()).unwrap();
+        let cwd = lfs.add_dir(root, "cwd").unwrap();
+        lfs.add_file(cwd, "shared.txt", b"cwd-value".to_vec())
+            .unwrap();
+        lfs.add_dir(cwd, "source").unwrap();
+        lfs.add_dir(cwd, "destination").unwrap();
+        let explicit = lfs.add_dir(root, "explicit").unwrap();
+        lfs.add_file(explicit, "shared.txt", b"explicit-value".to_vec())
+            .unwrap();
+        lfs.add_file(root, "plain-file", Vec::new()).unwrap();
+        lfs.add_symlink(root, "symlink-to-cwd", "cwd").unwrap();
+
+        let inner = StandardDynamicFileSystem::new(lfs);
+        let root_fd = inner.add_fd(root, !0, !0);
+        let explicit_fd = inner.add_fd(explicit, !0, !0);
+        Fixture {
+            fs: CwdAwareFileSystem::new(inner, root, root_fd),
+            root_fd,
+            explicit_fd,
+        }
+    }
+
+    fn stat_size<Wasm: WasmAccess + WasmAccessName + 'static>(
+        fs: &TestFs,
+        fd: Fd,
+        path: &[u8],
+    ) -> u64 {
+        let mut stat: wasip1::Filestat = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            fs.path_filestat_get_raw::<Wasm>(
+                fd,
+                wasip1::LOOKUPFLAGS_SYMLINK_FOLLOW,
+                path.as_ptr(),
+                path.len(),
+                &mut stat,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        stat.size
+    }
+
+    #[test]
+    fn routes_only_relative_root_fd_paths_for_the_mapped_target() {
+        let fixture = fixture();
+        let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
+            9
+        );
+        assert_eq!(
+            stat_size::<UnmappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
+            4
+        );
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"/shared.txt"),
+            4
+        );
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.explicit_fd, b"shared.txt"),
+            14
+        );
+        drop(guard);
+    }
+
+    #[test]
+    fn target_identity_does_not_depend_on_display_name() {
+        let fixture = fixture();
+        let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
+            9
+        );
+        assert_eq!(
+            stat_size::<SameNameWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
+            4
+        );
+    }
+
+    #[test]
+    fn link_and_rename_route_both_directory_path_pairs() {
+        let fixture = fixture();
+        let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let source = b"shared.txt";
+        let link = b"linked.txt";
+        assert_eq!(
+            fixture.fs.path_link_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                source.as_ptr(),
+                source.len(),
+                fixture.explicit_fd,
+                link.as_ptr(),
+                link.len(),
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        let renamed = b"source/renamed.txt";
+        assert_eq!(
+            fixture.fs.path_rename_raw::<MappedWasm>(
+                fixture.explicit_fd,
+                link.as_ptr(),
+                link.len(),
+                fixture.root_fd,
+                renamed.as_ptr(),
+                renamed.len(),
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, renamed),
+            9
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_cwd_without_allocating_an_fd() {
+        for cwd in [
+            b"".as_slice(),
+            b"/missing",
+            b"/plain-file",
+            b"/../escape",
+            b"/symlink-to-cwd",
+            &[0xff],
+        ] {
+            let fixture = fixture();
+            let next_fd = fixture.fs.next_fd.load(Ordering::SeqCst);
+            let fd_count = fixture.fs.fd_map.len();
+            assert!(fixture.fs.enter_target_cwd::<MappedWasm>(cwd).is_err());
+            assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), next_fd);
+            assert_eq!(fixture.fs.fd_map.len(), fd_count);
+        }
+    }
+
+    #[test]
+    fn root_duplicate_drop_and_protected_descriptors_preserve_ownership() {
+        let fixture = fixture();
+        let initial_next = fixture.fs.next_fd.load(Ordering::SeqCst);
+        let initial_count = fixture.fs.fd_map.len();
+        drop(fixture.fs.enter_target_cwd::<MappedWasm>(b"/").unwrap());
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), initial_next);
+        assert_eq!(fixture.fs.fd_map.len(), initial_count);
+
+        let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
+        let next_after_first = fixture.fs.next_fd.load(Ordering::SeqCst);
+        let count_after_first = fixture.fs.fd_map.len();
+        assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/").is_err());
+        assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").is_err());
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), next_after_first);
+        assert_eq!(fixture.fs.fd_map.len(), count_after_first);
+        for fd in [fixture.root_fd, cwd_fd] {
+            assert_eq!(
+                fixture.fs.fd_close_raw::<MappedWasm>(fd),
+                wasip1::ERRNO_NOTCAPABLE
+            );
+            assert_eq!(
+                fixture.fs.fd_renumber_raw::<MappedWasm>(fd, 100),
+                wasip1::ERRNO_NOTCAPABLE
+            );
+            assert_eq!(
+                fixture.fs.fd_renumber_raw::<MappedWasm>(100, fd),
+                wasip1::ERRNO_NOTCAPABLE
+            );
+            assert!(fixture.fs.fd_map.contains_key(&fd));
+        }
+        drop(guard);
+        assert!(!fixture.fs.fd_map.contains_key(&cwd_fd));
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
+            4
+        );
+    }
+
+    #[test]
+    fn unprotected_descriptors_can_be_closed() {
+        let fixture = fixture();
+        let inode = fixture
+            .fs
+            .lfs
+            .add_dir(fixture.fs.root_inode, "closable")
+            .unwrap();
+        let fd = fixture.fs.add_fd(inode, !0, !0);
+        assert_eq!(
+            fixture.fs.fd_close_raw::<MappedWasm>(fd),
+            wasip1::ERRNO_SUCCESS
+        );
+        assert!(!fixture.fs.fd_map.contains_key(&fd));
+    }
+
+    #[test]
+    fn renumber_advances_allocator_past_occupied_destination() {
+        let fixture = fixture();
+        let destination = fixture.fs.next_fd.load(Ordering::SeqCst);
+        assert_eq!(
+            fixture
+                .fs
+                .fd_renumber_raw::<MappedWasm>(fixture.explicit_fd, destination),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert!(fixture.fs.next_fd.load(Ordering::SeqCst) > destination);
+        let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
+        assert_ne!(cwd_fd, destination);
+        assert!(fixture.fs.fd_map.contains_key(&destination));
+        assert!(fixture.fs.fd_map.contains_key(&cwd_fd));
+        drop(guard);
+    }
+
+    #[test]
+    fn descriptor_exhaustion_never_wraps_the_allocator() {
+        let fixture = fixture();
+        assert_eq!(
+            fixture
+                .fs
+                .fd_renumber_raw::<MappedWasm>(fixture.explicit_fd, u32::MAX),
+            wasip1::ERRNO_MFILE,
+        );
+        assert!(fixture.fs.fd_map.contains_key(&fixture.explicit_fd));
+
+        fixture.fs.next_fd.store(u32::MAX, Ordering::SeqCst);
+        assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").is_err());
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), u32::MAX);
+
+        let path = b"new-file";
+        let mut opened = 0;
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                wasip1::OFLAGS_CREAT,
+                !0,
+                !0,
+                0,
+                &mut opened,
+            ),
+            wasip1::ERRNO_MFILE,
+        );
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), u32::MAX);
+    }
+
+    type RouteBlock = (mpsc::Sender<()>, mpsc::Receiver<()>);
+    static ROUTE_BLOCK: LazyLock<parking_lot::Mutex<Option<RouteBlock>>> =
+        LazyLock::new(|| parking_lot::Mutex::new(None));
+
+    #[derive(Debug)]
+    struct BlockingWasm;
+
+    impl WasmAccessName for BlockingWasm {
+        const NAME: &'static str = "blocking";
+    }
+
+    impl WasmAccessRaw for BlockingWasm {
+        fn memcpy_raw(offset: *mut u8, src: *const u8, len: usize) {
+            unsafe { std::ptr::copy_nonoverlapping(src, offset, len) };
+        }
+
+        fn memcpy_to_raw(offset: *mut u8, src: *const u8, len: usize) {
+            let block = ROUTE_BLOCK.lock().take();
+            if let Some((entered, release)) = block {
+                entered.send(()).unwrap();
+                release.recv().unwrap();
+            }
+            unsafe { std::ptr::copy_nonoverlapping(src, offset, len) };
+        }
+
+        fn _main_raw() -> wasip1::Errno {
+            wasip1::ERRNO_SUCCESS
+        }
+        fn _reset_raw() {}
+        fn _start_raw() {}
+        fn memory_director_raw(ptr: isize) -> isize {
+            ptr
+        }
+    }
+
+    #[test]
+    fn routed_call_holds_lock_until_inner_dispatch_finishes() {
+        let fixture = fixture();
+        let guard = fixture
+            .fs
+            .enter_target_cwd::<BlockingWasm>(b"/cwd")
+            .unwrap();
+        let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<BlockingWasm>()].cwd_fd;
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        *ROUTE_BLOCK.lock() = Some((entered_tx, release_rx));
+
+        let (path_tx, path_rx) = mpsc::channel();
+        let (drop_started_tx, drop_started_rx) = mpsc::channel();
+        let (drop_finished_tx, drop_finished_rx) = mpsc::channel();
+        let mut write_was_available = false;
+        let mut drop_finished_early = false;
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let path = b"shared.txt";
+                let mut stat: wasip1::Filestat = unsafe { std::mem::zeroed() };
+                let errno = fixture.fs.path_filestat_get_raw::<BlockingWasm>(
+                    fixture.root_fd,
+                    wasip1::LOOKUPFLAGS_SYMLINK_FOLLOW,
+                    path.as_ptr(),
+                    path.len(),
+                    &mut stat,
+                );
+                path_tx.send(errno).unwrap();
+            });
+
+            if let Err(error) = entered_rx.recv_timeout(Duration::from_secs(1)) {
+                let _ = release_tx.send(());
+                panic!("routed call did not inspect the path: {error}");
+            }
+            write_was_available = fixture.fs.target_cwds.try_write().is_some();
+            scope.spawn(move || {
+                drop_started_tx.send(()).unwrap();
+                drop(guard);
+                drop_finished_tx.send(()).unwrap();
+            });
+            let drop_started = drop_started_rx.recv_timeout(Duration::from_secs(1));
+            if drop_started.is_ok() {
+                drop_finished_early = drop_finished_rx
+                    .recv_timeout(Duration::from_millis(50))
+                    .is_ok();
+            }
+            let release_result = release_tx.send(());
+            let path_result = path_rx.recv_timeout(Duration::from_secs(1));
+            let drop_finished = if drop_started.is_ok() && !drop_finished_early {
+                Some(drop_finished_rx.recv_timeout(Duration::from_secs(1)))
+            } else {
+                None
+            };
+
+            assert!(drop_started.is_ok());
+            assert!(release_result.is_ok());
+            assert_eq!(path_result.unwrap(), wasip1::ERRNO_SUCCESS);
+            assert!(drop_finished.is_some_and(|result| result.is_ok()));
+        });
+
+        assert!(!write_was_available);
+        assert!(!drop_finished_early);
+        assert!(!fixture.fs.fd_map.contains_key(&cwd_fd));
+    }
 }
 
 #[cfg(test)]
