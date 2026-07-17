@@ -78,6 +78,21 @@ jobs:
           cd page
           bunx mini-coi -sw dist/mini-coi.js
           sed -i '/<head>/a \    <script src="./mini-coi.js" scope="./"></script>' dist/index.html
+      - name: Add v1 static snapshot
+        run: |
+          rm -rf page/dist/v1
+          mkdir -p page/dist/v1
+
+          git fetch --depth=1 origin refs/heads/v1-dist
+          git archive --format=tar FETCH_HEAD \
+            | tar -xf - -C page/dist/v1
+
+          test -f page/dist/v1/index.html
+          test -d page/dist/v1/assets
+
+          echo "v1 snapshot:"
+          find page/dist/v1 -maxdepth 2 -type f | sort
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
