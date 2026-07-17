@@ -19,6 +19,7 @@ import {
   isChildProcessMessage,
 } from "../../lib/src/child_process_bridge";
 import { createCratesProxyFetch } from "../../lib/src/proxy";
+import childProcessWorkerUrl from "./worker_process/vfs_bindings/child_process_worker.ts?worker&url";
 
 wait_async_polyfill();
 
@@ -337,10 +338,7 @@ edition = "2021"
   const stderr = new XtermStderr(term);
   const childBridge = createChildProcessBridge({
     getWasiRef: () => farm.get_ref(),
-    workerUrl: new URL(
-      "./worker_process/vfs_bindings/child_process_worker.ts",
-      import.meta.url,
-    ),
+    workerUrl: childProcessWorkerUrl,
     filesystemRoot: root_dir.dir,
     uploadTimeoutMs: 30000,
     executionTimeoutMs: 120000,
