@@ -48,7 +48,7 @@ jobs:
           rustup target add wasm32-wasip1-threads --toolchain nightly
       - name: install wasi_virt_layer
         run: |
-          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/oligamiq/wasi_virt_layer/releases/download/v0.6.0/wasi_virt_layer-cli-installer.sh | sh
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/oligamiq/wasi_virt_layer/releases/download/v0.6.1/wasi_virt_layer-cli-installer.sh | sh
 
       - name: Build
         run: |
