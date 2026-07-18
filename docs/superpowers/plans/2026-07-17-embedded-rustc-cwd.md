@@ -19,7 +19,7 @@
 - Serialize temporary cwd allocation, `path_open_raw`, and renumbering with one FD-allocation mutex.
 - Reserve FD `u32::MAX`; return `ERRNO_MFILE` instead of allowing `next_fd` to wrap.
 - Return `wasip1::ERRNO_NOTCAPABLE` for attempts to close or renumber the root FD or an active cwd FD.
-- Reject an empty cwd, invalid UTF-8, unsupported prefixes, root escapes, missing components, symlink components, and non-directory components.
+- Treat an empty cwd as a no-op that preserves root routing and allocates no mapping or FD; reject invalid non-empty UTF-8, unsupported prefixes, root escapes, missing components, symlink components, and non-directory components.
 - Treat `/` as a no-allocation guard only after rejecting an existing mapping for the same target.
 - Restore cwd mapping, temporary FD, environment, arguments, output capture, and child stdio on every exit path.
 - The acceptance sequence is exactly `cargo add hello` then `cargo build -j 1` in one retained VFS session.
@@ -199,9 +199,23 @@ Add lifecycle and descriptor tests before production code as part of the same RE
 
 ```rust
 #[test]
+fn empty_cwd_is_a_no_op_that_preserves_root_routing() {
+    let fixture = fixture();
+    let next_fd = fixture.fs.next_fd.load(Ordering::SeqCst);
+    let fd_count = fixture.fs.fd_map.len();
+    let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"").unwrap();
+    assert!(guard.target_id.is_none());
+    assert!(guard.cwd_fd.is_none());
+    assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), next_fd);
+    assert_eq!(fixture.fs.fd_map.len(), fd_count);
+    assert!(!fixture.fs.target_cwds.read().contains_key(&TypeId::of::<MappedWasm>()));
+    assert_eq!(stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"), 4);
+}
+
+#[test]
 fn rejects_invalid_cwd_without_allocating_an_fd() {
     for cwd in [
-        b"".as_slice(), b"/missing", b"/plain-file", b"/../escape",
+        b"/missing".as_slice(), b"/plain-file", b"/../escape",
         b"/symlink-to-cwd", &[0xff],
     ] {
         let fixture = fixture();
@@ -450,13 +464,14 @@ Keep the existing concrete `type LFS = StandardDynamicLFS<ShellVirtualStdIO>` al
 
 The implementation must perform these operations in order:
 
-1. Decode with `std::str::from_utf8`; reject empty input.
-2. Normalize `Path::components()`: ignore `RootDir` and `CurDir`, push `Normal`, pop for `ParentDir`, reject an empty-stack pop, and reject `Prefix`.
-3. Acquire `target_cwds.write()` before inspecting filesystem state, and retain it through traversal, duplicate checking, FD allocation, and insertion. This excludes wrapper-routed path mutations during validation; direct `.lfs` mutation callers do not rename or remove Cargo registry directories during the serialized rustc spawn path.
-4. Reject an existing `TypeId::of::<Wasm>()` before handling normalized root.
-5. Traverse from `self.root_inode` through `self.lfs.read_dir(inode)`, matching each normal UTF-8 component exactly. Check `self.lfs.metadata(child).filetype`; reject `FILETYPE_SYMBOLIC_LINK` and every type other than `FILETYPE_DIRECTORY`.
-6. Return a guard with `target_id: None` and `cwd_fd: None` for normalized root.
-7. Acquire `fd_allocation` after the mapping write lock, advance `inner.next_fd` past occupied `fd_map` keys, and reject with `"file descriptor table exhausted"` before `u32::MAX` can be allocated. Call `self.add_fd(inode, !0, !0)` exactly once, insert `TargetCwdEntry { target_name: Wasm::NAME, cwd_fd }`, and return the active guard.
+1. Return a guard with `target_id: None` and `cwd_fd: None` for empty input without acquiring the mapping lock or allocating an FD.
+2. Decode non-empty input with `std::str::from_utf8`; reject invalid UTF-8.
+3. Normalize `Path::components()`: ignore `RootDir` and `CurDir`, push `Normal`, pop for `ParentDir`, reject an empty-stack pop, and reject `Prefix`.
+4. Acquire `target_cwds.write()` before inspecting filesystem state, and retain it through traversal, duplicate checking, FD allocation, and insertion. This excludes wrapper-routed path mutations during validation; direct `.lfs` mutation callers do not rename or remove Cargo registry directories during the serialized rustc spawn path.
+5. Reject an existing `TypeId::of::<Wasm>()` before handling normalized root.
+6. Traverse from `self.root_inode` through `self.lfs.read_dir(inode)`, matching each normal UTF-8 component exactly. Check `self.lfs.metadata(child).filetype`; reject `FILETYPE_SYMBOLIC_LINK` and every type other than `FILETYPE_DIRECTORY`.
+7. Return a guard with `target_id: None` and `cwd_fd: None` for normalized root.
+8. Acquire `fd_allocation` after the mapping write lock, advance `inner.next_fd` past occupied `fd_map` keys, and reject with `"file descriptor table exhausted"` before `u32::MAX` can be allocated. Call `self.add_fd(inode, !0, !0)` exactly once, insert `TargetCwdEntry { target_name: Wasm::NAME, cwd_fd }`, and return the active guard.
 
 Implement `Drop` so an active guard acquires the write lock, removes the same `TypeId`, verifies the recorded FD matches, removes that FD while still locked, and leaves root no-op guards unchanged.
 

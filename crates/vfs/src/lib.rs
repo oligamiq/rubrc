@@ -836,10 +836,15 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         &self,
         cwd: &[u8],
     ) -> Result<TargetCwdGuard<'_, StandardDynamicFileSystem<LFS>>, String> {
-        let cwd = std::str::from_utf8(cwd).map_err(|_| "cwd is not valid UTF-8".to_string())?;
         if cwd.is_empty() {
-            return Err("cwd is empty".to_string());
+            return Ok(TargetCwdGuard {
+                fs: self,
+                target_id: None,
+                cwd_fd: None,
+                remove_fd: remove_dynamic_fd,
+            });
         }
+        let cwd = std::str::from_utf8(cwd).map_err(|_| "cwd is not valid UTF-8".to_string())?;
 
         let mut components = Vec::new();
         for component in Path::new(cwd).components() {
@@ -2644,8 +2649,7 @@ mod cwd_aware_fs_tests {
     #[test]
     fn rejects_invalid_cwd_without_allocating_an_fd() {
         for cwd in [
-            b"".as_slice(),
-            b"/missing",
+            b"/missing".as_slice(),
             b"/plain-file",
             b"/../escape",
             b"/symlink-to-cwd",
@@ -2658,6 +2662,35 @@ mod cwd_aware_fs_tests {
             assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), next_fd);
             assert_eq!(fixture.fs.fd_map.len(), fd_count);
         }
+    }
+
+    #[test]
+    fn empty_cwd_is_a_no_op_that_preserves_root_routing() {
+        let fixture = fixture();
+        let initial_next = fixture.fs.next_fd.load(Ordering::SeqCst);
+        let initial_count = fixture.fs.fd_map.len();
+
+        let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"").unwrap();
+
+        assert!(guard.target_id.is_none());
+        assert!(guard.cwd_fd.is_none());
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), initial_next);
+        assert_eq!(fixture.fs.fd_map.len(), initial_count);
+        assert!(
+            !fixture
+                .fs
+                .target_cwds
+                .read()
+                .contains_key(&TypeId::of::<MappedWasm>())
+        );
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
+            4
+        );
+
+        drop(guard);
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), initial_next);
+        assert_eq!(fixture.fs.fd_map.len(), initial_count);
     }
 
     #[test]

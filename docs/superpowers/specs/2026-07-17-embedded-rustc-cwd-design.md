@@ -93,13 +93,14 @@ where
 
 The operation:
 
-1. Decodes and normalizes the Cargo cwd.
-2. Rejects invalid UTF-8, unsupported prefixes, root escapes, missing entries, symlink components, and non-directory entries. Cwd traversal does not follow symlinks.
-3. Returns a no-op guard for `/` because root routing already has the correct behavior.
-4. Traverses `inner.lfs` from the wrapper's recorded root inode.
-5. Acquires the mapping write lock and checks that `TypeId::of::<Wasm>()` is absent.
-6. While still holding that lock, calls `inner.add_fd` exactly once with directory rights equivalent to the root preopen and inserts the resulting FD into the target entry. If insertion cannot complete, it removes that same FD before returning.
-7. Returns an RAII guard.
+1. Returns a no-op guard for an empty cwd so rustc discovery/probe invocations preserve root routing without allocating a mapping or FD.
+2. Decodes and normalizes a non-empty Cargo cwd.
+3. Rejects invalid UTF-8, unsupported prefixes, root escapes, missing entries, symlink components, and non-directory entries. Cwd traversal does not follow symlinks.
+4. Acquires the mapping write lock and checks that `TypeId::of::<Wasm>()` is absent.
+5. Traverses `inner.lfs` from the wrapper's recorded root inode.
+6. Returns a no-op guard for `/` because root routing already has the correct behavior.
+7. While still holding that lock, calls `inner.add_fd` exactly once with directory rights equivalent to the root preopen and inserts the resulting FD into the target entry. If insertion cannot complete, it removes that same FD before returning.
+8. Returns an RAII guard.
 
 `TargetCwdGuard::drop` acquires the mapping write lock, removes the target mapping, and then removes that entry's exact temporary FD before releasing the lock. Active path calls hold a read lock through inner dispatch, so cleanup waits for them. Protected close/renumber handling ensures the stored FD still names the wrapper-owned inode.
 
@@ -153,6 +154,7 @@ Unit tests use separate fake `WasmAccessName` target types and an in-memory dyna
 - An absolute path for the mapped target still resolves from root.
 - A path using an explicitly opened directory FD is not remapped.
 - Both sides of link and rename operations are routed independently.
+- An empty cwd returns a no-op guard, allocates no mapping or FD, and preserves root routing.
 - A no-op root guard does not allocate or alter routing.
 - Missing, file-valued, escaping, and duplicate cwd mappings are rejected.
 - Symlink components in a cwd are rejected rather than followed.
