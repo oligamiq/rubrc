@@ -20,7 +20,8 @@
     "vfs:debug-rustc-fixed": "deno run --no-lock -A scripts/test_rustc_fixed.ts",
     "vfs:clean": "cd crates/vfs && rm -rf dist target llvm_mock.wasm rustc_mock.wasm",
     "build": "bun run vfs:build && bun run --cwd lib build && bun run --cwd page build",
-    "build:prod": "bun run vfs:build:prod && bun run --cwd lib build && bun run --cwd page build"
+    "build:prod": "bun run vfs:build:prod && bun run --cwd lib build && bun run --cwd page build",
+    "vfs:prepare:prod": "node scripts/prepare-vfs-asset.mjs page/dist"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.2",

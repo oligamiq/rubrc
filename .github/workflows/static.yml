@@ -75,6 +75,7 @@ jobs:
         run: |
           bun i
           bun run build:prod
+          bun run vfs:prepare:prod
           cd page
           bunx mini-coi -sw dist/mini-coi.js
           sed -i '/<head>/a \    <script src="./mini-coi.js" scope="./"></script>' dist/index.html
@@ -92,6 +93,10 @@ jobs:
 
           echo "v1 snapshot:"
           find page/dist/v1 -maxdepth 2 -type f | sort
+
+      - name: Verify artifacts
+        run: |
+          node scripts/verify-vfs-asset.mjs page/dist
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
