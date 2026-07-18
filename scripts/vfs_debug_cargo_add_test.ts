@@ -157,12 +157,15 @@ if (result.output.indexOf(" $ ", returnIndex) === -1) {
   console.error("shell prompt did not return after the final cargo command");
   Deno.exit(1);
 }
-if (!/Adding hello v\S+ to dependencies/.test(result.output)) {
+if (
+  Deno.args.length === 0 &&
+  !/Adding hello v\S+ to dependencies/.test(result.output)
+) {
   console.error("cargo add did not report adding hello");
   Deno.exit(1);
 }
 if (result.output.includes("error:")) {
-  console.error("cargo add reported an error");
+  console.error("Cargo command reported an error");
   Deno.exit(1);
 }
 if (Deno.args.length === 0) {
