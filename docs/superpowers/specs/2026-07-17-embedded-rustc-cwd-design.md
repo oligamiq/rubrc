@@ -29,6 +29,12 @@ Build-script execution is explicitly outside this design. No build-script archit
 - Preserve absolute-path behavior and explicit directory-FD behavior.
 - Restore cwd routing and temporary FD state on every exit path.
 - Do not mirror `.cargo/registry` into the browser-host filesystem.
+- Require `--vfs-unwind` for the outer VFS module in every development,
+  production, and debug VFS build so panic containment can unwind to
+  `catch_unwind` and return status `101`.
+- Do not add `--wasm-unwind`; embedded target artifacts remain unchanged.
+  This is root build configuration, not a rustc or Cargo artifact source
+  modification.
 
 ## Wrapper
 
@@ -193,7 +199,15 @@ cargo build -j 1
 
 The E2E prepares the wasm32-wasip1 sysroot, proves rustc is invoked for the registry source cwd, rejects `failed to set cwd`, requires successful compilation of `hello`, and requires the shell prompt to return.
 
-Existing local workspace Cargo build, Cargo run, Cargo add/info, Deno bridge, VFS Rust, formatting, build, and artifact checks remain required.
+A focused Deno configuration test parses root `package.json` and requires
+`vfs:build`, `vfs:build:prod`, and `vfs:build-debug` to contain the standalone
+`--vfs-unwind` flag.
+
+Existing local workspace Cargo build, Cargo run, Cargo add/info, Deno bridge,
+VFS Rust, formatting, development build, and artifact checks remain required.
+Verification also requires `bun run vfs:build:prod`, validation of both
+`dist/vfs.core.wasm` and the copied page wasm, and a byte-for-byte comparison of
+those files.
 
 ## Acceptance Criteria
 
@@ -202,4 +216,5 @@ Existing local workspace Cargo build, Cargo run, Cargo add/info, Deno bridge, VF
 - Absolute and explicit-directory-FD operations retain existing behavior.
 - Cwd state is target-local and restored after every rustc invocation.
 - `cargo add hello` followed by `cargo build -j 1` succeeds and returns to the WebShell prompt.
+- Development, production, and debug VFS build commands all enable outer-module panic unwinding with `--vfs-unwind`.
 - No WVL, browser shim, Cargo, rustc artifact, or build-script implementation is changed.

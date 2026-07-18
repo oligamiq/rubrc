@@ -23,10 +23,17 @@
 - Treat `/` as a no-allocation guard only after rejecting an existing mapping for the same target.
 - Restore cwd mapping, temporary FD, environment, arguments, output capture, and child stdio on every exit path.
 - The acceptance sequence is exactly `cargo add hello` then `cargo build -j 1` in one retained VFS session.
+- Require the standalone `--vfs-unwind` flag on `vfs:build`, `vfs:build:prod`,
+  and `vfs:build-debug` so the outer VFS can unwind to its panic handler and
+  return status `101`.
+- Do not add `--wasm-unwind`; embedded target artifacts remain unchanged. This
+  is root build configuration, not a rustc or Cargo artifact source change.
 
 ## File Structure
 
 - Modify `crates/vfs/src/lib.rs`: define the wrapper and guard, delegate/intercept WASI filesystem methods, construct the wrapped global filesystem, integrate cwd validation into rustc spawn, and add focused Rust tests.
+- Modify `package.json`: enable `--vfs-unwind` for development, production, and debug VFS builds.
+- Add `scripts/vfs_unwind_config_test.ts`: parse root `package.json` and enforce the standalone flag on all three VFS build commands.
 - Use `scripts/vfs_debug_cargo_add_test.ts` unchanged to run the two-command acceptance sequence and assert registry-cwd compilation and prompt recovery.
 - Do not modify `scripts/vfs_debug_cargo_pipe_test.ts`: use it unchanged as local-workspace regression coverage.
 
@@ -802,6 +809,7 @@ Expected: `cargo add hello` returns, rustc receives the `hello-1.0.4` registry c
 Run:
 
 ```bash
+deno test --no-lock -A scripts/vfs_unwind_config_test.ts
 deno run --no-lock -A scripts/vfs_debug_cargo_pipe_test.ts
 deno run --no-lock -A scripts/vfs_debug_cargo_run_test.ts
 deno run --no-lock -A scripts/vfs_debug_cargo_info_test.ts
@@ -810,13 +818,19 @@ cargo fmt --all -- --check
 cargo test -p vfs
 bun run --cwd lib build
 bun run --cwd page build
+bun run vfs:build:prod
 wasm-tools validate dist/vfs.core.wasm
 wasm-tools validate page/src/worker_process/vfs_bindings/vfs.core.wasm
 cmp -s dist/vfs.core.wasm page/src/worker_process/vfs_bindings/vfs.core.wasm
 git diff --check
 ```
 
-Expected: local workspace build, Cargo run/info, child/HTTP bridge tests, Rust tests, and both application builds pass; both generated VFS wasm artifacts validate and are byte-identical; formatting/diff checks report no errors. Build-script execution remains intentionally untested and unchanged because it is outside the approved scope.
+Expected: the unwind configuration test, local workspace build, Cargo run/info,
+child/HTTP bridge tests, Rust tests, both application builds, and the production
+VFS build pass; both generated VFS wasm artifacts validate and are
+byte-identical; formatting/diff checks report no errors. Build-script execution
+remains intentionally untested and unchanged because it is outside the approved
+scope.
 
 - [ ] **Step 5: Inspect the final scope**
 
@@ -841,3 +855,67 @@ git commit -m "test(vfs): build registry dependency from virtual cwd"
 ```
 
 Expected staged path: only `scripts/vfs_debug_cargo_add_test.ts`. Never stage generated bindings, unrelated scratch files, or pre-existing user changes.
+
+---
+
+### Task 4: Outer VFS Panic Unwinding
+
+**Files:**
+
+- Modify `package.json`: add the standalone `--vfs-unwind` flag to
+  `vfs:build`, `vfs:build:prod`, and `vfs:build-debug`.
+- Add `scripts/vfs_unwind_config_test.ts`: enforce outer-module unwinding on
+  all three VFS build commands without enabling embedded-target unwinding.
+- Modify this plan and
+  `docs/superpowers/specs/2026-07-17-embedded-rustc-cwd-design.md`: document
+  the build and verification requirements.
+
+- [ ] **Step 1: Add and run the focused configuration test first**
+
+```bash
+deno test --no-lock -A scripts/vfs_unwind_config_test.ts
+```
+
+Expected RED: `vfs:build must include standalone --vfs-unwind`.
+
+- [ ] **Step 2: Enable unwind only for the outer VFS module**
+
+Add `--vfs-unwind` to all development, production, and debug VFS build
+commands. Do not add `--wasm-unwind`; rustc, Cargo, and every other embedded
+target artifact remain unchanged.
+
+- [ ] **Step 3: Run build and integration verification**
+
+```bash
+deno test --no-lock -A scripts/vfs_unwind_config_test.ts
+bun run vfs:build
+deno run --no-lock -A scripts/vfs_debug_cargo_add_test.ts
+deno run --no-lock -A scripts/vfs_debug_cargo_add_test.ts build -j 1
+deno run --no-lock -A scripts/vfs_debug_cargo_pipe_test.ts
+bun run vfs:build:prod
+wasm-tools validate dist/vfs.core.wasm
+wasm-tools validate page/src/worker_process/vfs_bindings/vfs.core.wasm
+cmp -s dist/vfs.core.wasm page/src/worker_process/vfs_bindings/vfs.core.wasm
+deno fmt --check scripts/vfs_unwind_config_test.ts
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/clang cargo test -p vfs
+cargo fmt -p vfs -- --check
+git diff --check
+```
+
+Expected: RED/GREEN is recorded; development and production builds, all three
+E2Es, config/Rust/format checks, and both wasm validations pass; the copied page
+wasm is byte-identical to `dist/vfs.core.wasm`.
+
+- [ ] **Step 4: Commit only the build-integration change**
+
+```bash
+git add package.json scripts/vfs_unwind_config_test.ts \
+  docs/superpowers/specs/2026-07-17-embedded-rustc-cwd-design.md \
+  docs/superpowers/plans/2026-07-17-embedded-rustc-cwd.md
+git diff --cached --name-only
+git commit -m "build(vfs): enable panic unwinding"
+```
+
+Expected staged paths: exactly the four files listed above. Do not stage WVL,
+browser libraries, build-script execution, generated artifacts, or embedded
+rustc/Cargo wasm inputs.
