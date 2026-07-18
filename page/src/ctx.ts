@@ -7,7 +7,6 @@ export type Ctx = {
   tree_id: string;
   ls_id: string;
   exec_file_id: string;
-  download_by_url_id: string;
   load_additional_sysroot_id: string;
   input_char_id: string;
   input_string_id: string;
@@ -27,7 +26,6 @@ export const gen_ctx = (): Ctx => {
     tree_id: uuidv4(),
     ls_id: uuidv4(),
     exec_file_id: uuidv4(),
-    download_by_url_id: uuidv4(),
     load_additional_sysroot_id: uuidv4(),
     input_char_id: uuidv4(),
     input_string_id: uuidv4(),
