@@ -108,52 +108,64 @@ impl ChildProcessStdio {
 static CHILD_PROCESS_STDIO: std::sync::LazyLock<parking_lot::Mutex<Option<ChildProcessStdio>>> =
     std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
 
+struct ChildProcessStdioGuard {
+    previous: Option<ChildProcessStdio>,
+    active: bool,
+}
+
+impl ChildProcessStdioGuard {
+    fn new(cwd: Vec<u8>, stdin: Vec<u8>) -> Self {
+        let previous = {
+            let mut process = CHILD_PROCESS_STDIO.lock();
+            process.replace(ChildProcessStdio::new(cwd, stdin))
+        };
+        Self {
+            previous,
+            active: true,
+        }
+    }
+
+    fn finish(mut self) -> CargoOutput {
+        let mut current = self.restore();
+        if !current.cwd.is_empty() {
+            debug_trace(&format!(
+                "child-process:cwd {}",
+                String::from_utf8_lossy(&current.cwd)
+            ));
+        }
+        CargoOutput {
+            stdout: current.stdout.drain(),
+            stderr: current.stderr.drain(),
+        }
+    }
+
+    fn restore(&mut self) -> ChildProcessStdio {
+        let mut process = CHILD_PROCESS_STDIO.lock();
+        let current = process
+            .take()
+            .unwrap_or_else(|| ChildProcessStdio::new(Vec::new(), Vec::new()));
+        *process = self.previous.take();
+        self.active = false;
+        current
+    }
+}
+
+impl Drop for ChildProcessStdioGuard {
+    fn drop(&mut self) {
+        if self.active {
+            *CHILD_PROCESS_STDIO.lock() = self.previous.take();
+        }
+    }
+}
+
 fn with_child_process_stdio<T>(
     cwd: Vec<u8>,
     stdin: Vec<u8>,
     f: impl FnOnce() -> T,
 ) -> (T, CargoOutput) {
-    let previous = {
-        let mut process = CHILD_PROCESS_STDIO.lock();
-        process.replace(ChildProcessStdio::new(cwd, stdin))
-    };
-
+    let guard = ChildProcessStdioGuard::new(cwd, stdin);
     let result = f();
-
-    let mut current = {
-        let mut process = CHILD_PROCESS_STDIO.lock();
-        let current = process
-            .take()
-            .unwrap_or_else(|| ChildProcessStdio::new(Vec::new(), Vec::new()));
-        *process = previous;
-        current
-    };
-
-    if !current.cwd.is_empty() {
-        debug_trace(&format!(
-            "child-process:cwd {}",
-            String::from_utf8_lossy(&current.cwd)
-        ));
-    }
-
-    (
-        result,
-        CargoOutput {
-            stdout: current.stdout.drain(),
-            stderr: current.stderr.drain(),
-        },
-    )
-}
-
-fn virtual_cwd_for_set_current_dir(cwd: &[u8]) -> Option<std::borrow::Cow<'_, str>> {
-    let cwd = String::from_utf8_lossy(cwd);
-    if cwd == "/" {
-        None
-    } else if let Some(relative) = cwd.strip_prefix('/') {
-        Some(std::borrow::Cow::Owned(relative.to_string()))
-    } else {
-        Some(cwd)
-    }
+    (result, guard.finish())
 }
 
 thread_local! {
@@ -167,6 +179,36 @@ pub(crate) static RUSTC_RUN_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::n
 #[allow(dead_code)]
 static RUSTC_STARTED: AtomicBool = AtomicBool::new(false);
 pub(crate) static RUSTC_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
+
+struct RustcInvocationState {
+    previous_env: Vec<String>,
+    previous_args: Vec<String>,
+    previous_output: Option<CargoOutput>,
+}
+
+impl RustcInvocationState {
+    fn new(env: Vec<String>, args: Vec<String>) -> Self {
+        let previous_env = std::mem::replace(&mut VIRTUAL_SHELL_ENV.lock().env, env);
+        let previous_args = std::mem::replace(&mut command::VIRTUAL_ARGS.lock().args, args);
+        let previous_output =
+            CARGO_OUTPUT.with(|output| output.replace(Some(CargoOutput::default())));
+        Self {
+            previous_env,
+            previous_args,
+            previous_output,
+        }
+    }
+}
+
+impl Drop for RustcInvocationState {
+    fn drop(&mut self) {
+        VIRTUAL_SHELL_ENV.lock().env = std::mem::take(&mut self.previous_env);
+        command::VIRTUAL_ARGS.lock().args = std::mem::take(&mut self.previous_args);
+        CARGO_OUTPUT.with(|output| {
+            output.replace(self.previous_output.take());
+        });
+    }
+}
 
 struct RustcActiveGuard;
 
@@ -1706,66 +1748,50 @@ pub extern "C" fn wasi_ext_spawn(
 
     let _rustc_guard = RUSTC_RUN_LOCK.lock();
 
-    let old_env = {
-        let mut virtual_env = VIRTUAL_SHELL_ENV.lock();
-        let old = virtual_env.env.clone();
-        virtual_env.env = env
-            .split(|byte| *byte == 0)
-            .filter(|entry| !entry.is_empty())
-            .map(|entry| String::from_utf8_lossy(entry).into_owned())
-            .collect();
-        old
-    };
     if !cwd.is_empty() {
-        crate::debug_trace(&format!(
+        debug_trace(&format!(
             "wasi-ext-spawn:virtual-cwd {}",
             String::from_utf8_lossy(&cwd)
         ));
     }
 
-    let old_cwd = std::env::current_dir().ok();
-    if !cwd.is_empty() {
-        let cwd_string = String::from_utf8_lossy(&cwd);
-        let set_cwd = virtual_cwd_for_set_current_dir(&cwd);
-        if let Some(set_cwd) = set_cwd {
-            if let Err(error) = std::env::set_current_dir(set_cwd.as_ref()) {
-                VIRTUAL_SHELL_ENV.lock().env = old_env;
-                write_cargo_owned_spawn_result(
-                    Vec::new(),
-                    format!("failed to set cwd `{cwd_string}`: {error}").into_bytes(),
-                    1,
-                    out_exit_code,
-                    out_stdout_ptr,
-                    out_stdout_len,
-                    out_stderr_ptr,
-                    out_stderr_len,
-                );
-                return 0;
-            }
+    let cwd_guard = match VIRTUAL_FILE_SYSTEM.enter_target_cwd::<rustc_opt>(&cwd) {
+        Ok(guard) => guard,
+        Err(error) => {
+            let stderr = bounded_rustc_cwd_error(&cwd, &error);
+            write_cargo_owned_spawn_result(
+                Vec::new(),
+                stderr,
+                RUSTC_CWD_ERROR_STATUS,
+                out_exit_code,
+                out_stdout_ptr,
+                out_stdout_len,
+                out_stderr_ptr,
+                out_stderr_len,
+            );
+            return 0;
         }
-    }
+    };
 
-    let outer_output = CARGO_OUTPUT.with(|output| output.borrow_mut().take());
-    CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
-
-    crate::debug_trace("wasi-ext-spawn:run-rustc:enter");
-    let old_args = command::VIRTUAL_ARGS.lock().args.clone();
     argv.push("--sysroot".to_string());
     argv.push("/sysroot".to_string());
     argv.push("-Clinker-flavor=wasm-ld".to_string());
     argv.push("-Clinker=wasm-ld".to_string());
-    command::set_rustc_opt_args(&argv);
-    let ((), child_output) = with_child_process_stdio(cwd.to_vec(), stdin, run_rustc);
-    command::VIRTUAL_ARGS.lock().args = old_args;
-    let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
-    crate::debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
+    let rustc_env = env
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| String::from_utf8_lossy(entry).into_owned())
+        .collect();
+    let (child_output, status) = {
+        let _invocation_state = RustcInvocationState::new(rustc_env, argv);
+        crate::debug_trace("wasi-ext-spawn:run-rustc:enter");
+        let ((), child_output) = with_child_process_stdio(cwd.to_vec(), stdin, run_rustc);
+        let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
+        crate::debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
+        (child_output, status)
+    };
 
-    let _ = CARGO_OUTPUT.with(|output| output.borrow_mut().take());
-    CARGO_OUTPUT.with(|output| *output.borrow_mut() = outer_output);
-    if let Some(old_cwd) = old_cwd {
-        let _ = std::env::set_current_dir(old_cwd);
-    }
-    VIRTUAL_SHELL_ENV.lock().env = old_env;
+    drop(cwd_guard);
 
     write_cargo_owned_spawn_result(
         child_output.stdout,
@@ -1785,9 +1811,20 @@ const WASI_SPAWN_REPLACE: i32 = 1;
 const MAX_CHILD_MODULE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CHILD_MODULE_CHUNK_BYTES: usize = 256 * 1024;
 const MAX_CHILD_ERROR_BYTES: usize = 64 * 1024;
+const RUSTC_CWD_ERROR_STATUS: i32 = 1;
 const CHILD_STATE_UPLOADING: u32 = 1;
 const CHILD_STATE_RUNNING: u32 = 2;
 const CHILD_STATE_COMPLETED: u32 = 3;
+
+fn bounded_rustc_cwd_error(cwd: &[u8], error: &str) -> Vec<u8> {
+    let mut stderr = format!(
+        "failed to set virtual cwd `{}`: {error}",
+        String::from_utf8_lossy(cwd),
+    )
+    .into_bytes();
+    stderr.truncate(MAX_CHILD_ERROR_BYTES);
+    stderr
+}
 
 fn checked_child_module_size(size: u64) -> Result<usize, String> {
     let size = usize::try_from(size).map_err(|_| "child module exceeds 16 MiB".to_string())?;
@@ -2832,6 +2869,181 @@ mod cwd_aware_fs_tests {
         assert!(!write_was_available);
         assert!(!drop_finished_early);
         assert!(!fixture.fs.fd_map.contains_key(&cwd_fd));
+    }
+}
+
+#[cfg(test)]
+mod invocation_state_tests {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    struct ChildProcessStdioReset {
+        previous: Option<ChildProcessStdio>,
+    }
+
+    impl ChildProcessStdioReset {
+        fn install(current: Option<ChildProcessStdio>) -> Self {
+            let previous = std::mem::replace(&mut *CHILD_PROCESS_STDIO.lock(), current);
+            Self { previous }
+        }
+    }
+
+    impl Drop for ChildProcessStdioReset {
+        fn drop(&mut self) {
+            *CHILD_PROCESS_STDIO.lock() = self.previous.take();
+        }
+    }
+
+    fn install_sentinel_invocation_state(
+        env: Vec<String>,
+        args: Vec<String>,
+        stdout: Vec<u8>,
+    ) -> RustcInvocationState {
+        let state = RustcInvocationState::new(env, args);
+        CARGO_OUTPUT.with(|output| {
+            let mut output = output.borrow_mut();
+            let output = output.as_mut().unwrap();
+            output.stdout = stdout;
+            output.stderr = b"outer-error".to_vec();
+        });
+        state
+    }
+
+    #[test]
+    fn invocation_state_cwd_error_is_bounded_without_mutating_state() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        let sentinel_env = vec!["SENTINEL_ENV=1".to_string()];
+        let sentinel_args = vec!["sentinel-rustc".to_string()];
+        let sentinel_stdout = b"outer-output".to_vec();
+        let sentinel_cwd = b"/outer".to_vec();
+
+        let _outer_state = install_sentinel_invocation_state(
+            sentinel_env.clone(),
+            sentinel_args.clone(),
+            sentinel_stdout.clone(),
+        );
+        let _outer_child = ChildProcessStdioReset::install(Some(ChildProcessStdio::new(
+            sentinel_cwd.clone(),
+            Vec::new(),
+        )));
+
+        let stderr = bounded_rustc_cwd_error(&sentinel_cwd, &"x".repeat(MAX_CHILD_ERROR_BYTES));
+
+        assert_eq!(RUSTC_CWD_ERROR_STATUS, 1);
+        assert_eq!(stderr.len(), MAX_CHILD_ERROR_BYTES);
+        assert_eq!(VIRTUAL_SHELL_ENV.lock().env, sentinel_env);
+        assert_eq!(command::VIRTUAL_ARGS.lock().args, sentinel_args);
+        CARGO_OUTPUT.with(|output| {
+            assert_eq!(output.borrow().as_ref().unwrap().stdout, sentinel_stdout);
+        });
+        assert_eq!(
+            CHILD_PROCESS_STDIO.lock().as_ref().unwrap().cwd,
+            sentinel_cwd
+        );
+    }
+
+    #[test]
+    fn invocation_state_unwind_restores_previous_child_stdio() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        let sentinel_env = vec!["SENTINEL_ENV=1".to_string()];
+        let sentinel_args = vec!["sentinel-rustc".to_string()];
+        let sentinel_stdout = b"outer-output".to_vec();
+        let sentinel_cwd = b"/outer".to_vec();
+        let child_stdout = b"child-output".to_vec();
+
+        let _outer_state = install_sentinel_invocation_state(
+            sentinel_env.clone(),
+            sentinel_args.clone(),
+            sentinel_stdout.clone(),
+        );
+        let mut sentinel_child =
+            ChildProcessStdio::new(sentinel_cwd.clone(), b"outer-input".to_vec());
+        sentinel_child.stdout.write(&child_stdout);
+        sentinel_child.stderr.write(b"child-error");
+        let _outer_child = ChildProcessStdioReset::install(Some(sentinel_child));
+
+        let unwind = catch_unwind(AssertUnwindSafe(|| {
+            let _invocation_state = RustcInvocationState::new(
+                vec!["INNER_ENV=1".to_string()],
+                vec!["inner-rustc".to_string()],
+            );
+            let _child_stdio =
+                ChildProcessStdioGuard::new(b"/inner".to_vec(), b"inner-input".to_vec());
+            panic!("rustc invocation failed");
+        }));
+
+        assert!(unwind.is_err());
+        assert_eq!(VIRTUAL_SHELL_ENV.lock().env, sentinel_env);
+        assert_eq!(command::VIRTUAL_ARGS.lock().args, sentinel_args);
+        CARGO_OUTPUT.with(|output| {
+            assert_eq!(output.borrow().as_ref().unwrap().stdout, sentinel_stdout);
+        });
+        let restored_child = CHILD_PROCESS_STDIO.lock();
+        let restored_child = restored_child.as_ref().unwrap();
+        assert_eq!(restored_child.owner, std::thread::current().id());
+        assert_eq!(restored_child.cwd, sentinel_cwd);
+        assert_eq!(
+            restored_child
+                .stdin
+                .buffer
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            b"outer-input"
+        );
+        assert!(restored_child.stdin.write_closed);
+        assert_eq!(
+            restored_child
+                .stdout
+                .buffer
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            child_stdout
+        );
+        assert_eq!(
+            restored_child
+                .stderr
+                .buffer
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            b"child-error"
+        );
+    }
+
+    #[test]
+    fn invocation_state_unwind_restores_absent_child_stdio() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        let sentinel_env = vec!["SENTINEL_ENV=1".to_string()];
+        let sentinel_args = vec!["sentinel-rustc".to_string()];
+        let sentinel_stdout = b"outer-output".to_vec();
+        let sentinel_cwd = b"/outer".to_vec();
+
+        let _outer_state = install_sentinel_invocation_state(
+            sentinel_env.clone(),
+            sentinel_args.clone(),
+            sentinel_stdout.clone(),
+        );
+        let _outer_child = ChildProcessStdioReset::install(None);
+
+        let unwind = catch_unwind(AssertUnwindSafe(|| {
+            let _invocation_state = RustcInvocationState::new(
+                vec!["INNER_ENV=1".to_string()],
+                vec!["inner-rustc".to_string()],
+            );
+            let _child_stdio =
+                ChildProcessStdioGuard::new(sentinel_cwd.clone(), b"inner-input".to_vec());
+            panic!("rustc invocation failed");
+        }));
+
+        assert!(unwind.is_err());
+        assert_eq!(VIRTUAL_SHELL_ENV.lock().env, sentinel_env);
+        assert_eq!(command::VIRTUAL_ARGS.lock().args, sentinel_args);
+        CARGO_OUTPUT.with(|output| {
+            assert_eq!(output.borrow().as_ref().unwrap().stdout, sentinel_stdout);
+        });
+        assert!(CHILD_PROCESS_STDIO.lock().is_none());
     }
 }
 
