@@ -12,6 +12,8 @@ Cargo downloads and extracts registry crates into rubrc's Rust-side `VIRTUAL_FIL
 
 The local root build does not expose the bug because `/` is explicitly exempted from the outer `set_current_dir` call.
 
+For an absolute path under the active cwd, wasi-libc selects the root preopen FD and strips the leading `/` before invoking WASI. For example, rustc's absolute `/.../hello-1.0.4/src/lib.rs` reaches the filesystem as root FD plus the relative bytes `.cargo/.../hello-1.0.4/src/lib.rs`. Treating every relative root-FD path as cwd-relative duplicates the cwd prefix and returns `ENOENT`.
+
 ## Scope
 
 This change fixes cwd-aware path resolution for embedded `rustc_opt` executions. The acceptance case is `cargo add hello` followed by `cargo build` in the same WebShell session.
@@ -42,7 +44,7 @@ pub struct CwdAwareFileSystem<F> {
 }
 ```
 
-`TargetCwdEntry` stores `Wasm::NAME` for diagnostics and the temporary cwd FD for routing. `TypeId::of::<Wasm>()`, not the display name, is the target identity; two target types may legally expose the same name.
+`TargetCwdEntry` stores `Wasm::NAME` for diagnostics, the temporary cwd FD, and the normalized UTF-8 cwd components from the LFS root for routing. `TypeId::of::<Wasm>()`, not the display name, is the target identity; two target types may legally expose the same name.
 
 The concrete wrapped value remains `StandardDynamicFileSystem<LFS>`. The wrapper implements `Deref` to the inner filesystem so existing rubrc code can continue using `.lfs`, `add_fd`, and `remove_fd` without duplicating storage or changing synchronization helpers.
 
@@ -63,15 +65,16 @@ Two-directory operations remap each directory/path pair independently. For `path
 
 ## Path Routing
 
-The wrapper uses `TypeId::of::<Wasm>()` to look up the active cwd FD for the calling embedded target and retains `WasmAccessName::NAME` only for diagnostics. It uses `WasmPathAccess` to inspect the guest path without copying or modifying guest memory.
+The wrapper uses `TypeId::of::<Wasm>()` to look up the active cwd FD and normalized cwd components for the calling embedded target and retains `WasmAccessName::NAME` only for diagnostics. It uses `WasmPathAccess` to inspect and compare guest path components without copying or modifying guest memory or assuming guest pointers are host pointers.
 
 A directory FD is remapped only when all conditions hold:
 
 1. The calling target has an active cwd mapping.
 2. The incoming directory FD equals the wrapper's recorded root preopen FD.
 3. The guest path is relative; its first component is not the root component.
+4. The guest path's normal component prefix does not already equal the target's normalized cwd-from-root components.
 
-Absolute paths remain rooted at the original root FD. Paths relative to an explicitly opened directory FD remain relative to that FD. Targets without an active mapping behave exactly like the inner filesystem.
+The fourth condition preserves wasi-libc's representation of an absolute path under the cwd: wasi-libc strips the leading `/` but retains the root preopen FD, so a path already beginning with the full cwd-from-root prefix must stay root-relative. Other relative root-FD paths are remapped to the cwd FD. Directly rooted paths remain at the original root FD, paths relative to an explicitly opened directory FD remain relative to that FD, and targets without an active mapping behave exactly like the inner filesystem.
 
 Empty or malformed paths are forwarded to the inner filesystem, which retains ownership of WASI error semantics.
 
@@ -94,7 +97,7 @@ where
 The operation:
 
 1. Returns a no-op guard for an empty cwd so rustc discovery/probe invocations preserve root routing without allocating a mapping or FD.
-2. Decodes and normalizes a non-empty Cargo cwd.
+2. Decodes and normalizes a non-empty Cargo cwd, retaining its normal UTF-8 components for target-aware routing.
 3. Rejects invalid UTF-8, unsupported prefixes, root escapes, missing entries, symlink components, and non-directory entries. Cwd traversal does not follow symlinks.
 4. Acquires the mapping write lock and checks that `TypeId::of::<Wasm>()` is absent.
 5. Traverses `inner.lfs` from the wrapper's recorded root inode.
@@ -152,6 +155,7 @@ Unit tests use separate fake `WasmAccessName` target types and an in-memory dyna
 - A relative path for the mapped rustc target resolves beneath its cwd.
 - The same relative path for an unmapped target still resolves from root.
 - An absolute path for the mapped target still resolves from root.
+- A wasi-libc-normalized absolute path whose relative bytes begin with the active cwd prefix stays on the root FD and resolves that prefix exactly once.
 - A path using an explicitly opened directory FD is not remapped.
 - Both sides of link and rename operations are routed independently.
 - An empty cwd returns a no-op guard, allocates no mapping or FD, and preserves root routing.

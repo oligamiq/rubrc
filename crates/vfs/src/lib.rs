@@ -770,6 +770,7 @@ type LFS = StandardDynamicLFS<ShellVirtualStdIO>;
 struct TargetCwdEntry {
     target_name: &'static str,
     cwd_fd: Fd,
+    cwd_components: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -853,7 +854,8 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
                 Component::Normal(component) => components.push(
                     component
                         .to_str()
-                        .ok_or_else(|| "cwd component is not valid UTF-8".to_string())?,
+                        .ok_or_else(|| "cwd component is not valid UTF-8".to_string())?
+                        .to_string(),
                 ),
                 Component::ParentDir => {
                     components
@@ -871,14 +873,14 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         }
 
         let mut inode = self.root_inode;
-        for component in components {
+        for component in &components {
             let entries = self
                 .lfs
                 .read_dir(inode)
                 .map_err(|_| format!("cannot read cwd component {component}"))?;
             let child = entries
                 .into_iter()
-                .find_map(|(name, inode)| (name == component).then_some(inode))
+                .find_map(|(name, inode)| (name == component.as_str()).then_some(inode))
                 .ok_or_else(|| format!("cwd component does not exist: {component}"))?;
             let metadata = self
                 .lfs
@@ -911,6 +913,7 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
             TargetCwdEntry {
                 target_name: Wasm::NAME,
                 cwd_fd,
+                cwd_components: components,
             },
         );
         Ok(TargetCwdGuard {
@@ -943,12 +946,19 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         let Some(entry) = target_cwds.get(&TypeId::of::<Wasm>()) else {
             return fd;
         };
-        if matches!(
-            WasmPathAccess::<Wasm>::new(path_ptr, path_len)
-                .components()
-                .next(),
-            Some(WasmPathComponent::RootDir) | None
-        ) {
+        let mut path_components = WasmPathAccess::<Wasm>::new(path_ptr, path_len).components();
+        let Some(first_component) = path_components.next() else {
+            return fd;
+        };
+        if matches!(first_component, WasmPathComponent::RootDir) {
+            return fd;
+        }
+        let mut path_components = std::iter::once(first_component).chain(path_components);
+        if entry.cwd_components.iter().all(|cwd_component| {
+            path_components
+                .next()
+                .is_some_and(|path_component| path_component.eq_str(cwd_component))
+        }) {
             fd
         } else {
             entry.cwd_fd
@@ -2594,6 +2604,20 @@ mod cwd_aware_fs_tests {
             14
         );
         drop(guard);
+    }
+
+    #[test]
+    fn wasi_libc_absolute_path_form_stays_root_relative() {
+        let fixture = fixture();
+        let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"cwd/shared.txt"),
+            9
+        );
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
+            9
+        );
     }
 
     #[test]

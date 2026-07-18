@@ -154,6 +154,14 @@ fn routes_only_relative_root_fd_paths_for_the_mapped_target() {
 }
 
 #[test]
+fn wasi_libc_absolute_path_form_stays_root_relative() {
+    let fixture = fixture();
+    let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+    assert_eq!(stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"cwd/shared.txt"), 9);
+    assert_eq!(stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"), 9);
+}
+
+#[test]
 fn target_identity_does_not_depend_on_display_name() {
     let fixture = fixture();
     let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
@@ -425,6 +433,7 @@ Add imports for `TypeId`, `HashMap`, `Deref`, `WasmPathAccess`, and the WVL dyna
 struct TargetCwdEntry {
     target_name: &'static str,
     cwd_fd: Fd,
+    cwd_components: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -466,12 +475,12 @@ The implementation must perform these operations in order:
 
 1. Return a guard with `target_id: None` and `cwd_fd: None` for empty input without acquiring the mapping lock or allocating an FD.
 2. Decode non-empty input with `std::str::from_utf8`; reject invalid UTF-8.
-3. Normalize `Path::components()`: ignore `RootDir` and `CurDir`, push `Normal`, pop for `ParentDir`, reject an empty-stack pop, and reject `Prefix`.
+3. Normalize `Path::components()`: ignore `RootDir` and `CurDir`, retain each `Normal` as an owned UTF-8 component, pop for `ParentDir`, reject an empty-stack pop, and reject `Prefix`. Keep the resulting cwd-from-root components for both traversal and target routing.
 4. Acquire `target_cwds.write()` before inspecting filesystem state, and retain it through traversal, duplicate checking, FD allocation, and insertion. This excludes wrapper-routed path mutations during validation; direct `.lfs` mutation callers do not rename or remove Cargo registry directories during the serialized rustc spawn path.
 5. Reject an existing `TypeId::of::<Wasm>()` before handling normalized root.
 6. Traverse from `self.root_inode` through `self.lfs.read_dir(inode)`, matching each normal UTF-8 component exactly. Check `self.lfs.metadata(child).filetype`; reject `FILETYPE_SYMBOLIC_LINK` and every type other than `FILETYPE_DIRECTORY`.
 7. Return a guard with `target_id: None` and `cwd_fd: None` for normalized root.
-8. Acquire `fd_allocation` after the mapping write lock, advance `inner.next_fd` past occupied `fd_map` keys, and reject with `"file descriptor table exhausted"` before `u32::MAX` can be allocated. Call `self.add_fd(inode, !0, !0)` exactly once, insert `TargetCwdEntry { target_name: Wasm::NAME, cwd_fd }`, and return the active guard.
+8. Acquire `fd_allocation` after the mapping write lock, advance `inner.next_fd` past occupied `fd_map` keys, and reject with `"file descriptor table exhausted"` before `u32::MAX` can be allocated. Call `self.add_fd(inode, !0, !0)` exactly once, insert `TargetCwdEntry { target_name: Wasm::NAME, cwd_fd, cwd_components }`, and return the active guard.
 
 Implement `Drop` so an active guard acquires the write lock, removes the same `TypeId`, verifies the recorded FD matches, removes that FD while still locked, and leaves root no-op guards unchanged.
 
@@ -483,7 +492,7 @@ Implement the trait for `CwdAwareFileSystem<StandardDynamicFileSystem<LFS>>`. Ev
 Wasm: WasmAccess + WasmAccessName + 'static
 ```
 
-Add a routing helper that receives an already-held read guard. It returns the original FD unless a mapping exists, the FD equals `root_fd`, and `WasmPathAccess::<Wasm>::new(path_ptr, path_len).components().next()` is not `RootDir`. Empty and malformed paths keep the original FD so the inner filesystem owns their errno.
+Add a routing helper that receives an already-held read guard. It returns the original FD unless a mapping exists, the FD equals `root_fd`, the path is relative, and its normal component prefix does not already equal the target's retained cwd-from-root components. wasi-libc represents an absolute path under the cwd by stripping the leading `/` while retaining the root preopen FD; when the relative guest components begin with the complete target cwd prefix, keep `root_fd` so that prefix is resolved exactly once. Compare components through `WasmPathAccess::<Wasm>` without assuming guest pointers are host pointers. Directly rooted, empty, and malformed paths keep the original FD so the inner filesystem owns their semantics; explicit directory FDs are unchanged.
 
 For all ten path methods, acquire one `target_cwds.read()` guard and retain it until the delegated inner call returns:
 
