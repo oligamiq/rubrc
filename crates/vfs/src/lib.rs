@@ -7,7 +7,9 @@ use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use wasi_virt_layer::__private::wasip1::{self, Ciovec, Dircookie, Fd, Size};
-use wasi_virt_layer::memory::{WasmAccessName, WasmPathAccess, WasmPathComponent};
+use wasi_virt_layer::memory::{
+    WasmAccessName, WasmPathAccess, WasmPathComponent, WasmPathComponentCommon,
+};
 use wasi_virt_layer::wasi::file::Wasip1LFSBase;
 use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
 
@@ -770,7 +772,7 @@ type LFS = StandardDynamicLFS<ShellVirtualStdIO>;
 struct TargetCwdEntry {
     target_name: &'static str,
     cwd_fd: Fd,
-    cwd_components: Vec<String>,
+    root_path_hints: Vec<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -836,6 +838,7 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
     pub fn enter_target_cwd<Wasm: WasmAccess + WasmAccessName + 'static>(
         &self,
         cwd: &[u8],
+        root_path_hints: Vec<Vec<String>>,
     ) -> Result<TargetCwdGuard<'_, StandardDynamicFileSystem<LFS>>, String> {
         if cwd.is_empty() {
             return Ok(TargetCwdGuard {
@@ -913,7 +916,7 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
             TargetCwdEntry {
                 target_name: Wasm::NAME,
                 cwd_fd,
-                cwd_components: components,
+                root_path_hints,
             },
         );
         Ok(TargetCwdGuard {
@@ -953,11 +956,28 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         if matches!(first_component, WasmPathComponent::RootDir) {
             return fd;
         }
-        let mut path_components = std::iter::once(first_component).chain(path_components);
-        if entry.cwd_components.iter().all(|cwd_component| {
-            path_components
-                .next()
-                .is_some_and(|path_component| path_component.eq_str(cwd_component))
+        let mut normalized_path = Vec::new();
+        for component in std::iter::once(first_component).chain(path_components) {
+            if component.as_cur_dir() {
+                continue;
+            }
+            if component.as_parent_dir() {
+                if normalized_path.pop().is_none() {
+                    return entry.cwd_fd;
+                }
+                continue;
+            }
+            let Some(normal) = component.as_normal() else {
+                return entry.cwd_fd;
+            };
+            normalized_path.push(normal.into_iter().collect::<Vec<_>>());
+        }
+        if entry.root_path_hints.iter().any(|hint| {
+            hint.len() <= normalized_path.len()
+                && hint
+                    .iter()
+                    .zip(&normalized_path)
+                    .all(|(hint, component)| hint.as_bytes() == component)
         }) {
             fd
         } else {
@@ -1683,6 +1703,57 @@ pub extern "C" fn wasi_ext_git_fetch(_path_ptr: i32, _path_len: i32) -> i32 {
     1
 }
 
+fn normalize_root_path_hint(path: &str) -> Option<Vec<String>> {
+    let mut components = Vec::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::RootDir | Component::CurDir => {}
+            Component::Normal(component) => components.push(component.to_str()?.to_string()),
+            Component::ParentDir => {
+                components.pop()?;
+            }
+            Component::Prefix(_) => return None,
+        }
+    }
+    (!components.is_empty()).then_some(components)
+}
+
+fn rustc_root_path_hints(argv: &[String]) -> Vec<Vec<String>> {
+    let mut hints = Vec::new();
+    let mut next_is_emit_value = false;
+    for argument in argv {
+        let bytes = argument.as_bytes();
+        let comma_delimited = next_is_emit_value || argument.starts_with("--emit=");
+        next_is_emit_value = argument == "--emit";
+        let mut offset = 0;
+        while let Some(relative_start) = bytes[offset..].iter().position(|byte| *byte == b'/') {
+            let start = offset + relative_start;
+            if start != 0 && !matches!(bytes[start - 1], b'=' | b'@') {
+                offset = start + 1;
+                continue;
+            }
+            let end = if comma_delimited {
+                bytes[start..]
+                    .iter()
+                    .position(|byte| *byte == b',')
+                    .map_or(bytes.len(), |end| start + end)
+            } else {
+                bytes.len()
+            };
+            if let Some(hint) = normalize_root_path_hint(&argument[start..end])
+                && !hints.contains(&hint)
+            {
+                hints.push(hint);
+            }
+            if end == bytes.len() {
+                break;
+            }
+            offset = end + 1;
+        }
+    }
+    hints
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn wasi_ext_spawn(
     program_ptr: i32,
@@ -1763,6 +1834,12 @@ pub extern "C" fn wasi_ext_spawn(
 
     let _rustc_guard = RUSTC_RUN_LOCK.lock();
 
+    argv.push("--sysroot".to_string());
+    argv.push("/sysroot".to_string());
+    argv.push("-Clinker-flavor=wasm-ld".to_string());
+    argv.push("-Clinker=wasm-ld".to_string());
+    let root_path_hints = rustc_root_path_hints(&argv);
+
     if !cwd.is_empty() {
         debug_trace(&format!(
             "wasi-ext-spawn:virtual-cwd {}",
@@ -1770,7 +1847,7 @@ pub extern "C" fn wasi_ext_spawn(
         ));
     }
 
-    let cwd_guard = match VIRTUAL_FILE_SYSTEM.enter_target_cwd::<rustc_opt>(&cwd) {
+    let cwd_guard = match VIRTUAL_FILE_SYSTEM.enter_target_cwd::<rustc_opt>(&cwd, root_path_hints) {
         Ok(guard) => guard,
         Err(error) => {
             let stderr = bounded_rustc_cwd_error(&cwd, &error);
@@ -1788,10 +1865,6 @@ pub extern "C" fn wasi_ext_spawn(
         }
     };
 
-    argv.push("--sysroot".to_string());
-    argv.push("/sysroot".to_string());
-    argv.push("-Clinker-flavor=wasm-ld".to_string());
-    argv.push("-Clinker=wasm-ld".to_string());
     let rustc_env = env
         .split(|byte| *byte == 0)
         .filter(|entry| !entry.is_empty())
@@ -2546,6 +2619,15 @@ mod cwd_aware_fs_tests {
         let cwd = lfs.add_dir(root, "cwd").unwrap();
         lfs.add_file(cwd, "shared.txt", b"cwd-value".to_vec())
             .unwrap();
+        let nested_cwd = lfs.add_dir(cwd, "cwd").unwrap();
+        lfs.add_file(nested_cwd, "shared.txt", b"nested-cwd".to_vec())
+            .unwrap();
+        let root_sysroot = lfs.add_dir(root, "sysroot").unwrap();
+        lfs.add_file(root_sysroot, "shared.txt", b"root-sysroot".to_vec())
+            .unwrap();
+        let cwd_sysroot = lfs.add_dir(cwd, "sysroot").unwrap();
+        lfs.add_file(cwd_sysroot, "shared.txt", b"cwd-sysroot".to_vec())
+            .unwrap();
         lfs.add_dir(cwd, "source").unwrap();
         lfs.add_dir(cwd, "destination").unwrap();
         let explicit = lfs.add_dir(root, "explicit").unwrap();
@@ -2586,7 +2668,10 @@ mod cwd_aware_fs_tests {
     #[test]
     fn routes_only_relative_root_fd_paths_for_the_mapped_target() {
         let fixture = fixture();
-        let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
         assert_eq!(
             stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
             9
@@ -2607,13 +2692,41 @@ mod cwd_aware_fs_tests {
     }
 
     #[test]
-    fn wasi_libc_absolute_path_form_stays_root_relative() {
+    fn root_path_hint_keeps_stripped_sysroot_path_at_root_with_cwd_collision() {
         let fixture = fixture();
-        let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", vec![vec!["sysroot".to_string()]])
+            .unwrap();
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"sysroot/shared.txt"),
+            12
+        );
+    }
+
+    #[test]
+    fn exact_absolute_source_hint_keeps_path_at_root() {
+        let fixture = fixture();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(
+                b"/cwd",
+                vec![vec!["cwd".to_string(), "shared.txt".to_string()]],
+            )
+            .unwrap();
         assert_eq!(
             stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"cwd/shared.txt"),
             9
         );
+    }
+
+    #[test]
+    fn plain_relative_path_still_routes_to_cwd_with_root_hints() {
+        let fixture = fixture();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", vec![vec!["sysroot".to_string()]])
+            .unwrap();
         assert_eq!(
             stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
             9
@@ -2621,9 +2734,25 @@ mod cwd_aware_fs_tests {
     }
 
     #[test]
+    fn relative_path_starting_with_cwd_name_routes_without_a_hint() {
+        let fixture = fixture();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"cwd/shared.txt"),
+            10
+        );
+    }
+
+    #[test]
     fn target_identity_does_not_depend_on_display_name() {
         let fixture = fixture();
-        let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
         assert_eq!(
             stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
             9
@@ -2637,7 +2766,10 @@ mod cwd_aware_fs_tests {
     #[test]
     fn link_and_rename_route_both_directory_path_pairs() {
         let fixture = fixture();
-        let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
         let source = b"shared.txt";
         let link = b"linked.txt";
         assert_eq!(
@@ -2682,7 +2814,12 @@ mod cwd_aware_fs_tests {
             let fixture = fixture();
             let next_fd = fixture.fs.next_fd.load(Ordering::SeqCst);
             let fd_count = fixture.fs.fd_map.len();
-            assert!(fixture.fs.enter_target_cwd::<MappedWasm>(cwd).is_err());
+            assert!(
+                fixture
+                    .fs
+                    .enter_target_cwd::<MappedWasm>(cwd, Vec::new())
+                    .is_err()
+            );
             assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), next_fd);
             assert_eq!(fixture.fs.fd_map.len(), fd_count);
         }
@@ -2694,7 +2831,10 @@ mod cwd_aware_fs_tests {
         let initial_next = fixture.fs.next_fd.load(Ordering::SeqCst);
         let initial_count = fixture.fs.fd_map.len();
 
-        let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"").unwrap();
+        let guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"", Vec::new())
+            .unwrap();
 
         assert!(guard.target_id.is_none());
         assert!(guard.cwd_fd.is_none());
@@ -2722,16 +2862,34 @@ mod cwd_aware_fs_tests {
         let fixture = fixture();
         let initial_next = fixture.fs.next_fd.load(Ordering::SeqCst);
         let initial_count = fixture.fs.fd_map.len();
-        drop(fixture.fs.enter_target_cwd::<MappedWasm>(b"/").unwrap());
+        drop(
+            fixture
+                .fs
+                .enter_target_cwd::<MappedWasm>(b"/", Vec::new())
+                .unwrap(),
+        );
         assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), initial_next);
         assert_eq!(fixture.fs.fd_map.len(), initial_count);
 
-        let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
         let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
         let next_after_first = fixture.fs.next_fd.load(Ordering::SeqCst);
         let count_after_first = fixture.fs.fd_map.len();
-        assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/").is_err());
-        assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").is_err());
+        assert!(
+            fixture
+                .fs
+                .enter_target_cwd::<MappedWasm>(b"/", Vec::new())
+                .is_err()
+        );
+        assert!(
+            fixture
+                .fs
+                .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+                .is_err()
+        );
         assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), next_after_first);
         assert_eq!(fixture.fs.fd_map.len(), count_after_first);
         for fd in [fixture.root_fd, cwd_fd] {
@@ -2784,7 +2942,10 @@ mod cwd_aware_fs_tests {
             wasip1::ERRNO_SUCCESS,
         );
         assert!(fixture.fs.next_fd.load(Ordering::SeqCst) > destination);
-        let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
         let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
         assert_ne!(cwd_fd, destination);
         assert!(fixture.fs.fd_map.contains_key(&destination));
@@ -2804,7 +2965,12 @@ mod cwd_aware_fs_tests {
         assert!(fixture.fs.fd_map.contains_key(&fixture.explicit_fd));
 
         fixture.fs.next_fd.store(u32::MAX, Ordering::SeqCst);
-        assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").is_err());
+        assert!(
+            fixture
+                .fs
+                .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+                .is_err()
+        );
         assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), u32::MAX);
 
         let path = b"new-file";
@@ -2866,7 +3032,7 @@ mod cwd_aware_fs_tests {
         let fixture = fixture();
         let guard = fixture
             .fs
-            .enter_target_cwd::<BlockingWasm>(b"/cwd")
+            .enter_target_cwd::<BlockingWasm>(b"/cwd", Vec::new())
             .unwrap();
         let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<BlockingWasm>()].cwd_fd;
         let (entered_tx, entered_rx) = mpsc::channel();
@@ -2964,6 +3130,49 @@ mod invocation_state_tests {
             output.stderr = b"outer-error".to_vec();
         });
         state
+    }
+
+    #[test]
+    fn rustc_argv_root_path_hints_cover_supported_forms() {
+        let argv = [
+            "rustc",
+            "/cwd/src/lib.rs",
+            "--sysroot",
+            "/sysroot",
+            "--out-dir",
+            "/target/out",
+            "-Ldependency=/target/deps",
+            "--extern=name=/target/deps/libname.rlib",
+            "--emit=dep-info=/target/emit/name.d,link=/target/emit/name.wasm",
+            "--emit",
+            "asm=/target/emit/separate.s,llvm-ir=/target/emit/separate.ll",
+            "@/response.rsp",
+            "/sysroot",
+            "/a/../normalized",
+            "/../escape",
+            "--extern=relative=target/deps/relative.rlib",
+        ]
+        .map(str::to_string);
+
+        assert_eq!(
+            rustc_root_path_hints(&argv),
+            vec![
+                vec!["cwd", "src", "lib.rs"],
+                vec!["sysroot"],
+                vec!["target", "out"],
+                vec!["target", "deps"],
+                vec!["target", "deps", "libname.rlib"],
+                vec!["target", "emit", "name.d"],
+                vec!["target", "emit", "name.wasm"],
+                vec!["target", "emit", "separate.s"],
+                vec!["target", "emit", "separate.ll"],
+                vec!["response.rsp"],
+                vec!["normalized"],
+            ]
+            .into_iter()
+            .map(|components| components.into_iter().map(str::to_string).collect())
+            .collect::<Vec<Vec<String>>>(),
+        );
     }
 
     #[test]

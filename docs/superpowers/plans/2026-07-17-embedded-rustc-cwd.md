@@ -4,7 +4,7 @@
 
 **Goal:** Route embedded `rustc_opt` relative filesystem operations through Cargo's Rust-side virtual cwd so `cargo add hello` followed by `cargo build -j 1` succeeds in one WebShell session.
 
-**Architecture:** Wrap the existing shared `StandardDynamicFileSystem` in a rubrc-owned `CwdAwareFileSystem`. The wrapper retains root identity, installs a temporary directory FD keyed by the embedded target's `TypeId`, holds routing locks through inner calls, and restores the mapping through RAII. `wasi_ext_spawn` validates the cwd before changing invocation state and runs rustc while the guard is alive.
+**Architecture:** Wrap the existing shared `StandardDynamicFileSystem` in a rubrc-owned `CwdAwareFileSystem`. The wrapper retains root identity, installs a temporary directory FD plus explicit argv-derived root-path hints keyed by the embedded target's `TypeId`, holds routing locks through inner calls, and restores the mapping through RAII. `wasi_ext_spawn` prepares the complete local rustc argv, extracts hints before libc destroys absolute intent, validates cwd before changing global invocation state, and runs rustc while the guard is alive.
 
 **Tech Stack:** Rust, `wasi_virt_layer` dynamic filesystem APIs, `parking_lot::RwLock`, Deno TypeScript E2E harness, Bun build scripts.
 
@@ -27,7 +27,7 @@
 ## File Structure
 
 - Modify `crates/vfs/src/lib.rs`: define the wrapper and guard, delegate/intercept WASI filesystem methods, construct the wrapped global filesystem, integrate cwd validation into rustc spawn, and add focused Rust tests.
-- Modify `scripts/vfs_debug_cargo_add_test.ts`: prepare the cached sysroot, run the two-command acceptance sequence, and assert registry-cwd compilation and prompt recovery.
+- Use `scripts/vfs_debug_cargo_add_test.ts` unchanged to run the two-command acceptance sequence and assert registry-cwd compilation and prompt recovery.
 - Do not modify `scripts/vfs_debug_cargo_pipe_test.ts`: use it unchanged as local-workspace regression coverage.
 
 ---
@@ -40,7 +40,7 @@
 
 **Interfaces:**
 - Consumes: the existing concrete `StandardDynamicFileSystem<LFS>`, `StandardDynamicLFS`, `WasmAccess`, `WasmAccessName`, `WasmPathAccess`, `InodeId`, and raw WASI filesystem method signatures.
-- Produces: `CwdAwareFileSystem<F>`, `TargetCwdGuard<'a, F>`, `CwdAwareFileSystem::new(inner, root_inode, root_fd)`, and `enter_target_cwd::<Wasm>(&[u8]) -> Result<TargetCwdGuard<'_, F>, String>`.
+- Produces: `CwdAwareFileSystem<F>`, `TargetCwdGuard<'a, F>`, `CwdAwareFileSystem::new(inner, root_inode, root_fd)`, and `enter_target_cwd::<Wasm>(&[u8], Vec<Vec<String>>) -> Result<TargetCwdGuard<'_, F>, String>`.
 
 - [ ] **Step 1: Add direct-memory target types and a fresh filesystem fixture**
 
@@ -145,7 +145,7 @@ Add tests with these exact assertions. Use file sizes `4`, `9`, and `14` to dist
 #[test]
 fn routes_only_relative_root_fd_paths_for_the_mapped_target() {
     let fixture = fixture();
-    let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+    let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new()).unwrap();
     assert_eq!(stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"), 9);
     assert_eq!(stat_size::<UnmappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"), 4);
     assert_eq!(stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"/shared.txt"), 4);
@@ -153,18 +153,12 @@ fn routes_only_relative_root_fd_paths_for_the_mapped_target() {
     drop(guard);
 }
 
-#[test]
-fn wasi_libc_absolute_path_form_stays_root_relative() {
-    let fixture = fixture();
-    let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
-    assert_eq!(stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"cwd/shared.txt"), 9);
-    assert_eq!(stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"), 9);
-}
+Add focused tests proving that an explicit `sysroot` hint preserves root routing despite a colliding cwd directory, an exact absolute source hint under cwd stays root-based, plain `src/lib.rs` still routes through cwd, and a relative path beginning with the cwd directory name is not root-based without a hint. Add a pure `rustc_root_path_hints` test covering standalone source, forced `--sysroot`, `--out-dir`, `-Ldependency=`, `--extern=name=`, comma-delimited `--emit`, and `@/response` forms, plus normalization, root-escape rejection, and deduplication.
 
 #[test]
 fn target_identity_does_not_depend_on_display_name() {
     let fixture = fixture();
-    let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+    let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new()).unwrap();
     assert_eq!(stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"), 9);
     assert_eq!(stat_size::<SameNameWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"), 4);
 }
@@ -172,7 +166,7 @@ fn target_identity_does_not_depend_on_display_name() {
 #[test]
 fn link_and_rename_route_both_directory_path_pairs() {
     let fixture = fixture();
-    let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+    let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new()).unwrap();
     let source = b"shared.txt";
     let link = b"linked.txt";
     assert_eq!(
@@ -211,7 +205,7 @@ fn empty_cwd_is_a_no_op_that_preserves_root_routing() {
     let fixture = fixture();
     let next_fd = fixture.fs.next_fd.load(Ordering::SeqCst);
     let fd_count = fixture.fs.fd_map.len();
-    let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"").unwrap();
+    let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"", Vec::new()).unwrap();
     assert!(guard.target_id.is_none());
     assert!(guard.cwd_fd.is_none());
     assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), next_fd);
@@ -229,7 +223,7 @@ fn rejects_invalid_cwd_without_allocating_an_fd() {
         let fixture = fixture();
         let next_fd = fixture.fs.next_fd.load(Ordering::SeqCst);
         let fd_count = fixture.fs.fd_map.len();
-        assert!(fixture.fs.enter_target_cwd::<MappedWasm>(cwd).is_err());
+        assert!(fixture.fs.enter_target_cwd::<MappedWasm>(cwd, Vec::new()).is_err());
         assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), next_fd);
         assert_eq!(fixture.fs.fd_map.len(), fd_count);
     }
@@ -240,16 +234,16 @@ fn root_duplicate_drop_and_protected_descriptors_preserve_ownership() {
     let fixture = fixture();
     let initial_next = fixture.fs.next_fd.load(Ordering::SeqCst);
     let initial_count = fixture.fs.fd_map.len();
-    drop(fixture.fs.enter_target_cwd::<MappedWasm>(b"/").unwrap());
+    drop(fixture.fs.enter_target_cwd::<MappedWasm>(b"/", Vec::new()).unwrap());
     assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), initial_next);
     assert_eq!(fixture.fs.fd_map.len(), initial_count);
 
-    let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+    let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new()).unwrap();
     let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
     let next_after_first = fixture.fs.next_fd.load(Ordering::SeqCst);
     let count_after_first = fixture.fs.fd_map.len();
-    assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/").is_err());
-    assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").is_err());
+    assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/", Vec::new()).is_err());
+    assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new()).is_err());
     assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), next_after_first);
     assert_eq!(fixture.fs.fd_map.len(), count_after_first);
     for fd in [fixture.root_fd, cwd_fd] {
@@ -272,7 +266,7 @@ fn renumber_advances_allocator_past_occupied_destination() {
         wasip1::ERRNO_SUCCESS,
     );
     assert!(fixture.fs.next_fd.load(Ordering::SeqCst) > destination);
-    let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+    let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new()).unwrap();
     let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
     assert_ne!(cwd_fd, destination);
     assert!(fixture.fs.fd_map.contains_key(&destination));
@@ -290,7 +284,7 @@ fn descriptor_exhaustion_never_wraps_the_allocator() {
     assert!(fixture.fs.fd_map.contains_key(&fixture.explicit_fd));
 
     fixture.fs.next_fd.store(u32::MAX, Ordering::SeqCst);
-    assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").is_err());
+    assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new()).is_err());
     assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), u32::MAX);
 
     let path = b"new-file";
@@ -352,7 +346,7 @@ impl WasmAccessRaw for BlockingWasm {
 #[test]
 fn routed_call_holds_lock_until_inner_dispatch_finishes() {
     let fixture = fixture();
-    let guard = fixture.fs.enter_target_cwd::<BlockingWasm>(b"/cwd").unwrap();
+    let guard = fixture.fs.enter_target_cwd::<BlockingWasm>(b"/cwd", Vec::new()).unwrap();
     let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<BlockingWasm>()].cwd_fd;
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
@@ -433,7 +427,7 @@ Add imports for `TypeId`, `HashMap`, `Deref`, `WasmPathAccess`, and the WVL dyna
 struct TargetCwdEntry {
     target_name: &'static str,
     cwd_fd: Fd,
-    cwd_components: Vec<String>,
+    root_path_hints: Vec<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -475,12 +469,12 @@ The implementation must perform these operations in order:
 
 1. Return a guard with `target_id: None` and `cwd_fd: None` for empty input without acquiring the mapping lock or allocating an FD.
 2. Decode non-empty input with `std::str::from_utf8`; reject invalid UTF-8.
-3. Normalize `Path::components()`: ignore `RootDir` and `CurDir`, retain each `Normal` as an owned UTF-8 component, pop for `ParentDir`, reject an empty-stack pop, and reject `Prefix`. Keep the resulting cwd-from-root components for both traversal and target routing.
+3. Normalize `Path::components()` for cwd traversal: ignore `RootDir` and `CurDir`, retain each `Normal` as an owned UTF-8 component, pop for `ParentDir`, reject an empty-stack pop, and reject `Prefix`.
 4. Acquire `target_cwds.write()` before inspecting filesystem state, and retain it through traversal, duplicate checking, FD allocation, and insertion. This excludes wrapper-routed path mutations during validation; direct `.lfs` mutation callers do not rename or remove Cargo registry directories during the serialized rustc spawn path.
 5. Reject an existing `TypeId::of::<Wasm>()` before handling normalized root.
 6. Traverse from `self.root_inode` through `self.lfs.read_dir(inode)`, matching each normal UTF-8 component exactly. Check `self.lfs.metadata(child).filetype`; reject `FILETYPE_SYMBOLIC_LINK` and every type other than `FILETYPE_DIRECTORY`.
 7. Return a guard with `target_id: None` and `cwd_fd: None` for normalized root.
-8. Acquire `fd_allocation` after the mapping write lock, advance `inner.next_fd` past occupied `fd_map` keys, and reject with `"file descriptor table exhausted"` before `u32::MAX` can be allocated. Call `self.add_fd(inode, !0, !0)` exactly once, insert `TargetCwdEntry { target_name: Wasm::NAME, cwd_fd, cwd_components }`, and return the active guard.
+8. Acquire `fd_allocation` after the mapping write lock, advance `inner.next_fd` past occupied `fd_map` keys, and reject with `"file descriptor table exhausted"` before `u32::MAX` can be allocated. Call `self.add_fd(inode, !0, !0)` exactly once, insert `TargetCwdEntry { target_name: Wasm::NAME, cwd_fd, root_path_hints }`, and return the active guard.
 
 Implement `Drop` so an active guard acquires the write lock, removes the same `TypeId`, verifies the recorded FD matches, removes that FD while still locked, and leaves root no-op guards unchanged.
 
@@ -492,7 +486,9 @@ Implement the trait for `CwdAwareFileSystem<StandardDynamicFileSystem<LFS>>`. Ev
 Wasm: WasmAccess + WasmAccessName + 'static
 ```
 
-Add a routing helper that receives an already-held read guard. It returns the original FD unless a mapping exists, the FD equals `root_fd`, the path is relative, and its normal component prefix does not already equal the target's retained cwd-from-root components. wasi-libc represents an absolute path under the cwd by stripping the leading `/` while retaining the root preopen FD; when the relative guest components begin with the complete target cwd prefix, keep `root_fd` so that prefix is resolved exactly once. Compare components through `WasmPathAccess::<Wasm>` without assuming guest pointers are host pointers. Directly rooted, empty, and malformed paths keep the original FD so the inner filesystem owns their semantics; explicit directory FDs are unchanged.
+Add a routing helper that receives an already-held read guard. Normalize the guest's normal-component sequence through `WasmPathAccess::<Wasm>` without assuming guest pointers are host pointers. Keep the original root FD only when that sequence equals or descends from an active root-path hint; otherwise remap relative root-FD paths to cwd. Directly rooted, empty, and malformed paths keep the original FD so the inner filesystem owns their semantics; explicit directory FDs are unchanged. Remove the automatic cwd-prefix exception completely because a legitimate relative path can begin with the cwd directory name.
+
+Document the unavoidable limitation: wasi-libc emits identical root-FD plus relative-byte calls for relative and absolute paths, so absolute paths not represented in argv cannot be preserved under the rubrc-only/no-WVL/no-artifact constraint.
 
 For all ten path methods, acquire one `target_cwds.read()` guard and retain it until the delegated inner call returns:
 
@@ -588,7 +584,7 @@ git commit -m "feat(vfs): route embedded target paths from cwd"
 
 **Interfaces:**
 - Consumes: `CwdAwareFileSystem::enter_target_cwd::<rustc_opt>`, `TargetCwdGuard`, `RUSTC_RUN_LOCK`, `VIRTUAL_SHELL_ENV`, `command::VIRTUAL_ARGS`, `CARGO_OUTPUT`, and `CHILD_PROCESS_STDIO`.
-- Produces: validation-before-mutation rustc spawning and unwind-safe restoration helpers for mutable invocation state.
+- Produces: `rustc_root_path_hints(&[String]) -> Vec<Vec<String>>`, validation-before-mutation rustc spawning, and unwind-safe restoration helpers for mutable invocation state.
 
 - [ ] **Step 1: Write failing tests for invocation-state restoration**
 
@@ -647,6 +643,12 @@ Retain the existing successful output behavior of `with_child_process_stdio`; on
 After the non-rustc branch and `RUSTC_RUN_LOCK` acquisition:
 
 ```rust
+argv.push("--sysroot".to_string());
+argv.push("/sysroot".to_string());
+argv.push("-Clinker-flavor=wasm-ld".to_string());
+argv.push("-Clinker=wasm-ld".to_string());
+let root_path_hints = rustc_root_path_hints(&argv);
+
 if !cwd.is_empty() {
     debug_trace(&format!(
         "wasi-ext-spawn:virtual-cwd {}",
@@ -654,7 +656,9 @@ if !cwd.is_empty() {
     ));
 }
 
-let cwd_guard = match VIRTUAL_FILE_SYSTEM.enter_target_cwd::<rustc_opt>(&cwd) {
+let cwd_guard = match VIRTUAL_FILE_SYSTEM
+    .enter_target_cwd::<rustc_opt>(&cwd, root_path_hints)
+{
     Ok(guard) => guard,
     Err(error) => {
         let stderr = bounded_rustc_cwd_error(&cwd, &error);
@@ -668,7 +672,7 @@ let cwd_guard = match VIRTUAL_FILE_SYSTEM.enter_target_cwd::<rustc_opt>(&cwd) {
 };
 ```
 
-Then install invocation state and child stdio, run `run_rustc`, collect status/output, restore invocation state, and finally drop `cwd_guard`.
+The pure extractor recognizes absolute values at token start and after `=` or `@`, stops each comma-delimited joined or separate `--emit` value, normalizes to root-relative components, rejects root escapes/root-only values, and deduplicates. It does not read response files. Then install the same prepared argv into invocation state, install child stdio, run `run_rustc`, collect status/output, restore invocation state, and finally drop `cwd_guard`.
 
 Delete `virtual_cwd_for_set_current_dir` and delete all use of outer `std::env::current_dir`, `std::env::set_current_dir`, and cwd restoration from the rustc spawn path. Do not change host cwd handling in `host_run_cargo`.
 
