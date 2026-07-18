@@ -6,6 +6,7 @@ import { get_data } from "../cat";
 import { write_data } from "../write_data";
 import { custom_instantiate } from "./vfs_bindings/inst";
 import { set_fake_worker } from "./vfs_bindings/common";
+import { get_brotli_decompress_stream } from "../../../lib/src/brotli_stream";
 
 import thread_spawn_path from "./vfs_bindings/thread_spawn.ts?worker&url";
 import worker_background_worker_url from "./vfs_bindings/worker_background_worker.ts?worker&url";
@@ -102,38 +103,180 @@ globalThis.addEventListener("message", async (event) => {
   const vfs_wasm_path = new URL("./vfs_bindings/vfs.core.wasm", import.meta.url)
     .href;
   let vfs_wasm: WebAssembly.Module | null = null;
-  let response: Response | null = null;
 
   try {
-    response = await fetch(vfs_wasm_path);
-    const etag =
-      response.headers.get("etag") ||
-      response.headers.get("last-modified") ||
-      "unknown";
-    const cacheKey = `${vfs_wasm_path}?etag=${etag}`;
-    vfs_wasm = await getCachedWasm(cacheKey);
+    if (import.meta.env.PROD) {
+      const manifestUrl = new URL(vfs_wasm_path);
+      manifestUrl.pathname += ".br.json";
+      manifestUrl.hash = "";
 
-    if (vfs_wasm) {
-      await terminal({
-        sessionId: 0,
-        data: new TextEncoder().encode(
-          `[VFS] Loaded compiled Wasm from local cache.\r\n`,
-        ),
-      });
-      response.body?.cancel(); // Cancel download to save bandwidth
+      const manifestRes = await fetch(manifestUrl.href);
+      if (!manifestRes.ok) {
+        throw new Error(`Failed to fetch manifest: ${manifestUrl.href} ${manifestRes.status} ${manifestRes.statusText}`);
+      }
+      const manifest = await manifestRes.json();
+
+      if (manifest.version !== 1 || manifest.encoding !== "br" || !manifest.parts || !Array.isArray(manifest.parts) || manifest.parts.length === 0) {
+        throw new Error(`Invalid manifest at ${manifestUrl.href}`);
+      }
+      if (typeof manifest.originalFile !== 'string' || !/^vfs\.core-.*\.wasm$/.test(manifest.originalFile) || manifest.originalFile.includes('/') || manifest.originalFile.includes('\\') || manifest.originalFile.includes('..')) {
+        throw new Error(`Invalid originalFile in manifest`);
+      }
+      if (!manifestUrl.pathname.endsWith(`/${manifest.originalFile}.br.json`)) {
+        throw new Error(`Manifest URL basename does not match originalFile`);
+      }
+      if (!Number.isSafeInteger(manifest.originalSize) || manifest.originalSize <= 0) {
+        throw new Error(`Invalid originalSize in manifest`);
+      }
+      if (!Number.isSafeInteger(manifest.compressedSize) || manifest.compressedSize <= 0) {
+        throw new Error(`Invalid compressedSize in manifest`);
+      }
+
+      let totalPartSize = 0;
+      for (let i = 0; i < manifest.parts.length; i++) {
+        const part = manifest.parts[i];
+        const expectedPartFile = `${manifest.originalFile}.br.part-${i.toString().padStart(3, "0")}`;
+        if (part.file !== expectedPartFile) {
+          throw new Error(`Invalid part file in manifest: expected ${expectedPartFile}, got ${part.file}`);
+        }
+        if (!Number.isSafeInteger(part.size) || part.size <= 0 || part.size > 25165824) {
+          throw new Error(`Invalid part size in manifest`);
+        }
+        totalPartSize += part.size;
+      }
+      if (totalPartSize !== manifest.compressedSize) {
+        throw new Error(`Manifest part sizes do not match compressedSize`);
+      }
+
+      const cacheKey = `${manifestUrl.href}?etag=${manifest.compressedSize}`;
+      vfs_wasm = await getCachedWasm(cacheKey);
+
+      if (vfs_wasm) {
+        await terminal({
+          sessionId: 0,
+          data: new TextEncoder().encode(`[VFS] Loaded compiled Wasm from local cache.\r\n`),
+        });
+      } else {
+        const total = manifest.compressedSize;
+        const decompressStream = await get_brotli_decompress_stream();
+
+        const { readable, writable } = new TransformStream();
+
+        (async () => {
+          const writer = writable.getWriter();
+          try {
+            let loaded = 0;
+            let partIndex = 0;
+            for (const part of manifest.parts) {
+              const partUrl = new URL(part.file, manifestUrl.href).href;
+              const partRes = await fetch(partUrl);
+              if (!partRes.ok) {
+                throw new Error(`Failed to fetch part ${partIndex} (${partUrl}): ${partRes.status} ${partRes.statusText}`);
+              }
+              const reader = partRes.body?.getReader();
+              if (!reader) throw new Error("No body on part response");
+
+              let partLoaded = 0;
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                partLoaded += value.byteLength;
+                loaded += value.byteLength;
+                let progressMsg = `\r\x1b[K[VFS] Fetching and streaming compilation: ${(loaded / 1024 / 1024).toFixed(2)} MB`;
+                if (total > 0) {
+                  const percent = Math.round((loaded / total) * 100);
+                  progressMsg += ` / ${(total / 1024 / 1024).toFixed(2)} MB (${percent}%)`;
+                }
+                await terminal({
+                  sessionId: 0,
+                  data: new TextEncoder().encode(progressMsg),
+                });
+                await writer.write(value);
+              }
+              if (partLoaded !== part.size) {
+                throw new Error(`Part size mismatch for ${part.file}: loaded ${partLoaded}, expected ${part.size}`);
+              }
+              partIndex++;
+            }
+            if (loaded !== manifest.compressedSize) {
+              throw new Error(`Total size mismatch: loaded ${loaded}, expected ${manifest.compressedSize}`);
+            }
+            await terminal({
+              sessionId: 0,
+              data: new TextEncoder().encode(`\r\n[VFS] Finalizing compilation...\r\n`),
+            });
+            await writer.close();
+          } catch (e) {
+            await writer.abort(e);
+          }
+        })();
+
+        let decompressedLoaded = 0;
+        const validationStream = new TransformStream({
+          transform(chunk, controller) {
+            decompressedLoaded += chunk.byteLength;
+            if (decompressedLoaded > manifest.originalSize) {
+              controller.error(new Error("Decompressed size exceeds originalSize"));
+              return;
+            }
+            controller.enqueue(chunk);
+          },
+          flush(controller) {
+            if (decompressedLoaded !== manifest.originalSize) {
+              controller.error(new Error(`Decompressed size (${decompressedLoaded}) does not match originalSize (${manifest.originalSize})`));
+            }
+          }
+        });
+
+        const decompressedReadable = readable.pipeThrough(decompressStream).pipeThrough(validationStream);
+
+        vfs_wasm = await WebAssembly.compileStreaming(
+          new Response(decompressedReadable, {
+            headers: { "Content-Type": "application/wasm" },
+          }),
+        );
+
+        await cacheWasm(cacheKey, vfs_wasm);
+        await terminal({
+          sessionId: 0,
+          data: new TextEncoder().encode(`[VFS] Wasm ready and cached.\r\n`),
+        });
+      }
     } else {
-      const contentLength = response.headers.get("Content-Length");
-      const total = parseInt(contentLength || "0", 10);
-      let loaded = 0;
+      let response = await fetch(vfs_wasm_path);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ${vfs_wasm_path}: ${response.status} ${response.statusText}`);
+      }
+      const etag =
+        response.headers.get("etag") ||
+        response.headers.get("last-modified") ||
+        "unknown";
+      const cacheKey = `${vfs_wasm_path}?etag=${etag}`;
+      vfs_wasm = await getCachedWasm(cacheKey);
 
-      const reader = response.body?.getReader();
-      const stream = new ReadableStream({
-        async start(controller) {
+      if (vfs_wasm) {
+        await terminal({
+          sessionId: 0,
+          data: new TextEncoder().encode(
+            `[VFS] Loaded compiled Wasm from local cache.\r\n`,
+          ),
+        });
+        response.body?.cancel(); // Cancel download to save bandwidth
+      } else {
+        const contentLength = response.headers.get("Content-Length");
+        const total = parseInt(contentLength || "0", 10);
+
+        const { readable, writable } = new TransformStream();
+        (async () => {
+          const writer = writable.getWriter();
+          const reader = response.body?.getReader();
           if (!reader) {
-            controller.close();
+            await writer.close();
             return;
           }
           try {
+            let loaded = 0;
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
@@ -147,7 +290,7 @@ globalThis.addEventListener("message", async (event) => {
                 sessionId: 0,
                 data: new TextEncoder().encode(progressMsg),
               });
-              controller.enqueue(value);
+              await writer.write(value);
             }
             await terminal({
               sessionId: 0,
@@ -155,28 +298,27 @@ globalThis.addEventListener("message", async (event) => {
                 `\r\n[VFS] Finalizing compilation...\r\n`,
               ),
             });
+            await writer.close();
           } catch (e) {
-            controller.error(e);
-          } finally {
-            controller.close();
+            await writer.abort(e);
           }
-        },
-      });
+        })();
 
-      vfs_wasm = await WebAssembly.compileStreaming(
-        new Response(stream, {
-          headers: response.headers,
-          status: response.status,
-          statusText: response.statusText,
-        }),
-      );
+        vfs_wasm = await WebAssembly.compileStreaming(
+          new Response(readable, {
+            headers: response.headers,
+            status: response.status,
+            statusText: response.statusText,
+          }),
+        );
 
-      // Cache it for next time
-      await cacheWasm(cacheKey, vfs_wasm);
-      await terminal({
-        sessionId: 0,
-        data: new TextEncoder().encode(`[VFS] Wasm ready and cached.\r\n`),
-      });
+        // Cache it for next time
+        await cacheWasm(cacheKey, vfs_wasm);
+        await terminal({
+          sessionId: 0,
+          data: new TextEncoder().encode(`[VFS] Wasm ready and cached.\r\n`),
+        });
+      }
     }
   } catch (err) {
     await terminal({
