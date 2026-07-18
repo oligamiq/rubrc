@@ -212,6 +212,44 @@ impl Drop for RustcInvocationState {
     }
 }
 
+fn run_rustc_invocation(
+    env: Vec<String>,
+    args: Vec<String>,
+    cwd: Vec<u8>,
+    stdin: Vec<u8>,
+    run: impl FnOnce(),
+) -> (CargoOutput, i32) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _invocation_state = RustcInvocationState::new(env, args);
+        debug_trace("wasi-ext-spawn:run-rustc:enter");
+        let ((), child_output) = with_child_process_stdio(cwd, stdin, run);
+        let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
+        debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
+        (child_output, status)
+    }));
+
+    match result {
+        Ok(result) => result,
+        Err(payload) => {
+            let message = if let Some(message) = payload.downcast_ref::<&str>() {
+                *message
+            } else if let Some(message) = payload.downcast_ref::<String>() {
+                message.as_str()
+            } else {
+                "unknown panic payload"
+            };
+            debug_trace(&format!("wasi-ext-spawn:run-rustc:panic {message}"));
+            (
+                CargoOutput {
+                    stdout: Vec::new(),
+                    stderr: bounded_rustc_panic_error(message),
+                },
+                RUSTC_PANIC_STATUS,
+            )
+        }
+    }
+}
+
 struct RustcActiveGuard;
 
 impl Drop for RustcActiveGuard {
@@ -1142,11 +1180,7 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         if to == u32::MAX {
             return wasip1::ERRNO_MFILE;
         }
-        let errno = self.inner.fd_renumber_raw::<Wasm>(fd, to);
-        if errno == wasip1::ERRNO_SUCCESS {
-            self.inner.next_fd.fetch_max(to + 1, Ordering::SeqCst);
-        }
-        errno
+        self.inner.fd_renumber_raw::<Wasm>(fd, to)
     }
 
     fn fd_readdir_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
@@ -1870,14 +1904,8 @@ pub extern "C" fn wasi_ext_spawn(
         .filter(|entry| !entry.is_empty())
         .map(|entry| String::from_utf8_lossy(entry).into_owned())
         .collect();
-    let (child_output, status) = {
-        let _invocation_state = RustcInvocationState::new(rustc_env, argv);
-        crate::debug_trace("wasi-ext-spawn:run-rustc:enter");
-        let ((), child_output) = with_child_process_stdio(cwd.to_vec(), stdin, run_rustc);
-        let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
-        crate::debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
-        (child_output, status)
-    };
+    let (child_output, status) =
+        run_rustc_invocation(rustc_env, argv, cwd.to_vec(), stdin, run_rustc);
 
     drop(cwd_guard);
 
@@ -1900,6 +1928,7 @@ const MAX_CHILD_MODULE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CHILD_MODULE_CHUNK_BYTES: usize = 256 * 1024;
 const MAX_CHILD_ERROR_BYTES: usize = 64 * 1024;
 const RUSTC_CWD_ERROR_STATUS: i32 = 1;
+const RUSTC_PANIC_STATUS: i32 = 101;
 const CHILD_STATE_UPLOADING: u32 = 1;
 const CHILD_STATE_RUNNING: u32 = 2;
 const CHILD_STATE_COMPLETED: u32 = 3;
@@ -1910,6 +1939,12 @@ fn bounded_rustc_cwd_error(cwd: &[u8], error: &str) -> Vec<u8> {
         String::from_utf8_lossy(cwd),
     )
     .into_bytes();
+    stderr.truncate(MAX_CHILD_ERROR_BYTES);
+    stderr
+}
+
+fn bounded_rustc_panic_error(message: &str) -> Vec<u8> {
+    let mut stderr = format!("embedded rustc panicked: {message}").into_bytes();
     stderr.truncate(MAX_CHILD_ERROR_BYTES);
     stderr
 }
@@ -2932,7 +2967,7 @@ mod cwd_aware_fs_tests {
     }
 
     #[test]
-    fn renumber_advances_allocator_past_occupied_destination() {
+    fn renumber_onto_next_fd_leaves_allocation_to_skip_the_destination() {
         let fixture = fixture();
         let destination = fixture.fs.next_fd.load(Ordering::SeqCst);
         assert_eq!(
@@ -2941,15 +2976,57 @@ mod cwd_aware_fs_tests {
                 .fd_renumber_raw::<MappedWasm>(fixture.explicit_fd, destination),
             wasip1::ERRNO_SUCCESS,
         );
-        assert!(fixture.fs.next_fd.load(Ordering::SeqCst) > destination);
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), destination);
         let guard = fixture
             .fs
             .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
             .unwrap();
         let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
-        assert_ne!(cwd_fd, destination);
+        assert_eq!(cwd_fd, destination + 1);
         assert!(fixture.fs.fd_map.contains_key(&destination));
         assert!(fixture.fs.fd_map.contains_key(&cwd_fd));
+        drop(guard);
+    }
+
+    #[test]
+    fn renumber_near_max_does_not_exhaust_low_fd_allocation() {
+        let fixture = fixture();
+        let initial_next = fixture.fs.next_fd.load(Ordering::SeqCst);
+        let destination = u32::MAX - 1;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_renumber_raw::<MappedWasm>(fixture.explicit_fd, destination),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), initial_next);
+        assert!(fixture.fs.fd_map.contains_key(&destination));
+
+        let guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
+        let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
+        assert_eq!(cwd_fd, initial_next);
+
+        let path = b"new-file";
+        let mut opened = 0;
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                wasip1::OFLAGS_CREAT,
+                !0,
+                !0,
+                0,
+                &mut opened,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert!(opened < destination);
+        assert!(fixture.fs.fd_map.contains_key(&destination));
         drop(guard);
     }
 
@@ -3098,7 +3175,6 @@ mod cwd_aware_fs_tests {
 #[cfg(test)]
 mod invocation_state_tests {
     use super::*;
-    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     struct ChildProcessStdioReset {
         previous: Option<ChildProcessStdio>,
@@ -3209,6 +3285,43 @@ mod invocation_state_tests {
     }
 
     #[test]
+    fn invocation_state_panic_error_is_bounded_with_status_101() {
+        let stderr = bounded_rustc_panic_error(&"x".repeat(MAX_CHILD_ERROR_BYTES * 2));
+
+        assert_eq!(RUSTC_PANIC_STATUS, 101);
+        assert_eq!(stderr.len(), MAX_CHILD_ERROR_BYTES);
+        assert!(stderr.starts_with(b"embedded rustc panicked: "));
+    }
+
+    #[test]
+    fn invocation_state_success_preserves_output_and_status() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        let _outer_child = ChildProcessStdioReset::install(None);
+        let previous_status = RUSTC_EXIT_STATUS.swap(17, Ordering::SeqCst);
+
+        let (output, status) = run_rustc_invocation(
+            vec!["INNER_ENV=1".to_string()],
+            vec!["inner-rustc".to_string()],
+            b"/inner".to_vec(),
+            b"inner-input".to_vec(),
+            || {
+                let mut child = CHILD_PROCESS_STDIO.lock();
+                let child = child
+                    .as_mut()
+                    .expect("replacement child stdio is installed");
+                child.stdout.write(b"inner-output");
+                child.stderr.write(b"inner-error");
+            },
+        );
+        RUSTC_EXIT_STATUS.store(previous_status, Ordering::SeqCst);
+
+        assert_eq!(status, 17);
+        assert_eq!(output.stdout, b"inner-output");
+        assert_eq!(output.stderr, b"inner-error");
+        assert!(CHILD_PROCESS_STDIO.lock().is_none());
+    }
+
+    #[test]
     fn invocation_state_unwind_restores_previous_child_stdio() {
         let _rustc_lock = RUSTC_RUN_LOCK.lock();
         let sentinel_env = vec!["SENTINEL_ENV=1".to_string()];
@@ -3228,17 +3341,39 @@ mod invocation_state_tests {
         sentinel_child.stderr.write(b"child-error");
         let _outer_child = ChildProcessStdioReset::install(Some(sentinel_child));
 
-        let unwind = catch_unwind(AssertUnwindSafe(|| {
-            let _invocation_state = RustcInvocationState::new(
-                vec!["INNER_ENV=1".to_string()],
-                vec!["inner-rustc".to_string()],
-            );
-            let _child_stdio =
-                ChildProcessStdioGuard::new(b"/inner".to_vec(), b"inner-input".to_vec());
-            panic!("rustc invocation failed");
-        }));
+        let replacement_seen = Cell::new(false);
+        let (panic_output, status) = run_rustc_invocation(
+            vec!["INNER_ENV=1".to_string()],
+            vec!["inner-rustc".to_string()],
+            b"/inner".to_vec(),
+            b"inner-input".to_vec(),
+            || {
+                assert_eq!(VIRTUAL_SHELL_ENV.lock().env, ["INNER_ENV=1"]);
+                assert_eq!(command::VIRTUAL_ARGS.lock().args, ["inner-rustc"]);
+                CARGO_OUTPUT.with(|output| {
+                    assert!(output.borrow().as_ref().unwrap().stdout.is_empty());
+                });
+                let child = CHILD_PROCESS_STDIO.lock();
+                let child = child
+                    .as_ref()
+                    .expect("replacement child stdio is installed");
+                assert_eq!(child.cwd, b"/inner");
+                assert_eq!(
+                    child.stdin.buffer.iter().copied().collect::<Vec<_>>(),
+                    b"inner-input"
+                );
+                replacement_seen.set(true);
+                panic!("rustc invocation failed");
+            },
+        );
 
-        assert!(unwind.is_err());
+        assert!(replacement_seen.get());
+        assert_eq!(status, RUSTC_PANIC_STATUS);
+        assert!(panic_output.stdout.is_empty());
+        assert_eq!(
+            panic_output.stderr,
+            b"embedded rustc panicked: rustc invocation failed"
+        );
         assert_eq!(VIRTUAL_SHELL_ENV.lock().env, sentinel_env);
         assert_eq!(command::VIRTUAL_ARGS.lock().args, sentinel_args);
         CARGO_OUTPUT.with(|output| {
@@ -3293,17 +3428,34 @@ mod invocation_state_tests {
         );
         let _outer_child = ChildProcessStdioReset::install(None);
 
-        let unwind = catch_unwind(AssertUnwindSafe(|| {
-            let _invocation_state = RustcInvocationState::new(
-                vec!["INNER_ENV=1".to_string()],
-                vec!["inner-rustc".to_string()],
-            );
-            let _child_stdio =
-                ChildProcessStdioGuard::new(sentinel_cwd.clone(), b"inner-input".to_vec());
-            panic!("rustc invocation failed");
-        }));
+        let replacement_seen = Cell::new(false);
+        let (panic_output, status) = run_rustc_invocation(
+            vec!["INNER_ENV=1".to_string()],
+            vec!["inner-rustc".to_string()],
+            sentinel_cwd.clone(),
+            b"inner-input".to_vec(),
+            || {
+                let child = CHILD_PROCESS_STDIO.lock();
+                let child = child
+                    .as_ref()
+                    .expect("replacement child stdio is installed");
+                assert_eq!(child.cwd, sentinel_cwd);
+                assert_eq!(
+                    child.stdin.buffer.iter().copied().collect::<Vec<_>>(),
+                    b"inner-input"
+                );
+                replacement_seen.set(true);
+                panic!("rustc invocation failed without prior child stdio");
+            },
+        );
 
-        assert!(unwind.is_err());
+        assert!(replacement_seen.get());
+        assert_eq!(status, RUSTC_PANIC_STATUS);
+        assert!(panic_output.stdout.is_empty());
+        assert_eq!(
+            panic_output.stderr,
+            b"embedded rustc panicked: rustc invocation failed without prior child stdio"
+        );
         assert_eq!(VIRTUAL_SHELL_ENV.lock().env, sentinel_env);
         assert_eq!(command::VIRTUAL_ARGS.lock().args, sentinel_args);
         CARGO_OUTPUT.with(|output| {

@@ -258,20 +258,34 @@ fn root_duplicate_drop_and_protected_descriptors_preserve_ownership() {
 }
 
 #[test]
-fn renumber_advances_allocator_past_occupied_destination() {
+fn renumber_onto_next_fd_leaves_allocation_to_skip_the_destination() {
     let fixture = fixture();
     let destination = fixture.fs.next_fd.load(Ordering::SeqCst);
     assert_eq!(
         fixture.fs.fd_renumber_raw::<MappedWasm>(fixture.explicit_fd, destination),
         wasip1::ERRNO_SUCCESS,
     );
-    assert!(fixture.fs.next_fd.load(Ordering::SeqCst) > destination);
+    assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), destination);
     let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new()).unwrap();
     let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
-    assert_ne!(cwd_fd, destination);
+    assert_eq!(cwd_fd, destination + 1);
     assert!(fixture.fs.fd_map.contains_key(&destination));
     assert!(fixture.fs.fd_map.contains_key(&cwd_fd));
     drop(guard);
+}
+
+#[test]
+fn renumber_near_max_does_not_exhaust_low_fd_allocation() {
+    let fixture = fixture();
+    let initial_next = fixture.fs.next_fd.load(Ordering::SeqCst);
+    let destination = u32::MAX - 1;
+    assert_eq!(
+        fixture.fs.fd_renumber_raw::<MappedWasm>(fixture.explicit_fd, destination),
+        wasip1::ERRNO_SUCCESS,
+    );
+    assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), initial_next);
+    assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new()).is_ok());
+    assert!(fixture.fs.fd_map.contains_key(&destination));
 }
 
 #[test]
@@ -507,7 +521,7 @@ path_unlink_file_raw
 
 Route both pairs independently in `path_link_raw` and `path_rename_raw`. Route only `(fd, new_path)` in `path_symlink_raw`; `old_path` remains unchanged link contents.
 
-For `fd_close_raw`, hold the read lock through both the protected-FD scan and delegated close. For `fd_renumber_raw`, hold the mapping read lock, then `fd_allocation`, while checking source/destination and delegating. Return `wasip1::ERRNO_NOTCAPABLE` if `root_fd` or any active `cwd_fd` is involved. Return `wasip1::ERRNO_MFILE` when `to == u32::MAX`. After a successful unprotected renumber, atomically raise `inner.next_fd` to at least `to + 1` before releasing either lock.
+For `fd_close_raw`, hold the read lock through both the protected-FD scan and delegated close. For `fd_renumber_raw`, hold the mapping read lock, then `fd_allocation`, while checking source/destination and delegating. Return `wasip1::ERRNO_NOTCAPABLE` if `root_fd` or any active `cwd_fd` is involved. Return `wasip1::ERRNO_MFILE` when `to == u32::MAX`. Do not advance `inner.next_fd` after renumbering; `prepare_fd_allocation` skips any occupied candidate under `fd_allocation` immediately before each later cwd or path allocation.
 
 For `path_open_raw`, hold the mapping read lock and then `fd_allocation` through allocator inspection and inner dispatch. Advance `next_fd` past occupied keys and return `ERRNO_MFILE` without calling the inner filesystem if the next value is `u32::MAX`. This lock order is mandatory everywhere: mapping lock first, allocation mutex second.
 
@@ -584,11 +598,11 @@ git commit -m "feat(vfs): route embedded target paths from cwd"
 
 **Interfaces:**
 - Consumes: `CwdAwareFileSystem::enter_target_cwd::<rustc_opt>`, `TargetCwdGuard`, `RUSTC_RUN_LOCK`, `VIRTUAL_SHELL_ENV`, `command::VIRTUAL_ARGS`, `CARGO_OUTPUT`, and `CHILD_PROCESS_STDIO`.
-- Produces: `rustc_root_path_hints(&[String]) -> Vec<Vec<String>>`, validation-before-mutation rustc spawning, and unwind-safe restoration helpers for mutable invocation state.
+- Produces: `rustc_root_path_hints(&[String]) -> Vec<Vec<String>>`, validation-before-mutation rustc spawning, panic containment with status `101`, and unwind-safe restoration helpers for mutable invocation state.
 
 - [ ] **Step 1: Write failing tests for invocation-state restoration**
 
-Extract the mutable rustc invocation state into a small RAII owner used only after cwd validation. Add tests that first acquire `RUSTC_RUN_LOCK`, seed non-default environment, args, output capture, and child stdio, then use `std::panic::catch_unwind(std::panic::AssertUnwindSafe(...))` to panic while the owner is active. One test starts with a sentinel `Some(ChildProcessStdio)` and asserts that exact prior state is restored. A second starts from `None` and asserts unwind restores `None`. Assert the outer `CARGO_OUTPUT.stdout` sentinel separately from child stdout.
+Extract the mutable rustc invocation state into a small RAII owner used only after cwd validation. Add a focused invocation helper that owns that state and child stdio inside `std::panic::catch_unwind(std::panic::AssertUnwindSafe(...))`. Tests first acquire `RUSTC_RUN_LOCK`, seed non-default environment, args, output capture, and child stdio, then panic while the helper is active. Assertions inside each panic closure must prove replacement child stdio is installed before panic. One test starts with a sentinel `Some(ChildProcessStdio)` and asserts that exact prior state is restored. A second starts from `None` and asserts unwind restores `None`. Assert the outer `CARGO_OUTPUT.stdout` sentinel separately from child stdout, and assert bounded panic stderr plus status `101`.
 
 Use exact sentinel values:
 
@@ -638,6 +652,8 @@ The rustc invocation-state guard must:
 
 Retain the existing successful output behavior of `with_child_process_stdio`; only replace its manual restoration internals with the child guard.
 
+The invocation helper must preserve successful child stdout/stderr and `RUSTC_EXIT_STATUS`. If its closure panics, both guards restore while unwinding to the helper's catch point; the helper then returns empty stdout, bounded `embedded rustc panicked: ...` stderr, and status `101` instead of allowing a panic to reach `wasi_ext_spawn`'s `extern "C"` boundary.
+
 - [ ] **Step 4: Integrate virtual cwd into `wasi_ext_spawn`**
 
 After the non-rustc branch and `RUSTC_RUN_LOCK` acquisition:
@@ -672,7 +688,7 @@ let cwd_guard = match VIRTUAL_FILE_SYSTEM
 };
 ```
 
-The pure extractor recognizes absolute values at token start and after `=` or `@`, stops each comma-delimited joined or separate `--emit` value, normalizes to root-relative components, rejects root escapes/root-only values, and deduplicates. It does not read response files. Then install the same prepared argv into invocation state, install child stdio, run `run_rustc`, collect status/output, restore invocation state, and finally drop `cwd_guard`.
+The pure extractor recognizes absolute values at token start and after `=` or `@`, stops each comma-delimited joined or separate `--emit` value, normalizes to root-relative components, rejects root escapes/root-only values, and deduplicates. It does not read response files. Then call the panic-containing invocation helper, which installs the same prepared argv and child stdio around `run_rustc`. On success, preserve status/output. On panic, restore invocation/child state before returning bounded stderr and status `101`. Finally drop `cwd_guard` normally.
 
 Delete `virtual_cwd_for_set_current_dir` and delete all use of outer `std::env::current_dir`, `std::env::set_current_dir`, and cwd restoration from the rustc spawn path. Do not change host cwd handling in `host_run_cargo`.
 

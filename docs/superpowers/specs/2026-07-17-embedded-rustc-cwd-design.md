@@ -84,7 +84,7 @@ Each intercepted path method holds the target-cwd read lock from lookup through 
 
 The wrapper also intercepts `fd_close_raw` and `fd_renumber_raw`. Each operation holds the target-cwd read lock from the protected-FD check through completion of any delegated inner mutation. The recorded root FD and every active temporary cwd FD are protected from close, replacement, and renumbering while owned by the wrapper. Attempts return a deterministic WASI error without mutating the inner FD map. All other FD operations delegate unchanged.
 
-`path_open_raw`, successful unprotected renumbering, and temporary cwd FD allocation also share `fd_allocation`. This closes the inner allocator's gap between incrementing `next_fd` and inserting into `fd_map`. Before allocation, the wrapper advances past occupied descriptors; renumbering raises the allocator high-water mark. Descriptor `u32::MAX` is reserved so the allocator cannot wrap to stdio FDs; allocation or renumbering that would reach it returns exhaustion.
+`path_open_raw`, successful unprotected renumbering, and temporary cwd FD allocation also share `fd_allocation`. This closes the inner allocator's gap between incrementing `next_fd` and inserting into `fd_map`. Renumbering leaves `next_fd` unchanged; before each later allocation, the wrapper advances past any occupied descriptor under the same lock. Descriptor `u32::MAX` is reserved, so renumbering to it or allocating it returns exhaustion without wrapping to stdio FDs.
 
 ## Cwd Lifecycle
 
@@ -124,15 +124,15 @@ The existing `RUSTC_RUN_LOCK` continues to serialize rustc resets and invocation
 3. Extract, normalize, and deduplicate absolute root-path hints from that complete argv.
 4. Validate and enter `rustc_opt`'s target cwd with those hints before mutating environment, global arguments, output capture, or child-process state.
 5. Install the same prepared argv and environment as today.
-6. Reset and execute `rustc_opt` while the cwd guard is alive.
-7. Restore environment, arguments, output capture, and child-process state as today.
-8. Let the cwd guard drop to restore routing and remove the temporary FD.
+6. Inside `catch_unwind(AssertUnwindSafe(...))`, install invocation and child-process state, then reset and execute `rustc_opt` while the cwd guard is alive.
+7. On success, restore state through the guards and retain the existing child stdout, stderr, and rustc status. On panic, let both guards restore exact prior state during unwind, then return empty stdout, a bounded `embedded rustc panicked: ...` stderr diagnostic, and deterministic status `101`.
+8. Let the cwd guard drop normally after either result to restore routing and remove the temporary FD.
 
 The pure argv extractor recognizes `/` at token start and after path-value boundaries such as `=` and `@`. It covers standalone source paths, `--sysroot`, `--out-dir`, `-Ldependency=`, `--extern=name=`, comma-delimited joined or separate `--emit` values, and `@/response` without reading response files. It normalizes paths to root-relative UTF-8 components, ignores root escapes and root-only values, and deduplicates exact hints.
 
 The outer `std::env::current_dir` / `std::env::set_current_dir` / restore block is removed from the rustc spawn path. The obsolete `virtual_cwd_for_set_current_dir` helper is removed.
 
-If cwd validation fails, `wasi_ext_spawn` returns the existing Cargo-owned status-1 result with a bounded explanatory stderr message and does not invoke rustc. Because validation occurs first, no invocation state requires rollback on this path. State changed after validation remains covered by existing restoration plus focused RAII guards where an unwind could otherwise bypass cleanup.
+If cwd validation fails, `wasi_ext_spawn` returns the existing Cargo-owned status-1 result with a bounded explanatory stderr message and does not invoke rustc. Because validation occurs first, no invocation state requires rollback on this path. A rustc panic is contained before the `extern "C"` boundary; invocation and child state restore through RAII before Cargo receives the bounded status-101 result, and cwd cleanup then follows the normal drop path.
 
 ## Construction
 
@@ -179,7 +179,10 @@ Unit tests use separate fake `WasmAccessName` target types and an in-memory dyna
 - Dropping the guard restores root behavior and removes the temporary FD.
 - A routed path call racing guard drop completes before the FD is removed.
 - Close and renumber cannot remove, replace, or move protected root/cwd FDs.
+- Renumbering onto the allocator's current candidate leaves the destination intact and lets the next allocation skip it.
+- Renumbering to `u32::MAX - 1` does not move a low allocator cursor or prevent later cwd/path allocation; destination `u32::MAX` remains rejected.
 - A rejected duplicate mapping does not allocate or leak an FD.
+- Rustc panic containment observes replacement child stdio while active, restores exact prior `Some` and `None` child states plus invocation state, bounds stderr, and returns status `101`.
 
 The existing Cargo-add E2E is extended to run, in one retained VFS session:
 
