@@ -13,6 +13,16 @@ import {
   OrderedLspSender,
 } from "./lsp_protocol";
 
+/**
+ * Helper to safely close the underlying BroadcastChannel.
+ * The dependency uses a TypeScript `private bc` field, not a JS `#private` field,
+ * so we use a structural cast to access it and close the connection without leaking.
+ */
+function closeUnderlyingChannel(sharedObj: unknown) {
+  const obj = sharedObj as { bc?: { close(): void } };
+  obj?.bc?.close();
+}
+
 class MyMessageReader extends AbstractMessageReader {
   private readonly decoder = new LspFrameDecoder();
   private shared: SharedObject | undefined;
@@ -23,6 +33,7 @@ class MyMessageReader extends AbstractMessageReader {
   }
 
   listen(callback: DataCallback): Disposable {
+    if (this.closed) throw new Error("LSP reader is disposed");
     if (this.shared) throw new Error("LSP reader already listening");
     this.shared = new SharedObject(({ data }: { data: unknown }) => {
       if (this.closed) return;
@@ -34,7 +45,7 @@ class MyMessageReader extends AbstractMessageReader {
         this.closed = true;
         this.fireError(error);
         this.fireClose();
-        this.shared?.bc.close();
+        closeUnderlyingChannel(this.shared);
         this.shared = undefined;
       }
     }, this.ctx.ls_id);
@@ -44,7 +55,7 @@ class MyMessageReader extends AbstractMessageReader {
   override dispose(): void {
     if (!this.closed) {
       this.closed = true;
-      this.shared?.bc.close();
+      closeUnderlyingChannel(this.shared);
       this.shared = undefined;
     }
     super.dispose();
@@ -57,10 +68,13 @@ class MyMessageWriter extends AbstractMessageWriter {
     data: string | number[];
   }) => Promise<void>;
   private readonly sender: OrderedLspSender;
+  private readonly sharedRef: SharedObjectRef;
+  private closed = false;
 
   constructor(ctx: Ctx) {
     super();
-    this.inputStringProxy = new SharedObjectRef(ctx.input_string_id).proxy<
+    this.sharedRef = new SharedObjectRef(ctx.input_string_id);
+    this.inputStringProxy = this.sharedRef.proxy<
       (args: { sessionId: number; data: string | number[] }) => Promise<void>
     >();
     this.sender = new OrderedLspSender((data) =>
@@ -69,10 +83,19 @@ class MyMessageWriter extends AbstractMessageWriter {
   }
 
   write(msg: Message): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("LSP writer is disposed"));
     return this.sender.write(msg);
   }
 
   end(): void {}
+
+  override dispose(): void {
+    if (!this.closed) {
+      this.closed = true;
+      closeUnderlyingChannel(this.sharedRef);
+    }
+    super.dispose();
+  }
 }
 
 export function createLspConnection(ctx: Ctx) {
