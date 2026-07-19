@@ -9,14 +9,7 @@ import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { createLspConnection } from "./lsp_bridge";
 import { MonacoLanguageClient } from "monaco-languageclient";
 
-const Select = lazy(async () => {
-  const selector = import("@thisbeyond/solid-select");
-  const css_load = import("@thisbeyond/solid-select/style.css");
-
-  const [mod] = await Promise.all([selector, css_load]);
-
-  return { default: mod.Select };
-});
+import { TargetSelector } from "./TargetSelector";
 
 const MonacoEditor = lazy(() =>
   import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor })),
@@ -326,14 +319,14 @@ const App = (props: {
         </div>
       </div>
 
-      <div class="flex items-center bg-gray-900 border-t border-gray-700">
-        <div class="p-2 text-white">
+      <div class="flex items-center gap-4 bg-gray-950 border-t border-gray-800 px-6 py-3 shadow-lg z-10 relative">
+        <div>
           <RunButton triple={triple()} />
         </div>
-        <div class="p-2 text-white flex-1 max-w-sm">
-          <Select
+        <div class="flex-1 max-w-xs">
+          <TargetSelector
             options={triples}
-            class="text-sm text-green-700"
+            value={triple()}
             onChange={(value) => {
               if (
                 typeof value !== "string" ||
@@ -354,7 +347,7 @@ const App = (props: {
             }}
           />
         </div>
-        <div class="p-2 text-white">
+        <div class="ml-auto">
           <DownloadButton />
         </div>
       </div>
