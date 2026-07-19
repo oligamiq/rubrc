@@ -3,6 +3,7 @@ import {
   isLspSession,
   LSP_SESSION_ID,
   LspFrameDecoder,
+  OrderedLspSender,
   toLspBytes,
 } from "./lsp_protocol.ts";
 
@@ -76,4 +77,26 @@ Deno.test("LSP decoder rejects malformed streams", () => {
     }
     assert(threw, "malformed frame must throw");
   }
+});
+
+Deno.test("ordered sender serializes writes and recovers after rejection", async () => {
+  const sent: number[] = [];
+  let releaseFirst!: () => void;
+  const firstBlocked = new Promise<void>((resolve) => releaseFirst = resolve);
+  const sender = new OrderedLspSender(async (bytes) => {
+    const message = new LspFrameDecoder().push(bytes)[0] as { id: number };
+    sent.push(message.id);
+    if (message.id === 1) await firstBlocked;
+    if (message.id === 3) throw new Error("expected rejection");
+  });
+
+  const first = sender.write({ jsonrpc: "2.0", id: 1, result: null });
+  const second = sender.write({ jsonrpc: "2.0", id: 2, result: null });
+  await Promise.resolve();
+  assert(sent.join(",") === "1", `second write overtook first: ${sent}`);
+  releaseFirst();
+  await Promise.all([first, second]);
+  await sender.write({ jsonrpc: "2.0", id: 3, result: null }).catch(() => undefined);
+  await sender.write({ jsonrpc: "2.0", id: 4, result: null });
+  assert(sent.join(",") === "1,2,3,4", `wrong send order: ${sent}`);
 });

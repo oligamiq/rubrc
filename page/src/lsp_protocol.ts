@@ -86,3 +86,19 @@ export class LspFrameDecoder {
     return -1;
   }
 }
+
+export class OrderedLspSender {
+  private pending = Promise.resolve();
+
+  constructor(
+    private readonly send: (bytes: number[]) => Promise<void>,
+  ) {}
+
+  write(message: unknown): Promise<void> {
+    const bytes = Array.from(encodeLspMessage(message));
+    const write = this.pending.then(() => this.send(bytes));
+    this.pending = write.catch(() => undefined);
+    return write;
+  }
+}
+
