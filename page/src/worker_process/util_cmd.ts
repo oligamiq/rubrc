@@ -37,9 +37,6 @@ globalThis.addEventListener("message", async (event) => {
   const waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
     set_end_of_exec: (_end_of_exec: boolean) => Promise<void>;
   }>();
-  const download_by_url = new SharedObjectRef(ctx.download_by_url_id).proxy<
-    (args: { url: string; name: string }) => Promise<void>
-  >();
 
   async function getCachedWasm(
     key: string,
