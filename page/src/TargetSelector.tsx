@@ -33,7 +33,7 @@ export const TargetSelector = (props: {
   const handleOpen = () => {
     setIsOpen(!isOpen());
     if (isOpen()) {
-      if (typeof window !== "undefined" && window.innerWidth >= 768) {
+      if (typeof window !== "undefined" && !('ontouchstart' in window) && navigator.maxTouchPoints === 0) {
         setTimeout(() => searchInputRef?.focus(), 50);
       }
     } else {
@@ -83,7 +83,7 @@ export const TargetSelector = (props: {
               />
             </div>
           </div>
-          <div class="p-1.5 max-h-60 overflow-y-auto flex-1">
+          <div class="p-1.5 max-h-[40vh] sm:max-h-60 overflow-y-auto flex-1">
             <For each={filteredOptions()}>
               {(option) => (
                 <button
