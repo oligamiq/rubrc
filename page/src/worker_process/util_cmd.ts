@@ -180,10 +180,10 @@ globalThis.addEventListener("message", async (event) => {
 
                 partLoaded += value.byteLength;
                 loaded += value.byteLength;
-                let progressMsg = `\r\x1b[K[VFS] Fetching and streaming compilation: ${(loaded / 1024 / 1024).toFixed(2)} MB`;
+                let progressMsg = `\r\x1b[K[VFS] Downloading: ${(loaded / 1024 / 1024).toFixed(2)}MB`;
                 if (total > 0) {
                   const percent = Math.round((loaded / total) * 100);
-                  progressMsg += ` / ${(total / 1024 / 1024).toFixed(2)} MB (${percent}%)`;
+                  progressMsg += `/${(total / 1024 / 1024).toFixed(2)}MB (${percent}%)`;
                 }
                 await terminal({
                   sessionId: 0,
@@ -278,10 +278,10 @@ globalThis.addEventListener("message", async (event) => {
               const { done, value } = await reader.read();
               if (done) break;
               loaded += value.byteLength;
-              let progressMsg = `\r\x1b[K[VFS] Fetching and streaming compilation: ${(loaded / 1024 / 1024).toFixed(2)} MB`;
+              let progressMsg = `\r\x1b[K[VFS] Downloading: ${(loaded / 1024 / 1024).toFixed(2)}MB`;
               if (total > 0) {
                 const percent = Math.round((loaded / total) * 100);
-                progressMsg += ` / ${(total / 1024 / 1024).toFixed(2)} MB (${percent}%)`;
+                progressMsg += `/${(total / 1024 / 1024).toFixed(2)}MB (${percent}%)`;
               }
               await terminal({
                 sessionId: 0,
