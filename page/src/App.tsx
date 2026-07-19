@@ -193,7 +193,7 @@ const App = (props: {
   };
 
   return (
-    <div class="h-[100dvh] w-full flex flex-col overflow-hidden">
+    <div class="h-[100dvh] w-full flex flex-col overflow-hidden overscroll-none">
       <Suspense
         fallback={
           <div
