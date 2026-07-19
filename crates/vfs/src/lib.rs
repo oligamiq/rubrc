@@ -1051,7 +1051,14 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         };
         let open_fd = entry.value_mut();
         let inode = *open_fd.inode_id();
-        let mut cursor = open_fd.cursor();
+        let mut cursor = if open_fd.fd_flags() & wasip1::FDFLAGS_APPEND != 0 {
+            match self.inner.lfs.fd_filestat_get_raw::<Wasm>(&inode) {
+                Ok(stat) => stat.size as usize,
+                Err(error) => return error,
+            }
+        } else {
+            open_fd.cursor()
+        };
         let mut written = 0;
         for iov in Wasm::as_array(iovs_ptr, iovs_len) {
             match self
@@ -1330,7 +1337,7 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
             return wasip1::ERRNO_MFILE;
         }
         let dir_fd = self.routed_fd::<Wasm>(&target_cwds, dir_fd, path_ptr, path_len);
-        self.inner.path_open_raw::<Wasm>(
+        let result = self.inner.path_open_raw::<Wasm>(
             dir_fd,
             dir_flags,
             path_ptr,
@@ -1340,7 +1347,14 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
             fs_rights_inheriting,
             fd_flags,
             fd_ret,
-        )
+        );
+        if result == wasip1::ERRNO_SUCCESS {
+            let fd = Wasm::load_le(fd_ret);
+            if let Some(mut entry) = self.inner.fd_map.get_mut(&fd) {
+                entry.value_mut().set_fd_flags(fd_flags);
+            }
+        }
+        result
     }
 
     fn path_readlink_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
@@ -2913,6 +2927,112 @@ mod cwd_aware_fs_tests {
         assert_eq!(&bytes, b"ab\0\0\0XY");
         let inode = *fixture.fs.fd_map.get(&fd).unwrap().inode_id();
         assert_eq!(fixture.fs.lfs.read_file(inode).unwrap(), b"ab\0\0\0XY");
+    }
+
+    #[test]
+    fn fd_write_appends_when_descriptor_has_append_flag() {
+        let fixture = fixture();
+        let path = b"append-cursor-write";
+        let mut fd = 0;
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                wasip1::OFLAGS_CREAT,
+                !0,
+                !0,
+                0,
+                &mut fd,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        let initial = b"abc";
+        let initial_iov = Ciovec {
+            buf: initial.as_ptr(),
+            buf_len: initial.len(),
+        };
+        let mut nwritten = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_write_raw::<MappedWasm>(fd, &initial_iov, 1, &mut nwritten),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(
+            fixture.fs.fd_close_raw::<MappedWasm>(fd),
+            wasip1::ERRNO_SUCCESS,
+        );
+
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                0,
+                !0,
+                !0,
+                wasip1::FDFLAGS_APPEND,
+                &mut fd,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        let mut offset = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_seek_raw::<MappedWasm>(fd, 0, wasip1::WHENCE_SET, &mut offset),
+            wasip1::ERRNO_SUCCESS,
+        );
+        let patch = b"XY";
+        let patch_iov = Ciovec {
+            buf: patch.as_ptr(),
+            buf_len: patch.len(),
+        };
+        assert_eq!(
+            fixture
+                .fs
+                .fd_write_raw::<MappedWasm>(fd, &patch_iov, 1, &mut nwritten),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(nwritten, patch.len());
+        assert_eq!(
+            fixture.fs.fd_close_raw::<MappedWasm>(fd),
+            wasip1::ERRNO_SUCCESS,
+        );
+
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                0,
+                !0,
+                !0,
+                0,
+                &mut fd,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        let mut bytes = [0; 5];
+        let read_iov = Ciovec {
+            buf: bytes.as_mut_ptr(),
+            buf_len: bytes.len(),
+        };
+        let mut nread = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_read_raw::<MappedWasm>(fd, &read_iov, 1, &mut nread),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(&bytes, b"abcXY");
+        assert_eq!(nread, bytes.len());
+        let inode = *fixture.fs.fd_map.get(&fd).unwrap().inode_id();
+        assert_eq!(fixture.fs.lfs.read_file(inode).unwrap(), b"abcXY");
     }
 
     #[test]
