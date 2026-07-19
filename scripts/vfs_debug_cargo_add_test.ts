@@ -135,7 +135,10 @@ const result = await new Promise<
         content:
           `[package]\nname = "cargo-add-test"\nversion = "0.1.0"\nedition = "2021"\n`,
       },
-      { path: "src/lib.rs", content: "pub fn test() {}\n" },
+      {
+        path: "src/lib.rs",
+        content: "pub fn test() { hello::world(); }\n",
+      },
     ],
   });
 });
@@ -180,6 +183,10 @@ if (Deno.args.length === 0) {
   }
   if (!/Compiling hello v1\.0\.4/.test(result.output)) {
     console.error("Cargo did not compile hello v1.0.4");
+    Deno.exit(1);
+  }
+  if (result.output.includes("invalid metadata files for crate `hello`")) {
+    console.error("root crate could not read the compiled hello metadata");
     Deno.exit(1);
   }
   if (!result.output.includes("Finished `dev` profile")) {

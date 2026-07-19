@@ -1040,8 +1040,35 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         iovs_len: usize,
         nwritten: *mut Size,
     ) -> wasip1::Errno {
-        self.inner
-            .fd_write_raw::<Wasm>(fd, iovs_ptr, iovs_len, nwritten)
+        if fd <= 2 {
+            return self
+                .inner
+                .fd_write_raw::<Wasm>(fd, iovs_ptr, iovs_len, nwritten);
+        }
+
+        let Some(mut entry) = self.inner.fd_map.get_mut(&fd) else {
+            return wasip1::ERRNO_BADF;
+        };
+        let open_fd = entry.value_mut();
+        let inode = *open_fd.inode_id();
+        let mut cursor = open_fd.cursor();
+        let mut written = 0;
+        for iov in Wasm::as_array(iovs_ptr, iovs_len) {
+            match self
+                .inner
+                .lfs
+                .fd_pwrite_raw::<Wasm>(&inode, iov.buf, iov.buf_len, cursor)
+            {
+                Ok(count) => {
+                    written += count;
+                    cursor += count;
+                }
+                Err(error) => return error,
+            }
+        }
+        open_fd.set_cursor(cursor);
+        Wasm::store_le(nwritten, written as Size);
+        wasip1::ERRNO_SUCCESS
     }
 
     fn fd_pwrite_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
@@ -2698,6 +2725,194 @@ mod cwd_aware_fs_tests {
             wasip1::ERRNO_SUCCESS,
         );
         stat.size
+    }
+
+    #[test]
+    fn fd_write_overwrites_at_the_current_cursor() {
+        let fixture = fixture();
+        let path = b"cursor-write";
+        let mut fd = 0;
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                wasip1::OFLAGS_CREAT,
+                !0,
+                !0,
+                0,
+                &mut fd,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+
+        let initial = b"abcdefgh";
+        let initial_iov = Ciovec {
+            buf: initial.as_ptr(),
+            buf_len: initial.len(),
+        };
+        let mut nwritten = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_write_raw::<MappedWasm>(fd, &initial_iov, 1, &mut nwritten),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(nwritten, initial.len());
+
+        let mut offset = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_seek_raw::<MappedWasm>(fd, 2, wasip1::WHENCE_SET, &mut offset),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(offset, 2);
+        let patch_iovs = [
+            Ciovec {
+                buf: b"X".as_ptr(),
+                buf_len: 1,
+            },
+            Ciovec {
+                buf: b"Y".as_ptr(),
+                buf_len: 1,
+            },
+        ];
+        assert_eq!(
+            fixture.fs.fd_write_raw::<MappedWasm>(
+                fd,
+                patch_iovs.as_ptr(),
+                patch_iovs.len(),
+                &mut nwritten,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(nwritten, 2);
+        assert_eq!(
+            fixture.fs.fd_close_raw::<MappedWasm>(fd),
+            wasip1::ERRNO_SUCCESS,
+        );
+
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                0,
+                !0,
+                !0,
+                0,
+                &mut fd,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        let mut bytes = [0; 8];
+        let read_iov = Ciovec {
+            buf: bytes.as_mut_ptr(),
+            buf_len: bytes.len(),
+        };
+        let mut nread = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_read_raw::<MappedWasm>(fd, &read_iov, 1, &mut nread),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(nread, bytes.len());
+        assert_eq!(&bytes, b"abXYefgh");
+        let inode = *fixture.fs.fd_map.get(&fd).unwrap().inode_id();
+        assert_eq!(fixture.fs.lfs.read_file(inode).unwrap(), b"abXYefgh");
+    }
+
+    #[test]
+    fn fd_write_zero_fills_when_cursor_is_past_eof() {
+        let fixture = fixture();
+        let path = b"sparse-cursor-write";
+        let mut fd = 0;
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                wasip1::OFLAGS_CREAT,
+                !0,
+                !0,
+                0,
+                &mut fd,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+
+        let initial = b"ab";
+        let initial_iov = Ciovec {
+            buf: initial.as_ptr(),
+            buf_len: initial.len(),
+        };
+        let mut nwritten = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_write_raw::<MappedWasm>(fd, &initial_iov, 1, &mut nwritten),
+            wasip1::ERRNO_SUCCESS,
+        );
+        let mut offset = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_seek_raw::<MappedWasm>(fd, 5, wasip1::WHENCE_SET, &mut offset),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(offset, 5);
+        let patch = b"XY";
+        let patch_iov = Ciovec {
+            buf: patch.as_ptr(),
+            buf_len: patch.len(),
+        };
+        assert_eq!(
+            fixture
+                .fs
+                .fd_write_raw::<MappedWasm>(fd, &patch_iov, 1, &mut nwritten),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(nwritten, patch.len());
+        assert_eq!(
+            fixture.fs.fd_close_raw::<MappedWasm>(fd),
+            wasip1::ERRNO_SUCCESS,
+        );
+
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                0,
+                !0,
+                !0,
+                0,
+                &mut fd,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        let mut bytes = [0; 7];
+        let read_iov = Ciovec {
+            buf: bytes.as_mut_ptr(),
+            buf_len: bytes.len(),
+        };
+        let mut nread = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_read_raw::<MappedWasm>(fd, &read_iov, 1, &mut nread),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(nread, bytes.len());
+        assert_eq!(&bytes, b"ab\0\0\0XY");
+        let inode = *fixture.fs.fd_map.get(&fd).unwrap().inode_id();
+        assert_eq!(fixture.fs.lfs.read_file(inode).unwrap(), b"ab\0\0\0XY");
     }
 
     #[test]

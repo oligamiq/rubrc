@@ -511,6 +511,8 @@ Add a routing helper that receives an already-held read guard. Normalize the gue
 
 Document the unavoidable limitation: wasi-libc emits identical root-FD plus relative-byte calls for relative and absolute paths, so absolute paths not represented in argv cannot be preserved under the rubrc-only/no-WVL/no-artifact constraint.
 
+`CwdAwareFileSystem` also carries a rubrc-owned workaround for the pinned WVL dynamic filesystem's append-only `fd_write_raw`. Although `fd_seek_raw` updates the descriptor cursor, WVL ignores it when writing. This breaks rustc's rlib/rmeta archive metadata backpatching and leaves corrupt metadata that the next rustc reports as E0786. The wrapper must delegate fd 0/1/2 unchanged and use the LFS `fd_pwrite_raw` guest-memory path at the current cursor for dynamic descriptors. Remove this override once the pinned WVL fixes `StandardDynamicFileSystem::fd_write_raw` to honor its cursor.
+
 For all ten path methods, acquire one `target_cwds.read()` guard and retain it until the delegated inner call returns:
 
 ```text

@@ -86,6 +86,12 @@ This mechanism intentionally cannot preserve absolute paths that are not represe
 
 Empty or malformed paths are forwarded to the inner filesystem, which retains ownership of WASI error semantics.
 
+### Cursor-aware write workaround
+
+`CwdAwareFileSystem` also owns a temporary `fd_write_raw` correction for the pinned WVL dynamic filesystem. WVL's `fd_seek_raw` updates the open descriptor cursor, but `StandardDynamicFileSystem::fd_write_raw` currently calls the append-only LFS write and ignores that cursor. rustc's rlib/rmeta archive writer seeks backward to backpatch metadata; appending those patches instead corrupts the archive and causes a later rustc invocation to report E0786.
+
+The wrapper delegates fd 0/1/2 unchanged. For dynamic file descriptors it writes each guest iovec with `fd_pwrite_raw` at the descriptor cursor and advances the cursor by the bytes written, preserving the existing guest-memory and error paths. Remove this rubrc-owned workaround once the pinned WVL implementation makes `fd_write_raw` cursor-aware.
+
 Each intercepted path method holds the target-cwd read lock from lookup through completion of the delegated inner filesystem call. Guard cleanup requires the write lock, so it cannot remove a temporary FD after routing has selected it but before the inner filesystem reads it. Two-directory operations hold one read guard while routing and dispatching both path pairs.
 
 The wrapper also intercepts `fd_close_raw` and `fd_renumber_raw`. Each operation holds the target-cwd read lock from the protected-FD check through completion of any delegated inner mutation. The recorded root FD and every active temporary cwd FD are protected from close, replacement, and renumbering while owned by the wrapper. Attempts return a deterministic WASI error without mutating the inner FD map. All other FD operations delegate unchanged.
