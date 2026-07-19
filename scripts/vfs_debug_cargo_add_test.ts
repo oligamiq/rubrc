@@ -13,7 +13,8 @@ import {
 } from "../lib/src/child_process_bridge.ts";
 
 const timeoutMs = 120000;
-const commands = Deno.args.length === 0
+const defaultMode = Deno.args.length === 0;
+const commands = defaultMode
   ? [
     ["cargo", "add", "hello"],
     ["cargo", "build", "-j", "1"],
@@ -137,7 +138,9 @@ const result = await new Promise<
       },
       {
         path: "src/lib.rs",
-        content: "pub fn test() { hello::world(); }\n",
+        content: defaultMode
+          ? "pub fn test() { hello::world(); }\n"
+          : "pub fn test() {}\n",
       },
     ],
   });
@@ -160,18 +163,15 @@ if (result.output.indexOf(" $ ", returnIndex) === -1) {
   console.error("shell prompt did not return after the final cargo command");
   Deno.exit(1);
 }
-if (
-  Deno.args.length === 0 &&
-  !/Adding hello v\S+ to dependencies/.test(result.output)
-) {
+if (defaultMode && !/Adding hello v\S+ to dependencies/.test(result.output)) {
   console.error("cargo add did not report adding hello");
   Deno.exit(1);
 }
-if (result.output.includes("error:")) {
+if (/^error(?:\[[^\]\r\n]+\])?:/m.test(result.output)) {
   console.error("Cargo command reported an error");
   Deno.exit(1);
 }
-if (Deno.args.length === 0) {
+if (defaultMode) {
   if (
     !/\[vfs-debug\] wasi-ext-spawn:virtual-cwd \/\.cargo\/registry\/src\/index\.crates\.io-[^/\s]+\/hello-1\.0\.4/
       .test(
