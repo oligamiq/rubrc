@@ -13,6 +13,13 @@ use wasi_shell::{
     handle_parallel, CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor,
 };
 
+macro_rules! debug_log {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "debug-log")]
+        eprintln!($($arg)*);
+    };
+}
+
 thread_local! {
     static CANCELLATION_TOKEN: RefCell<Option<wasibox_core::CancellationToken>> = RefCell::new(None);
 }
@@ -480,7 +487,7 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
         let cmd = args.get(0).map(|s| s.as_str()).unwrap_or("");
 
         if VFS_COMMANDS.contains(&cmd) {
-            eprintln!(
+            debug_log!(
                 "[vfs-shell-debug] fallback:enter sid={} tid={:?} cmd={}",
                 sid,
                 std::thread::current().id(),
@@ -499,14 +506,14 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                 }),
             );
 
-            eprintln!(
+            debug_log!(
                 "[vfs-shell-debug] fallback:vfs_execute_command:enter sid={} tid={:?} context_id={}",
                 sid,
                 std::thread::current().id(),
                 context_id
             );
             let status = unsafe { vfs_execute_command(context_id) };
-            eprintln!(
+            debug_log!(
                 "[vfs-shell-debug] fallback:vfs_execute_command:return sid={} tid={:?} context_id={} status={}",
                 sid,
                 std::thread::current().id(),
@@ -656,14 +663,14 @@ impl Write for SessionStdout {
 }
 
 fn print_prompt(writer: &mut dyn Write) {
-    eprintln!(
+    debug_log!(
         "[vfs-shell-debug] prompt:enter tid={:?}",
         std::thread::current().id()
     );
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     write!(writer, "{} $ ", cwd.display().to_string().cyan()).unwrap();
     writer.flush().unwrap();
-    eprintln!(
+    debug_log!(
         "[vfs-shell-debug] prompt:return tid={:?}",
         std::thread::current().id()
     );
@@ -919,7 +926,7 @@ fn process_input_char(
             buffer: Vec::new(),
         };
 
-        eprintln!(
+        debug_log!(
             "[vfs-shell-debug] handle_parallel:enter tid={:?} line={}",
             std::thread::current().id(),
             trimmed
@@ -931,7 +938,7 @@ fn process_input_char(
             Arc::clone(session_reg),
             cancellation_token.clone(),
         );
-        eprintln!(
+        debug_log!(
             "[vfs-shell-debug] handle_parallel:return tid={:?} results={}",
             std::thread::current().id(),
             results.len()
