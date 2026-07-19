@@ -1914,10 +1914,25 @@ pub extern "C" fn wasi_ext_spawn(
 
     let _rustc_guard = RUSTC_RUN_LOCK.lock();
 
+    let mut is_wasm32_target = true;
+    let mut expect_target = false;
+    for arg in &argv {
+        if expect_target {
+            is_wasm32_target = arg.contains("wasm32");
+            expect_target = false;
+        } else if arg == "--target" {
+            expect_target = true;
+        } else if arg.starts_with("--target=") {
+            is_wasm32_target = arg.contains("wasm32");
+        }
+    }
+
     argv.push("--sysroot".to_string());
     argv.push("/sysroot".to_string());
-    argv.push("-Clinker-flavor=wasm-ld".to_string());
-    argv.push("-Clinker=wasm-ld".to_string());
+    if is_wasm32_target {
+        argv.push("-Clinker-flavor=wasm-ld".to_string());
+        argv.push("-Clinker=wasm-ld".to_string());
+    }
     let root_path_hints = rustc_root_path_hints(&argv);
 
     if !cwd.is_empty() {

@@ -676,10 +676,25 @@ pub extern "C" fn wasi_ext_spawn(
         .and_then(|name| name.to_str())
         .unwrap_or(&program);
     let status = if program_name == "rustc" {
+        let mut is_wasm32_target = true;
+        let mut expect_target = false;
+        for arg in &argv {
+            if expect_target {
+                is_wasm32_target = arg.contains("wasm32");
+                expect_target = false;
+            } else if arg == "--target" {
+                expect_target = true;
+            } else if arg.starts_with("--target=") {
+                is_wasm32_target = arg.contains("wasm32");
+            }
+        }
+
         argv.push("--sysroot".to_string());
         argv.push("/sysroot".to_string());
-        argv.push("-Clinker-flavor=wasm-ld".to_string());
-        argv.push("-Clinker=wasm-ld".to_string());
+        if is_wasm32_target {
+            argv.push("-Clinker-flavor=wasm-ld".to_string());
+            argv.push("-Clinker=wasm-ld".to_string());
+        }
         command::set_rustc_opt_args(&argv);
         run_rustc();
         RUSTC_EXIT_STATUS.load(Ordering::SeqCst)
