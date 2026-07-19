@@ -820,6 +820,7 @@ pub struct CwdAwareFileSystem<F> {
     root_fd: Fd,
     target_cwds: parking_lot::RwLock<HashMap<TypeId, TargetCwdEntry>>,
     fd_allocation: parking_lot::Mutex<()>,
+    append_write: parking_lot::Mutex<()>,
 }
 
 impl<F> CwdAwareFileSystem<F> {
@@ -830,6 +831,7 @@ impl<F> CwdAwareFileSystem<F> {
             root_fd,
             target_cwds: parking_lot::RwLock::new(HashMap::new()),
             fd_allocation: parking_lot::Mutex::new(()),
+            append_write: parking_lot::Mutex::new(()),
         }
     }
 }
@@ -1051,7 +1053,10 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         };
         let open_fd = entry.value_mut();
         let inode = *open_fd.inode_id();
-        let mut cursor = if open_fd.fd_flags() & wasip1::FDFLAGS_APPEND != 0 {
+        let append = open_fd.fd_flags() & wasip1::FDFLAGS_APPEND != 0;
+        // The only lock order is descriptor entry, then append_write.
+        let _append_write = append.then(|| self.append_write.lock());
+        let mut cursor = if append {
             match self.inner.lfs.fd_filestat_get_raw::<Wasm>(&inode) {
                 Ok(stat) => stat.size as usize,
                 Err(error) => return error,
@@ -2640,8 +2645,8 @@ fn write_cargo_result(
 #[cfg(test)]
 mod cwd_aware_fs_tests {
     use super::*;
-    use std::sync::{LazyLock, mpsc};
-    use std::time::Duration;
+    use std::sync::{Arc, Barrier, LazyLock, mpsc};
+    use std::time::{Duration, Instant};
     use wasi_virt_layer::memory::{WasmAccessName, WasmAccessRaw};
 
     macro_rules! direct_memory_wasm {
@@ -2678,6 +2683,80 @@ mod cwd_aware_fs_tests {
     direct_memory_wasm!(MappedWasm, "same-name");
     direct_memory_wasm!(SameNameWasm, "same-name");
     direct_memory_wasm!(UnmappedWasm, "unmapped");
+
+    static APPEND_IOV_GATE: LazyLock<parking_lot::Mutex<Option<Arc<AppendIovGate>>>> =
+        LazyLock::new(|| parking_lot::Mutex::new(None));
+
+    #[derive(Debug)]
+    struct AppendIovGate {
+        state: parking_lot::Mutex<(usize, bool)>,
+        ready: parking_lot::Condvar,
+    }
+
+    impl AppendIovGate {
+        fn new() -> Self {
+            Self {
+                state: parking_lot::Mutex::new((0, false)),
+                ready: parking_lot::Condvar::new(),
+            }
+        }
+
+        fn wait(&self) {
+            let mut state = self.state.lock();
+            if state.1 {
+                return;
+            }
+            state.0 += 1;
+            if state.0 == 2 {
+                state.1 = true;
+                self.ready.notify_all();
+                return;
+            }
+
+            let deadline = Instant::now() + Duration::from_millis(50);
+            while !state.1 {
+                let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                    state.1 = true;
+                    self.ready.notify_all();
+                    break;
+                };
+                self.ready.wait_for(&mut state, remaining);
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct AppendRaceWasm;
+
+    impl WasmAccessName for AppendRaceWasm {
+        const NAME: &'static str = "append-race";
+    }
+
+    impl WasmAccessRaw for AppendRaceWasm {
+        fn memcpy_raw(offset: *mut u8, src: *const u8, len: usize) {
+            unsafe { std::ptr::copy_nonoverlapping(src, offset, len) };
+        }
+
+        fn memcpy_to_raw(offset: *mut u8, src: *const u8, len: usize) {
+            if len == std::mem::size_of::<Ciovec>() {
+                let gate = APPEND_IOV_GATE.lock().clone();
+                if let Some(gate) = gate {
+                    gate.wait();
+                }
+            }
+            unsafe { std::ptr::copy_nonoverlapping(src, offset, len) };
+        }
+
+        fn _main_raw() -> wasip1::Errno {
+            wasip1::ERRNO_SUCCESS
+        }
+        fn _reset_raw() {}
+        fn _start_raw() {}
+
+        fn memory_director_raw(ptr: isize) -> isize {
+            ptr
+        }
+    }
 
     type TestLfs = StandardDynamicLFS<ShellVirtualStdIO>;
     type TestFs = CwdAwareFileSystem<StandardDynamicFileSystem<TestLfs>>;
@@ -3033,6 +3112,158 @@ mod cwd_aware_fs_tests {
         assert_eq!(nread, bytes.len());
         let inode = *fixture.fs.fd_map.get(&fd).unwrap().inode_id();
         assert_eq!(fixture.fs.lfs.read_file(inode).unwrap(), b"abcXY");
+    }
+
+    #[test]
+    fn fd_write_serializes_append_across_descriptors() {
+        const PREFIX: &[u8] = b"base\n";
+        const FIRST_RECORD: &[u8] = b"AAAA\n";
+        const SECOND_RECORD: &[u8] = b"BBBB\n";
+        const WRITE_COUNT: usize = 16;
+
+        let fixture = fixture();
+        let path = b"concurrent-append-write";
+        let mut fd = 0;
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                wasip1::OFLAGS_CREAT,
+                !0,
+                !0,
+                0,
+                &mut fd,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        let prefix_iov = Ciovec {
+            buf: PREFIX.as_ptr(),
+            buf_len: PREFIX.len(),
+        };
+        let mut nwritten = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_write_raw::<MappedWasm>(fd, &prefix_iov, 1, &mut nwritten),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(
+            fixture.fs.fd_close_raw::<MappedWasm>(fd),
+            wasip1::ERRNO_SUCCESS,
+        );
+
+        let mut first_fd = 0;
+        let mut second_fd = 0;
+        for fd_ret in [&mut first_fd, &mut second_fd] {
+            assert_eq!(
+                fixture.fs.path_open_raw::<MappedWasm>(
+                    fixture.root_fd,
+                    0,
+                    path.as_ptr(),
+                    path.len(),
+                    0,
+                    !0,
+                    !0,
+                    wasip1::FDFLAGS_APPEND,
+                    fd_ret,
+                ),
+                wasip1::ERRNO_SUCCESS,
+            );
+        }
+
+        *APPEND_IOV_GATE.lock() = Some(Arc::new(AppendIovGate::new()));
+        let write_barrier = Arc::new(Barrier::new(2));
+        std::thread::scope(|scope| {
+            let fs = &fixture.fs;
+            let first_barrier = Arc::clone(&write_barrier);
+            scope.spawn(move || {
+                let iov = Ciovec {
+                    buf: FIRST_RECORD.as_ptr(),
+                    buf_len: FIRST_RECORD.len(),
+                };
+                for _ in 0..WRITE_COUNT {
+                    first_barrier.wait();
+                    let mut nwritten = 0;
+                    assert_eq!(
+                        fs.fd_write_raw::<AppendRaceWasm>(first_fd, &iov, 1, &mut nwritten),
+                        wasip1::ERRNO_SUCCESS,
+                    );
+                    assert_eq!(nwritten, FIRST_RECORD.len());
+                }
+            });
+            let second_barrier = Arc::clone(&write_barrier);
+            scope.spawn(move || {
+                let iov = Ciovec {
+                    buf: SECOND_RECORD.as_ptr(),
+                    buf_len: SECOND_RECORD.len(),
+                };
+                for _ in 0..WRITE_COUNT {
+                    second_barrier.wait();
+                    let mut nwritten = 0;
+                    assert_eq!(
+                        fs.fd_write_raw::<AppendRaceWasm>(second_fd, &iov, 1, &mut nwritten),
+                        wasip1::ERRNO_SUCCESS,
+                    );
+                    assert_eq!(nwritten, SECOND_RECORD.len());
+                }
+            });
+        });
+        *APPEND_IOV_GATE.lock() = None;
+
+        for fd in [first_fd, second_fd] {
+            assert_eq!(
+                fixture.fs.fd_close_raw::<MappedWasm>(fd),
+                wasip1::ERRNO_SUCCESS,
+            );
+        }
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                0,
+                !0,
+                !0,
+                0,
+                &mut fd,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+
+        let expected_len = PREFIX.len() + WRITE_COUNT * (FIRST_RECORD.len() + SECOND_RECORD.len());
+        let mut bytes = vec![0; expected_len];
+        let read_iov = Ciovec {
+            buf: bytes.as_mut_ptr(),
+            buf_len: bytes.len(),
+        };
+        let mut nread = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_read_raw::<MappedWasm>(fd, &read_iov, 1, &mut nread),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(nread, expected_len);
+        assert_eq!(&bytes[..PREFIX.len()], PREFIX);
+
+        let mut first_count = 0;
+        let mut second_count = 0;
+        for record in bytes[PREFIX.len()..].chunks_exact(FIRST_RECORD.len()) {
+            if record == FIRST_RECORD {
+                first_count += 1;
+            } else if record == SECOND_RECORD {
+                second_count += 1;
+            } else {
+                panic!("unexpected append record: {record:?}");
+            }
+        }
+        assert_eq!(first_count, WRITE_COUNT);
+        assert_eq!(second_count, WRITE_COUNT);
+        let inode = *fixture.fs.fd_map.get(&fd).unwrap().inode_id();
+        assert_eq!(fixture.fs.lfs.read_file(inode).unwrap(), bytes);
     }
 
     #[test]
