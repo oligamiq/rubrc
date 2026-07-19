@@ -175,9 +175,35 @@ export const SetupMyTerminal = (props: {
 
     terminal.focus();
 
+    let touchY = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        touchY = e.touches[0].clientY;
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        const delta = touchY - e.touches[0].clientY;
+        const viewport = terminal.element?.querySelector('.xterm-viewport');
+        if (viewport) {
+          viewport.scrollTop += delta;
+          touchY = e.touches[0].clientY;
+        }
+      }
+    };
+    
+    if (terminal.element) {
+      terminal.element.addEventListener('touchstart', onTouchStart, { passive: true });
+      terminal.element.addEventListener('touchmove', onTouchMove, { passive: true });
+    }
+
     return () => {
       terminals.delete(props.sessionId);
       window.removeEventListener("resize", onWindowResize);
+      if (terminal.element) {
+        terminal.element.removeEventListener('touchstart', onTouchStart);
+        terminal.element.removeEventListener('touchmove', onTouchMove);
+      }
       console.log(`Terminal ${props.sessionId} unmounted.`);
     };
   };
@@ -232,6 +258,9 @@ export const SetupMyTerminal = (props: {
       onData={onData}
       onResize={onResize}
       addons={[fit_addon]}
+      options={{
+        scrollSensitivity: (typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) ? 8 : 1
+      }}
       class="w-full h-full"
     />
   );
