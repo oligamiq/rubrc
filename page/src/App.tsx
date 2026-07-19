@@ -319,11 +319,11 @@ const App = (props: {
         </div>
       </div>
 
-      <div class="flex items-center gap-4 bg-gray-950 border-t border-gray-800 px-6 py-3 shadow-lg z-10 relative">
-        <div>
+      <div class="flex flex-nowrap items-center justify-between gap-2 sm:gap-4 bg-gray-950 border-t border-gray-800 p-2 sm:px-6 sm:py-3 shadow-lg z-10 relative">
+        <div class="flex-none">
           <RunButton triple={triple()} />
         </div>
-        <div class="flex-1 max-w-xs">
+        <div class="flex-1 min-w-[150px] sm:max-w-xs mx-auto">
           <TargetSelector
             options={triples}
             value={triple()}
@@ -347,7 +347,7 @@ const App = (props: {
             }}
           />
         </div>
-        <div class="ml-auto">
+        <div class="flex-none">
           <DownloadButton />
         </div>
       </div>
