@@ -3,13 +3,13 @@ import {
   AbstractMessageReader,
   AbstractMessageWriter,
   DataCallback,
-  Message,
   Disposable,
+  Message,
 } from "vscode-jsonrpc/browser";
 import type { Ctx } from "./ctx";
 import {
-  LspFrameDecoder,
   LSP_SESSION_ID,
+  LspFrameDecoder,
   OrderedLspSender,
 } from "./lsp_protocol";
 
