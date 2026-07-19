@@ -23,7 +23,7 @@ export const DownloadButton = () => {
       type="button"
       onClick={() => {
         console.log("download button clicked");
-        download("/tmp/main.wasm");
+        download("/target/wasm32-wasip1/debug/main.wasm");
       }}
       class="text-2xl text-green-700"
     >

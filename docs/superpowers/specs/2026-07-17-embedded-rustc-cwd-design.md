@@ -12,6 +12,8 @@ Cargo downloads and extracts registry crates into rubrc's Rust-side `VIRTUAL_FIL
 
 The local root build does not expose the bug because `/` is explicitly exempted from the outer `set_current_dir` call.
 
+Investigation confirmed that wasi-libc converts both relative `x` (while its cached cwd is `/`) and absolute `/x` to the identical root-preopen-FD plus `x` WASI call. The host therefore cannot infer absolute intent from the FD/path pair, and an automatic cwd-prefix exception is unsafe because a legitimate relative path can begin with the cwd directory name. The rubrc-only signal that exists before libc destroys intent is rustc's original argv, so the wrapper receives normalized root-path hints extracted from that argv for each invocation.
+
 ## Scope
 
 This change fixes cwd-aware path resolution for embedded `rustc_opt` executions. The acceptance case is `cargo add hello` followed by `cargo build` in the same WebShell session.
@@ -27,6 +29,12 @@ Build-script execution is explicitly outside this design. No build-script archit
 - Preserve absolute-path behavior and explicit directory-FD behavior.
 - Restore cwd routing and temporary FD state on every exit path.
 - Do not mirror `.cargo/registry` into the browser-host filesystem.
+- Require `--vfs-unwind` for the outer VFS module in every development,
+  production, and debug VFS build so panic containment can unwind to
+  `catch_unwind` and return status `101`.
+- Do not add `--wasm-unwind`; embedded target artifacts remain unchanged.
+  This is root build configuration, not a rustc or Cargo artifact source
+  modification.
 
 ## Wrapper
 
@@ -42,7 +50,7 @@ pub struct CwdAwareFileSystem<F> {
 }
 ```
 
-`TargetCwdEntry` stores `Wasm::NAME` for diagnostics and the temporary cwd FD for routing. `TypeId::of::<Wasm>()`, not the display name, is the target identity; two target types may legally expose the same name.
+`TargetCwdEntry` stores `Wasm::NAME` for diagnostics, the temporary cwd FD, and normalized root-relative path hints extracted from the invocation's original rustc argv. `TypeId::of::<Wasm>()`, not the display name, is the target identity; two target types may legally expose the same name.
 
 The concrete wrapped value remains `StandardDynamicFileSystem<LFS>`. The wrapper implements `Deref` to the inner filesystem so existing rubrc code can continue using `.lfs`, `add_fd`, and `remove_fd` without duplicating storage or changing synchronization helpers.
 
@@ -63,15 +71,18 @@ Two-directory operations remap each directory/path pair independently. For `path
 
 ## Path Routing
 
-The wrapper uses `TypeId::of::<Wasm>()` to look up the active cwd FD for the calling embedded target and retains `WasmAccessName::NAME` only for diagnostics. It uses `WasmPathAccess` to inspect the guest path without copying or modifying guest memory.
+The wrapper uses `TypeId::of::<Wasm>()` to look up the active cwd FD and root-path hints for the calling embedded target and retains `WasmAccessName::NAME` only for diagnostics. It uses `WasmPathAccess` to normalize and compare guest path components without modifying guest memory or assuming guest pointers are host pointers.
 
 A directory FD is remapped only when all conditions hold:
 
 1. The calling target has an active cwd mapping.
 2. The incoming directory FD equals the wrapper's recorded root preopen FD.
 3. The guest path is relative; its first component is not the root component.
+4. The guest path's normalized normal-component sequence does not equal or descend from an active root-path hint.
 
-Absolute paths remain rooted at the original root FD. Paths relative to an explicitly opened directory FD remain relative to that FD. Targets without an active mapping behave exactly like the inner filesystem.
+A hinted path stays on the original root FD; every other relative root-FD path is remapped to the cwd FD. Directly rooted paths remain at the original root FD, paths relative to an explicitly opened directory FD remain relative to that FD, and targets without an active mapping behave exactly like the inner filesystem. The previous automatic cwd-prefix exception is removed: matching the cwd's directory-name prefix alone never implies root intent.
+
+This mechanism intentionally cannot preserve absolute paths that are not represented in rustc argv. Once libc converts such a path to root FD plus relative bytes, it is indistinguishable from a genuine relative path under the no-WVL/no-artifact constraint and therefore follows cwd routing.
 
 Empty or malformed paths are forwarded to the inner filesystem, which retains ownership of WASI error semantics.
 
@@ -79,27 +90,32 @@ Each intercepted path method holds the target-cwd read lock from lookup through 
 
 The wrapper also intercepts `fd_close_raw` and `fd_renumber_raw`. Each operation holds the target-cwd read lock from the protected-FD check through completion of any delegated inner mutation. The recorded root FD and every active temporary cwd FD are protected from close, replacement, and renumbering while owned by the wrapper. Attempts return a deterministic WASI error without mutating the inner FD map. All other FD operations delegate unchanged.
 
-`path_open_raw`, successful unprotected renumbering, and temporary cwd FD allocation also share `fd_allocation`. This closes the inner allocator's gap between incrementing `next_fd` and inserting into `fd_map`. Before allocation, the wrapper advances past occupied descriptors; renumbering raises the allocator high-water mark. Descriptor `u32::MAX` is reserved so the allocator cannot wrap to stdio FDs; allocation or renumbering that would reach it returns exhaustion.
+`path_open_raw`, successful unprotected renumbering, and temporary cwd FD allocation also share `fd_allocation`. This closes the inner allocator's gap between incrementing `next_fd` and inserting into `fd_map`. Renumbering leaves `next_fd` unchanged; before each later allocation, the wrapper advances past any occupied descriptor under the same lock. Descriptor `u32::MAX` is reserved, so renumbering to it or allocating it returns exhaustion without wrapping to stdio FDs.
 
 ## Cwd Lifecycle
 
 The wrapper exposes a rubrc-internal operation that resolves a virtual directory path from the LFS root and installs it for one target:
 
 ```rust
-fn enter_target_cwd<Wasm>(&self, cwd: &[u8]) -> Result<TargetCwdGuard<'_, F>, String>
+fn enter_target_cwd<Wasm>(
+    &self,
+    cwd: &[u8],
+    root_path_hints: Vec<Vec<String>>,
+) -> Result<TargetCwdGuard<'_, F>, String>
 where
     Wasm: WasmAccessName + 'static;
 ```
 
 The operation:
 
-1. Decodes and normalizes the Cargo cwd.
-2. Rejects invalid UTF-8, unsupported prefixes, root escapes, missing entries, symlink components, and non-directory entries. Cwd traversal does not follow symlinks.
-3. Returns a no-op guard for `/` because root routing already has the correct behavior.
-4. Traverses `inner.lfs` from the wrapper's recorded root inode.
-5. Acquires the mapping write lock and checks that `TypeId::of::<Wasm>()` is absent.
-6. While still holding that lock, calls `inner.add_fd` exactly once with directory rights equivalent to the root preopen and inserts the resulting FD into the target entry. If insertion cannot complete, it removes that same FD before returning.
-7. Returns an RAII guard.
+1. Returns a no-op guard for an empty cwd so rustc discovery/probe invocations preserve root routing without allocating a mapping or FD.
+2. Decodes and normalizes a non-empty Cargo cwd for traversal.
+3. Rejects invalid UTF-8, unsupported prefixes, root escapes, missing entries, symlink components, and non-directory entries. Cwd traversal does not follow symlinks.
+4. Acquires the mapping write lock and checks that `TypeId::of::<Wasm>()` is absent.
+5. Traverses `inner.lfs` from the wrapper's recorded root inode.
+6. Returns a no-op guard for `/` because root routing already has the correct behavior.
+7. While still holding that lock, calls `inner.add_fd` exactly once with directory rights equivalent to the root preopen and inserts the resulting FD plus the already-normalized root-path hints into the target entry. If insertion cannot complete, it removes that same FD before returning.
+8. Returns an RAII guard.
 
 `TargetCwdGuard::drop` acquires the mapping write lock, removes the target mapping, and then removes that entry's exact temporary FD before releasing the lock. Active path calls hold a read lock through inner dispatch, so cleanup waits for them. Protected close/renumber handling ensures the stored FD still names the wrapper-owned inode.
 
@@ -110,15 +126,19 @@ The existing `RUSTC_RUN_LOCK` continues to serialize rustc resets and invocation
 `wasi_ext_spawn` keeps Cargo's cwd bytes and debug trace. For `rustc`:
 
 1. Acquire `RUSTC_RUN_LOCK` as today.
-2. Validate and enter `rustc_opt`'s target cwd before mutating environment, arguments, output capture, or child-process state.
-3. Install environment and arguments as today.
-4. Reset and execute `rustc_opt` while the cwd guard is alive.
-5. Restore environment, arguments, output capture, and child-process state as today.
-6. Let the cwd guard drop to restore routing and remove the temporary FD.
+2. Append the forced `--sysroot /sysroot` and linker arguments to the local argv. This is local preparation, not global invocation-state mutation.
+3. Extract, normalize, and deduplicate absolute root-path hints from that complete argv.
+4. Validate and enter `rustc_opt`'s target cwd with those hints before mutating environment, global arguments, output capture, or child-process state.
+5. Install the same prepared argv and environment as today.
+6. Inside `catch_unwind(AssertUnwindSafe(...))`, install invocation and child-process state, then reset and execute `rustc_opt` while the cwd guard is alive.
+7. On success, restore state through the guards and retain the existing child stdout, stderr, and rustc status. On panic, let both guards restore exact prior state during unwind, then return empty stdout, a bounded `embedded rustc panicked: ...` stderr diagnostic, and deterministic status `101`.
+8. Let the cwd guard drop normally after either result to restore routing and remove the temporary FD.
+
+The pure argv extractor recognizes `/` at token start and after path-value boundaries such as `=` and `@`. It covers standalone source paths, `--sysroot`, `--out-dir`, `-Ldependency=`, `--extern=name=`, comma-delimited joined or separate `--emit` values, and `@/response` without reading response files. It normalizes paths to root-relative UTF-8 components, ignores root escapes and root-only values, and deduplicates exact hints.
 
 The outer `std::env::current_dir` / `std::env::set_current_dir` / restore block is removed from the rustc spawn path. The obsolete `virtual_cwd_for_set_current_dir` helper is removed.
 
-If cwd validation fails, `wasi_ext_spawn` returns the existing Cargo-owned status-1 result with a bounded explanatory stderr message and does not invoke rustc. Because validation occurs first, no invocation state requires rollback on this path. State changed after validation remains covered by existing restoration plus focused RAII guards where an unwind could otherwise bypass cleanup.
+If cwd validation fails, `wasi_ext_spawn` returns the existing Cargo-owned status-1 result with a bounded explanatory stderr message and does not invoke rustc. Because validation occurs first, no invocation state requires rollback on this path. A rustc panic is contained before the `extern "C"` boundary; invocation and child state restore through RAII before Cargo receives the bounded status-101 result, and cwd cleanup then follows the normal drop path.
 
 ## Construction
 
@@ -151,15 +171,24 @@ Unit tests use separate fake `WasmAccessName` target types and an in-memory dyna
 - A relative path for the mapped rustc target resolves beneath its cwd.
 - The same relative path for an unmapped target still resolves from root.
 - An absolute path for the mapped target still resolves from root.
+- A stripped `/sysroot/...` path stays root-based when `/sysroot` is an argv hint, even if the cwd contains a colliding `sysroot` directory.
+- An absolute source path under the cwd stays root-based through its exact argv hint.
+- An ordinary relative path still resolves beneath cwd while hints are active.
+- A legitimate relative path beginning with the cwd directory name remains cwd-relative without a hint.
+- The pure argv extractor covers every supported rustc path-value form, normalization, escape rejection, and deduplication.
 - A path using an explicitly opened directory FD is not remapped.
 - Both sides of link and rename operations are routed independently.
+- An empty cwd returns a no-op guard, allocates no mapping or FD, and preserves root routing.
 - A no-op root guard does not allocate or alter routing.
 - Missing, file-valued, escaping, and duplicate cwd mappings are rejected.
 - Symlink components in a cwd are rejected rather than followed.
 - Dropping the guard restores root behavior and removes the temporary FD.
 - A routed path call racing guard drop completes before the FD is removed.
 - Close and renumber cannot remove, replace, or move protected root/cwd FDs.
+- Renumbering onto the allocator's current candidate leaves the destination intact and lets the next allocation skip it.
+- Renumbering to `u32::MAX - 1` does not move a low allocator cursor or prevent later cwd/path allocation; destination `u32::MAX` remains rejected.
 - A rejected duplicate mapping does not allocate or leak an FD.
+- Rustc panic containment observes replacement child stdio while active, restores exact prior `Some` and `None` child states plus invocation state, bounds stderr, and returns status `101`.
 
 The existing Cargo-add E2E is extended to run, in one retained VFS session:
 
@@ -170,7 +199,15 @@ cargo build -j 1
 
 The E2E prepares the wasm32-wasip1 sysroot, proves rustc is invoked for the registry source cwd, rejects `failed to set cwd`, requires successful compilation of `hello`, and requires the shell prompt to return.
 
-Existing local workspace Cargo build, Cargo run, Cargo add/info, Deno bridge, VFS Rust, formatting, build, and artifact checks remain required.
+A focused Deno configuration test parses root `package.json` and requires
+`vfs:build`, `vfs:build:prod`, and `vfs:build-debug` to contain the standalone
+`--vfs-unwind` flag.
+
+Existing local workspace Cargo build, Cargo run, Cargo add/info, Deno bridge,
+VFS Rust, formatting, development build, and artifact checks remain required.
+Verification also requires `bun run vfs:build:prod`, validation of both
+`dist/vfs.core.wasm` and the copied page wasm, and a byte-for-byte comparison of
+those files.
 
 ## Acceptance Criteria
 
@@ -179,4 +216,5 @@ Existing local workspace Cargo build, Cargo run, Cargo add/info, Deno bridge, VF
 - Absolute and explicit-directory-FD operations retain existing behavior.
 - Cwd state is target-local and restored after every rustc invocation.
 - `cargo add hello` followed by `cargo build -j 1` succeeds and returns to the WebShell prompt.
+- Development, production, and debug VFS build commands all enable outer-module panic unwinding with `--vfs-unwind`.
 - No WVL, browser shim, Cargo, rustc artifact, or build-script implementation is changed.

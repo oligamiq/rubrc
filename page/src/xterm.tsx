@@ -23,6 +23,12 @@ import childProcessWorkerUrl from "./worker_process/vfs_bindings/child_process_w
 
 wait_async_polyfill();
 
+const getDownloadFileName = (name: string): string => {
+  const normalized = name.replaceAll("\\", "/");
+  const fileName = normalized.slice(normalized.lastIndexOf("/") + 1);
+  return fileName || "download";
+};
+
 let shared_xterm: SharedObject | undefined;
 const terminals = new Map<number, Terminal>();
 let out_buff = "";
@@ -369,7 +375,7 @@ edition = "2021"
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
           a.href = url;
-          a.download = download_name;
+          a.download = getDownloadFileName(download_name);
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);

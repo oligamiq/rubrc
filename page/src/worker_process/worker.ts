@@ -22,23 +22,30 @@ globalThis.addEventListener("message", async (event) => {
       (string) => Promise<void>
     >();
 
-    const input_char = new SharedObjectRef(ctx.input_char_id).proxy<
-      (c: number) => Promise<void>
+    let input_string: (args: {
+      sessionId: number;
+      data: string;
+    }) => Promise<void>;
+    input_string = new SharedObjectRef(ctx.input_string_id).proxy<
+      (args: { sessionId: number; data: string }) => Promise<void>
     >();
 
     const run_command = async (args: string[]) => {
       const line = args.join(" ");
-      for (let i = 0; i < line.length; i++) {
-        await input_char(line.charCodeAt(i));
-      }
-      await input_char(13);
+      await input_string({
+        sessionId: 0,
+        data: `${line}\r`,
+      });
     };
 
-    shared = new SharedObject((triple) => {
-      (async () => {
-        await run_command(["load_sysroot", triple]);
-      })();
-    }, ctx.load_additional_sysroot_id);
+    shared = new SharedObject(
+      (triple: string) => {
+        void run_command(["load_sysroot", triple]).catch((error) => {
+          console.error("[Worker] Failed to load sysroot:", error);
+        });
+      },
+      ctx.load_additional_sysroot_id,
+    );
   } else if (event.data.wasi_ref) {
     const { wasi_ref } = event.data;
     wasi_refs[0] = wasi_ref;

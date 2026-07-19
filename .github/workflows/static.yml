@@ -2,12 +2,16 @@
 name: Deploy static content to Pages
 
 on:
-  # Runs on pushes targeting the default branch
-  push:
-    branches: ["main"]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Source commit SHA
+        required: true
+        type: string
+      dist_sha:
+        description: pages-dist commit SHA
+        required: true
+        type: string
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
@@ -15,10 +19,8 @@ permissions:
   pages: write
   id-token: write
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
 concurrency:
-  group: "pages"
+  group: github-pages
   cancel-in-progress: false
 
 jobs:
@@ -29,80 +31,99 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-      - name: Setup Node
-        uses: actions/setup-node@v3
-        with:
-          node-version: 20
-      - name: install bun
-        run: |
-          curl -fsSL https://bun.sh/install | bash
-          source /home/runner/.bashrc
-          echo '~/.bun/bin' >> $GITHUB_PATH
-      - name: Setup Rust nightly
-        run: |
-          rustup toolchain install nightly --profile minimal
-          rustup target add wasm32-wasip1-threads --toolchain nightly
-      - name: install wasi_virt_layer
-        run: |
-          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/oligamiq/wasi_virt_layer/releases/download/v0.6.1/wasi_virt_layer-cli-installer.sh | sh
-      - name: Install Binaryen
+      - name: Validate SHA inputs
         env:
-          BINARYEN_VERSION: version_131
-          BINARYEN_SHA256: b5bf1f0eaf17c63ee588ff7a5954dc8f6ce2c26989051c66f24dfe9ece3e46db
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          DIST_SHA: ${{ inputs.dist_sha }}
+          TRIGGER_SHA: ${{ github.sha }}
         run: |
-          curl --fail --location --retry 3 \
-            --output binaryen.tar.gz \
-            "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz"
+          if ! [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Error: source_sha must be a 40-character lowercase hex SHA"
+            exit 1
+          fi
 
-          echo "${BINARYEN_SHA256}  binaryen.tar.gz" | sha256sum --check -
+          if ! [[ "$DIST_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Error: dist_sha must be a 40-character lowercase hex SHA"
+            exit 1
+          fi
 
-          tar -xzf binaryen.tar.gz
+          if [ "$SOURCE_SHA" != "$TRIGGER_SHA" ]; then
+            echo "Error: source_sha does not match workflow trigger SHA"
+            exit 1
+          fi
 
-          BINARYEN_DIR="$PWD/binaryen-${BINARYEN_VERSION}"
-          echo "${BINARYEN_DIR}/bin" >> "$GITHUB_PATH"
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: source
+          fetch-depth: 1
 
-          "${BINARYEN_DIR}/bin/wasm-opt" --version
-          "${BINARYEN_DIR}/bin/wasm-opt" --help \
-            | grep -q -- "--enable-shared-everything"
-          "${BINARYEN_DIR}/bin/wasm-opt" --help \
-            | grep -q -- "--enable-multimemory"
+      - name: Checkout prebuilt site
+        uses: actions/checkout@v4
+        with:
+          ref: pages-dist
+          path: site
+          fetch-depth: 1
 
-      - name: Build
+      - name: Validate dist SHA
+        env:
+          DIST_SHA: ${{ inputs.dist_sha }}
         run: |
-          bun i
-          bun run build:prod
-          bun run vfs:prepare:prod
-          cd page
-          bunx mini-coi -sw dist/mini-coi.js
-          sed -i '/<head>/a \    <script src="./mini-coi.js" scope="./"></script>' dist/index.html
-      - name: Add v1 static snapshot
+          ACTUAL_DIST_SHA="$(git -C site rev-parse HEAD)"
+
+          if [ "$ACTUAL_DIST_SHA" != "$DIST_SHA" ]; then
+            echo "Error: actual pages-dist SHA does not match expected SHA"
+            exit 1
+          fi
+
+      - name: Remove site/.git
+        run: rm -rf site/.git
+
+      - name: Validate metadata
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
-          rm -rf page/dist/v1
-          mkdir -p page/dist/v1
+          node <<'NODE'
+          const fs = require("node:fs");
 
-          git fetch --depth=1 origin refs/heads/v1-dist
-          git archive --format=tar FETCH_HEAD \
-            | tar -xf - -C page/dist/v1
+          const metadata = JSON.parse(
+            fs.readFileSync(
+              "site/.rubrc-pages-build.json",
+              "utf8",
+            ),
+          );
 
-          test -f page/dist/v1/index.html
-          test -d page/dist/v1/assets
+          if (metadata.version !== 1) {
+            throw new Error("metadata.version !== 1");
+          }
 
-          echo "v1 snapshot:"
-          find page/dist/v1 -maxdepth 2 -type f | sort
+          if (metadata.sourceSha !== process.env.SOURCE_SHA) {
+            throw new Error(
+              "metadata.sourceSha does not match source_sha",
+            );
+          }
+          NODE
 
       - name: Verify artifacts
+        run: node source/scripts/verify-vfs-asset.mjs site
+
+      - name: Remove .rubrc-pages-build.json
+        run: rm -f site/.rubrc-pages-build.json
+
+      - name: Confirm index.html and v1/index.html
         run: |
-          node scripts/verify-vfs-asset.mjs page/dist
+          test -f site/index.html
+          test -f site/v1/index.html
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: './page/dist'
+          path: 'site'
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

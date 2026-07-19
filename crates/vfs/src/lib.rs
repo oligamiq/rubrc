@@ -7,7 +7,9 @@ use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use wasi_virt_layer::__private::wasip1::{self, Ciovec, Dircookie, Fd, Size};
-use wasi_virt_layer::memory::{WasmAccessName, WasmPathAccess, WasmPathComponent};
+use wasi_virt_layer::memory::{
+    WasmAccessName, WasmPathAccess, WasmPathComponent, WasmPathComponentCommon,
+};
 use wasi_virt_layer::wasi::file::Wasip1LFSBase;
 use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
 
@@ -108,52 +110,64 @@ impl ChildProcessStdio {
 static CHILD_PROCESS_STDIO: std::sync::LazyLock<parking_lot::Mutex<Option<ChildProcessStdio>>> =
     std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
 
+struct ChildProcessStdioGuard {
+    previous: Option<ChildProcessStdio>,
+    active: bool,
+}
+
+impl ChildProcessStdioGuard {
+    fn new(cwd: Vec<u8>, stdin: Vec<u8>) -> Self {
+        let previous = {
+            let mut process = CHILD_PROCESS_STDIO.lock();
+            process.replace(ChildProcessStdio::new(cwd, stdin))
+        };
+        Self {
+            previous,
+            active: true,
+        }
+    }
+
+    fn finish(mut self) -> CargoOutput {
+        let mut current = self.restore();
+        if !current.cwd.is_empty() {
+            debug_trace(&format!(
+                "child-process:cwd {}",
+                String::from_utf8_lossy(&current.cwd)
+            ));
+        }
+        CargoOutput {
+            stdout: current.stdout.drain(),
+            stderr: current.stderr.drain(),
+        }
+    }
+
+    fn restore(&mut self) -> ChildProcessStdio {
+        let mut process = CHILD_PROCESS_STDIO.lock();
+        let current = process
+            .take()
+            .unwrap_or_else(|| ChildProcessStdio::new(Vec::new(), Vec::new()));
+        *process = self.previous.take();
+        self.active = false;
+        current
+    }
+}
+
+impl Drop for ChildProcessStdioGuard {
+    fn drop(&mut self) {
+        if self.active {
+            *CHILD_PROCESS_STDIO.lock() = self.previous.take();
+        }
+    }
+}
+
 fn with_child_process_stdio<T>(
     cwd: Vec<u8>,
     stdin: Vec<u8>,
     f: impl FnOnce() -> T,
 ) -> (T, CargoOutput) {
-    let previous = {
-        let mut process = CHILD_PROCESS_STDIO.lock();
-        process.replace(ChildProcessStdio::new(cwd, stdin))
-    };
-
+    let guard = ChildProcessStdioGuard::new(cwd, stdin);
     let result = f();
-
-    let mut current = {
-        let mut process = CHILD_PROCESS_STDIO.lock();
-        let current = process
-            .take()
-            .unwrap_or_else(|| ChildProcessStdio::new(Vec::new(), Vec::new()));
-        *process = previous;
-        current
-    };
-
-    if !current.cwd.is_empty() {
-        debug_trace(&format!(
-            "child-process:cwd {}",
-            String::from_utf8_lossy(&current.cwd)
-        ));
-    }
-
-    (
-        result,
-        CargoOutput {
-            stdout: current.stdout.drain(),
-            stderr: current.stderr.drain(),
-        },
-    )
-}
-
-fn virtual_cwd_for_set_current_dir(cwd: &[u8]) -> Option<std::borrow::Cow<'_, str>> {
-    let cwd = String::from_utf8_lossy(cwd);
-    if cwd == "/" {
-        None
-    } else if let Some(relative) = cwd.strip_prefix('/') {
-        Some(std::borrow::Cow::Owned(relative.to_string()))
-    } else {
-        Some(cwd)
-    }
+    (result, guard.finish())
 }
 
 thread_local! {
@@ -167,6 +181,74 @@ pub(crate) static RUSTC_RUN_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::n
 #[allow(dead_code)]
 static RUSTC_STARTED: AtomicBool = AtomicBool::new(false);
 pub(crate) static RUSTC_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
+
+struct RustcInvocationState {
+    previous_env: Vec<String>,
+    previous_args: Vec<String>,
+    previous_output: Option<CargoOutput>,
+}
+
+impl RustcInvocationState {
+    fn new(env: Vec<String>, args: Vec<String>) -> Self {
+        let previous_env = std::mem::replace(&mut VIRTUAL_SHELL_ENV.lock().env, env);
+        let previous_args = std::mem::replace(&mut command::VIRTUAL_ARGS.lock().args, args);
+        let previous_output =
+            CARGO_OUTPUT.with(|output| output.replace(Some(CargoOutput::default())));
+        Self {
+            previous_env,
+            previous_args,
+            previous_output,
+        }
+    }
+}
+
+impl Drop for RustcInvocationState {
+    fn drop(&mut self) {
+        VIRTUAL_SHELL_ENV.lock().env = std::mem::take(&mut self.previous_env);
+        command::VIRTUAL_ARGS.lock().args = std::mem::take(&mut self.previous_args);
+        CARGO_OUTPUT.with(|output| {
+            output.replace(self.previous_output.take());
+        });
+    }
+}
+
+fn run_rustc_invocation(
+    env: Vec<String>,
+    args: Vec<String>,
+    cwd: Vec<u8>,
+    stdin: Vec<u8>,
+    run: impl FnOnce(),
+) -> (CargoOutput, i32) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _invocation_state = RustcInvocationState::new(env, args);
+        debug_trace("wasi-ext-spawn:run-rustc:enter");
+        let ((), child_output) = with_child_process_stdio(cwd, stdin, run);
+        let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
+        debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
+        (child_output, status)
+    }));
+
+    match result {
+        Ok(result) => result,
+        Err(payload) => {
+            let message = if let Some(message) = payload.downcast_ref::<&str>() {
+                *message
+            } else if let Some(message) = payload.downcast_ref::<String>() {
+                message.as_str()
+            } else {
+                "unknown panic payload"
+            };
+            debug_trace(&format!("wasi-ext-spawn:run-rustc:panic {message}"));
+            (
+                CargoOutput {
+                    stdout: Vec::new(),
+                    stderr: bounded_rustc_panic_error(message),
+                },
+                RUSTC_PANIC_STATUS,
+            )
+        }
+    }
+}
 
 struct RustcActiveGuard;
 
@@ -728,6 +810,7 @@ type LFS = StandardDynamicLFS<ShellVirtualStdIO>;
 struct TargetCwdEntry {
     target_name: &'static str,
     cwd_fd: Fd,
+    root_path_hints: Vec<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -793,11 +876,17 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
     pub fn enter_target_cwd<Wasm: WasmAccess + WasmAccessName + 'static>(
         &self,
         cwd: &[u8],
+        root_path_hints: Vec<Vec<String>>,
     ) -> Result<TargetCwdGuard<'_, StandardDynamicFileSystem<LFS>>, String> {
-        let cwd = std::str::from_utf8(cwd).map_err(|_| "cwd is not valid UTF-8".to_string())?;
         if cwd.is_empty() {
-            return Err("cwd is empty".to_string());
+            return Ok(TargetCwdGuard {
+                fs: self,
+                target_id: None,
+                cwd_fd: None,
+                remove_fd: remove_dynamic_fd,
+            });
         }
+        let cwd = std::str::from_utf8(cwd).map_err(|_| "cwd is not valid UTF-8".to_string())?;
 
         let mut components = Vec::new();
         for component in Path::new(cwd).components() {
@@ -806,7 +895,8 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
                 Component::Normal(component) => components.push(
                     component
                         .to_str()
-                        .ok_or_else(|| "cwd component is not valid UTF-8".to_string())?,
+                        .ok_or_else(|| "cwd component is not valid UTF-8".to_string())?
+                        .to_string(),
                 ),
                 Component::ParentDir => {
                     components
@@ -824,14 +914,14 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         }
 
         let mut inode = self.root_inode;
-        for component in components {
+        for component in &components {
             let entries = self
                 .lfs
                 .read_dir(inode)
                 .map_err(|_| format!("cannot read cwd component {component}"))?;
             let child = entries
                 .into_iter()
-                .find_map(|(name, inode)| (name == component).then_some(inode))
+                .find_map(|(name, inode)| (name == component.as_str()).then_some(inode))
                 .ok_or_else(|| format!("cwd component does not exist: {component}"))?;
             let metadata = self
                 .lfs
@@ -864,6 +954,7 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
             TargetCwdEntry {
                 target_name: Wasm::NAME,
                 cwd_fd,
+                root_path_hints,
             },
         );
         Ok(TargetCwdGuard {
@@ -896,12 +987,36 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         let Some(entry) = target_cwds.get(&TypeId::of::<Wasm>()) else {
             return fd;
         };
-        if matches!(
-            WasmPathAccess::<Wasm>::new(path_ptr, path_len)
-                .components()
-                .next(),
-            Some(WasmPathComponent::RootDir) | None
-        ) {
+        let mut path_components = WasmPathAccess::<Wasm>::new(path_ptr, path_len).components();
+        let Some(first_component) = path_components.next() else {
+            return fd;
+        };
+        if matches!(first_component, WasmPathComponent::RootDir) {
+            return fd;
+        }
+        let mut normalized_path = Vec::new();
+        for component in std::iter::once(first_component).chain(path_components) {
+            if component.as_cur_dir() {
+                continue;
+            }
+            if component.as_parent_dir() {
+                if normalized_path.pop().is_none() {
+                    return entry.cwd_fd;
+                }
+                continue;
+            }
+            let Some(normal) = component.as_normal() else {
+                return entry.cwd_fd;
+            };
+            normalized_path.push(normal.into_iter().collect::<Vec<_>>());
+        }
+        if entry.root_path_hints.iter().any(|hint| {
+            hint.len() <= normalized_path.len()
+                && hint
+                    .iter()
+                    .zip(&normalized_path)
+                    .all(|(hint, component)| hint.as_bytes() == component)
+        }) {
             fd
         } else {
             entry.cwd_fd
@@ -1065,11 +1180,7 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         if to == u32::MAX {
             return wasip1::ERRNO_MFILE;
         }
-        let errno = self.inner.fd_renumber_raw::<Wasm>(fd, to);
-        if errno == wasip1::ERRNO_SUCCESS {
-            self.inner.next_fd.fetch_max(to + 1, Ordering::SeqCst);
-        }
-        errno
+        self.inner.fd_renumber_raw::<Wasm>(fd, to)
     }
 
     fn fd_readdir_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
@@ -1626,6 +1737,57 @@ pub extern "C" fn wasi_ext_git_fetch(_path_ptr: i32, _path_len: i32) -> i32 {
     1
 }
 
+fn normalize_root_path_hint(path: &str) -> Option<Vec<String>> {
+    let mut components = Vec::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::RootDir | Component::CurDir => {}
+            Component::Normal(component) => components.push(component.to_str()?.to_string()),
+            Component::ParentDir => {
+                components.pop()?;
+            }
+            Component::Prefix(_) => return None,
+        }
+    }
+    (!components.is_empty()).then_some(components)
+}
+
+fn rustc_root_path_hints(argv: &[String]) -> Vec<Vec<String>> {
+    let mut hints = Vec::new();
+    let mut next_is_emit_value = false;
+    for argument in argv {
+        let bytes = argument.as_bytes();
+        let comma_delimited = next_is_emit_value || argument.starts_with("--emit=");
+        next_is_emit_value = argument == "--emit";
+        let mut offset = 0;
+        while let Some(relative_start) = bytes[offset..].iter().position(|byte| *byte == b'/') {
+            let start = offset + relative_start;
+            if start != 0 && !matches!(bytes[start - 1], b'=' | b'@') {
+                offset = start + 1;
+                continue;
+            }
+            let end = if comma_delimited {
+                bytes[start..]
+                    .iter()
+                    .position(|byte| *byte == b',')
+                    .map_or(bytes.len(), |end| start + end)
+            } else {
+                bytes.len()
+            };
+            if let Some(hint) = normalize_root_path_hint(&argument[start..end])
+                && !hints.contains(&hint)
+            {
+                hints.push(hint);
+            }
+            if end == bytes.len() {
+                break;
+            }
+            offset = end + 1;
+        }
+    }
+    hints
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn wasi_ext_spawn(
     program_ptr: i32,
@@ -1706,66 +1868,46 @@ pub extern "C" fn wasi_ext_spawn(
 
     let _rustc_guard = RUSTC_RUN_LOCK.lock();
 
-    let old_env = {
-        let mut virtual_env = VIRTUAL_SHELL_ENV.lock();
-        let old = virtual_env.env.clone();
-        virtual_env.env = env
-            .split(|byte| *byte == 0)
-            .filter(|entry| !entry.is_empty())
-            .map(|entry| String::from_utf8_lossy(entry).into_owned())
-            .collect();
-        old
-    };
+    argv.push("--sysroot".to_string());
+    argv.push("/sysroot".to_string());
+    argv.push("-Clinker-flavor=wasm-ld".to_string());
+    argv.push("-Clinker=wasm-ld".to_string());
+    let root_path_hints = rustc_root_path_hints(&argv);
+
     if !cwd.is_empty() {
-        crate::debug_trace(&format!(
+        debug_trace(&format!(
             "wasi-ext-spawn:virtual-cwd {}",
             String::from_utf8_lossy(&cwd)
         ));
     }
 
-    let old_cwd = std::env::current_dir().ok();
-    if !cwd.is_empty() {
-        let cwd_string = String::from_utf8_lossy(&cwd);
-        let set_cwd = virtual_cwd_for_set_current_dir(&cwd);
-        if let Some(set_cwd) = set_cwd {
-            if let Err(error) = std::env::set_current_dir(set_cwd.as_ref()) {
-                VIRTUAL_SHELL_ENV.lock().env = old_env;
-                write_cargo_owned_spawn_result(
-                    Vec::new(),
-                    format!("failed to set cwd `{cwd_string}`: {error}").into_bytes(),
-                    1,
-                    out_exit_code,
-                    out_stdout_ptr,
-                    out_stdout_len,
-                    out_stderr_ptr,
-                    out_stderr_len,
-                );
-                return 0;
-            }
+    let cwd_guard = match VIRTUAL_FILE_SYSTEM.enter_target_cwd::<rustc_opt>(&cwd, root_path_hints) {
+        Ok(guard) => guard,
+        Err(error) => {
+            let stderr = bounded_rustc_cwd_error(&cwd, &error);
+            write_cargo_owned_spawn_result(
+                Vec::new(),
+                stderr,
+                RUSTC_CWD_ERROR_STATUS,
+                out_exit_code,
+                out_stdout_ptr,
+                out_stdout_len,
+                out_stderr_ptr,
+                out_stderr_len,
+            );
+            return 0;
         }
-    }
+    };
 
-    let outer_output = CARGO_OUTPUT.with(|output| output.borrow_mut().take());
-    CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
+    let rustc_env = env
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| String::from_utf8_lossy(entry).into_owned())
+        .collect();
+    let (child_output, status) =
+        run_rustc_invocation(rustc_env, argv, cwd.to_vec(), stdin, run_rustc);
 
-    crate::debug_trace("wasi-ext-spawn:run-rustc:enter");
-    let old_args = command::VIRTUAL_ARGS.lock().args.clone();
-    argv.push("--sysroot".to_string());
-    argv.push("/sysroot".to_string());
-    argv.push("-Clinker-flavor=wasm-ld".to_string());
-    argv.push("-Clinker=wasm-ld".to_string());
-    command::set_rustc_opt_args(&argv);
-    let ((), child_output) = with_child_process_stdio(cwd.to_vec(), stdin, run_rustc);
-    command::VIRTUAL_ARGS.lock().args = old_args;
-    let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
-    crate::debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
-
-    let _ = CARGO_OUTPUT.with(|output| output.borrow_mut().take());
-    CARGO_OUTPUT.with(|output| *output.borrow_mut() = outer_output);
-    if let Some(old_cwd) = old_cwd {
-        let _ = std::env::set_current_dir(old_cwd);
-    }
-    VIRTUAL_SHELL_ENV.lock().env = old_env;
+    drop(cwd_guard);
 
     write_cargo_owned_spawn_result(
         child_output.stdout,
@@ -1785,9 +1927,27 @@ const WASI_SPAWN_REPLACE: i32 = 1;
 const MAX_CHILD_MODULE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CHILD_MODULE_CHUNK_BYTES: usize = 256 * 1024;
 const MAX_CHILD_ERROR_BYTES: usize = 64 * 1024;
+const RUSTC_CWD_ERROR_STATUS: i32 = 1;
+const RUSTC_PANIC_STATUS: i32 = 101;
 const CHILD_STATE_UPLOADING: u32 = 1;
 const CHILD_STATE_RUNNING: u32 = 2;
 const CHILD_STATE_COMPLETED: u32 = 3;
+
+fn bounded_rustc_cwd_error(cwd: &[u8], error: &str) -> Vec<u8> {
+    let mut stderr = format!(
+        "failed to set virtual cwd `{}`: {error}",
+        String::from_utf8_lossy(cwd),
+    )
+    .into_bytes();
+    stderr.truncate(MAX_CHILD_ERROR_BYTES);
+    stderr
+}
+
+fn bounded_rustc_panic_error(message: &str) -> Vec<u8> {
+    let mut stderr = format!("embedded rustc panicked: {message}").into_bytes();
+    stderr.truncate(MAX_CHILD_ERROR_BYTES);
+    stderr
+}
 
 fn checked_child_module_size(size: u64) -> Result<usize, String> {
     let size = usize::try_from(size).map_err(|_| "child module exceeds 16 MiB".to_string())?;
@@ -2494,6 +2654,15 @@ mod cwd_aware_fs_tests {
         let cwd = lfs.add_dir(root, "cwd").unwrap();
         lfs.add_file(cwd, "shared.txt", b"cwd-value".to_vec())
             .unwrap();
+        let nested_cwd = lfs.add_dir(cwd, "cwd").unwrap();
+        lfs.add_file(nested_cwd, "shared.txt", b"nested-cwd".to_vec())
+            .unwrap();
+        let root_sysroot = lfs.add_dir(root, "sysroot").unwrap();
+        lfs.add_file(root_sysroot, "shared.txt", b"root-sysroot".to_vec())
+            .unwrap();
+        let cwd_sysroot = lfs.add_dir(cwd, "sysroot").unwrap();
+        lfs.add_file(cwd_sysroot, "shared.txt", b"cwd-sysroot".to_vec())
+            .unwrap();
         lfs.add_dir(cwd, "source").unwrap();
         lfs.add_dir(cwd, "destination").unwrap();
         let explicit = lfs.add_dir(root, "explicit").unwrap();
@@ -2534,7 +2703,10 @@ mod cwd_aware_fs_tests {
     #[test]
     fn routes_only_relative_root_fd_paths_for_the_mapped_target() {
         let fixture = fixture();
-        let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
         assert_eq!(
             stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
             9
@@ -2555,9 +2727,67 @@ mod cwd_aware_fs_tests {
     }
 
     #[test]
+    fn root_path_hint_keeps_stripped_sysroot_path_at_root_with_cwd_collision() {
+        let fixture = fixture();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", vec![vec!["sysroot".to_string()]])
+            .unwrap();
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"sysroot/shared.txt"),
+            12
+        );
+    }
+
+    #[test]
+    fn exact_absolute_source_hint_keeps_path_at_root() {
+        let fixture = fixture();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(
+                b"/cwd",
+                vec![vec!["cwd".to_string(), "shared.txt".to_string()]],
+            )
+            .unwrap();
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"cwd/shared.txt"),
+            9
+        );
+    }
+
+    #[test]
+    fn plain_relative_path_still_routes_to_cwd_with_root_hints() {
+        let fixture = fixture();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", vec![vec!["sysroot".to_string()]])
+            .unwrap();
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
+            9
+        );
+    }
+
+    #[test]
+    fn relative_path_starting_with_cwd_name_routes_without_a_hint() {
+        let fixture = fixture();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"cwd/shared.txt"),
+            10
+        );
+    }
+
+    #[test]
     fn target_identity_does_not_depend_on_display_name() {
         let fixture = fixture();
-        let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
         assert_eq!(
             stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
             9
@@ -2571,7 +2801,10 @@ mod cwd_aware_fs_tests {
     #[test]
     fn link_and_rename_route_both_directory_path_pairs() {
         let fixture = fixture();
-        let _guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let _guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
         let source = b"shared.txt";
         let link = b"linked.txt";
         assert_eq!(
@@ -2607,8 +2840,7 @@ mod cwd_aware_fs_tests {
     #[test]
     fn rejects_invalid_cwd_without_allocating_an_fd() {
         for cwd in [
-            b"".as_slice(),
-            b"/missing",
+            b"/missing".as_slice(),
             b"/plain-file",
             b"/../escape",
             b"/symlink-to-cwd",
@@ -2617,10 +2849,47 @@ mod cwd_aware_fs_tests {
             let fixture = fixture();
             let next_fd = fixture.fs.next_fd.load(Ordering::SeqCst);
             let fd_count = fixture.fs.fd_map.len();
-            assert!(fixture.fs.enter_target_cwd::<MappedWasm>(cwd).is_err());
+            assert!(
+                fixture
+                    .fs
+                    .enter_target_cwd::<MappedWasm>(cwd, Vec::new())
+                    .is_err()
+            );
             assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), next_fd);
             assert_eq!(fixture.fs.fd_map.len(), fd_count);
         }
+    }
+
+    #[test]
+    fn empty_cwd_is_a_no_op_that_preserves_root_routing() {
+        let fixture = fixture();
+        let initial_next = fixture.fs.next_fd.load(Ordering::SeqCst);
+        let initial_count = fixture.fs.fd_map.len();
+
+        let guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"", Vec::new())
+            .unwrap();
+
+        assert!(guard.target_id.is_none());
+        assert!(guard.cwd_fd.is_none());
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), initial_next);
+        assert_eq!(fixture.fs.fd_map.len(), initial_count);
+        assert!(
+            !fixture
+                .fs
+                .target_cwds
+                .read()
+                .contains_key(&TypeId::of::<MappedWasm>())
+        );
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, b"shared.txt"),
+            4
+        );
+
+        drop(guard);
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), initial_next);
+        assert_eq!(fixture.fs.fd_map.len(), initial_count);
     }
 
     #[test]
@@ -2628,16 +2897,34 @@ mod cwd_aware_fs_tests {
         let fixture = fixture();
         let initial_next = fixture.fs.next_fd.load(Ordering::SeqCst);
         let initial_count = fixture.fs.fd_map.len();
-        drop(fixture.fs.enter_target_cwd::<MappedWasm>(b"/").unwrap());
+        drop(
+            fixture
+                .fs
+                .enter_target_cwd::<MappedWasm>(b"/", Vec::new())
+                .unwrap(),
+        );
         assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), initial_next);
         assert_eq!(fixture.fs.fd_map.len(), initial_count);
 
-        let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        let guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
         let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
         let next_after_first = fixture.fs.next_fd.load(Ordering::SeqCst);
         let count_after_first = fixture.fs.fd_map.len();
-        assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/").is_err());
-        assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").is_err());
+        assert!(
+            fixture
+                .fs
+                .enter_target_cwd::<MappedWasm>(b"/", Vec::new())
+                .is_err()
+        );
+        assert!(
+            fixture
+                .fs
+                .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+                .is_err()
+        );
         assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), next_after_first);
         assert_eq!(fixture.fs.fd_map.len(), count_after_first);
         for fd in [fixture.root_fd, cwd_fd] {
@@ -2680,7 +2967,7 @@ mod cwd_aware_fs_tests {
     }
 
     #[test]
-    fn renumber_advances_allocator_past_occupied_destination() {
+    fn renumber_onto_next_fd_leaves_allocation_to_skip_the_destination() {
         let fixture = fixture();
         let destination = fixture.fs.next_fd.load(Ordering::SeqCst);
         assert_eq!(
@@ -2689,12 +2976,57 @@ mod cwd_aware_fs_tests {
                 .fd_renumber_raw::<MappedWasm>(fixture.explicit_fd, destination),
             wasip1::ERRNO_SUCCESS,
         );
-        assert!(fixture.fs.next_fd.load(Ordering::SeqCst) > destination);
-        let guard = fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").unwrap();
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), destination);
+        let guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
         let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
-        assert_ne!(cwd_fd, destination);
+        assert_eq!(cwd_fd, destination + 1);
         assert!(fixture.fs.fd_map.contains_key(&destination));
         assert!(fixture.fs.fd_map.contains_key(&cwd_fd));
+        drop(guard);
+    }
+
+    #[test]
+    fn renumber_near_max_does_not_exhaust_low_fd_allocation() {
+        let fixture = fixture();
+        let initial_next = fixture.fs.next_fd.load(Ordering::SeqCst);
+        let destination = u32::MAX - 1;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_renumber_raw::<MappedWasm>(fixture.explicit_fd, destination),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), initial_next);
+        assert!(fixture.fs.fd_map.contains_key(&destination));
+
+        let guard = fixture
+            .fs
+            .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+            .unwrap();
+        let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<MappedWasm>()].cwd_fd;
+        assert_eq!(cwd_fd, initial_next);
+
+        let path = b"new-file";
+        let mut opened = 0;
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                path.as_ptr(),
+                path.len(),
+                wasip1::OFLAGS_CREAT,
+                !0,
+                !0,
+                0,
+                &mut opened,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert!(opened < destination);
+        assert!(fixture.fs.fd_map.contains_key(&destination));
         drop(guard);
     }
 
@@ -2710,7 +3042,12 @@ mod cwd_aware_fs_tests {
         assert!(fixture.fs.fd_map.contains_key(&fixture.explicit_fd));
 
         fixture.fs.next_fd.store(u32::MAX, Ordering::SeqCst);
-        assert!(fixture.fs.enter_target_cwd::<MappedWasm>(b"/cwd").is_err());
+        assert!(
+            fixture
+                .fs
+                .enter_target_cwd::<MappedWasm>(b"/cwd", Vec::new())
+                .is_err()
+        );
         assert_eq!(fixture.fs.next_fd.load(Ordering::SeqCst), u32::MAX);
 
         let path = b"new-file";
@@ -2772,7 +3109,7 @@ mod cwd_aware_fs_tests {
         let fixture = fixture();
         let guard = fixture
             .fs
-            .enter_target_cwd::<BlockingWasm>(b"/cwd")
+            .enter_target_cwd::<BlockingWasm>(b"/cwd", Vec::new())
             .unwrap();
         let cwd_fd = fixture.fs.target_cwds.read()[&TypeId::of::<BlockingWasm>()].cwd_fd;
         let (entered_tx, entered_rx) = mpsc::channel();
@@ -2832,6 +3169,299 @@ mod cwd_aware_fs_tests {
         assert!(!write_was_available);
         assert!(!drop_finished_early);
         assert!(!fixture.fs.fd_map.contains_key(&cwd_fd));
+    }
+}
+
+#[cfg(test)]
+mod invocation_state_tests {
+    use super::*;
+
+    struct ChildProcessStdioReset {
+        previous: Option<ChildProcessStdio>,
+    }
+
+    impl ChildProcessStdioReset {
+        fn install(current: Option<ChildProcessStdio>) -> Self {
+            let previous = std::mem::replace(&mut *CHILD_PROCESS_STDIO.lock(), current);
+            Self { previous }
+        }
+    }
+
+    impl Drop for ChildProcessStdioReset {
+        fn drop(&mut self) {
+            *CHILD_PROCESS_STDIO.lock() = self.previous.take();
+        }
+    }
+
+    fn install_sentinel_invocation_state(
+        env: Vec<String>,
+        args: Vec<String>,
+        stdout: Vec<u8>,
+    ) -> RustcInvocationState {
+        let state = RustcInvocationState::new(env, args);
+        CARGO_OUTPUT.with(|output| {
+            let mut output = output.borrow_mut();
+            let output = output.as_mut().unwrap();
+            output.stdout = stdout;
+            output.stderr = b"outer-error".to_vec();
+        });
+        state
+    }
+
+    #[test]
+    fn rustc_argv_root_path_hints_cover_supported_forms() {
+        let argv = [
+            "rustc",
+            "/cwd/src/lib.rs",
+            "--sysroot",
+            "/sysroot",
+            "--out-dir",
+            "/target/out",
+            "-Ldependency=/target/deps",
+            "--extern=name=/target/deps/libname.rlib",
+            "--emit=dep-info=/target/emit/name.d,link=/target/emit/name.wasm",
+            "--emit",
+            "asm=/target/emit/separate.s,llvm-ir=/target/emit/separate.ll",
+            "@/response.rsp",
+            "/sysroot",
+            "/a/../normalized",
+            "/../escape",
+            "--extern=relative=target/deps/relative.rlib",
+        ]
+        .map(str::to_string);
+
+        assert_eq!(
+            rustc_root_path_hints(&argv),
+            vec![
+                vec!["cwd", "src", "lib.rs"],
+                vec!["sysroot"],
+                vec!["target", "out"],
+                vec!["target", "deps"],
+                vec!["target", "deps", "libname.rlib"],
+                vec!["target", "emit", "name.d"],
+                vec!["target", "emit", "name.wasm"],
+                vec!["target", "emit", "separate.s"],
+                vec!["target", "emit", "separate.ll"],
+                vec!["response.rsp"],
+                vec!["normalized"],
+            ]
+            .into_iter()
+            .map(|components| components.into_iter().map(str::to_string).collect())
+            .collect::<Vec<Vec<String>>>(),
+        );
+    }
+
+    #[test]
+    fn invocation_state_cwd_error_is_bounded_without_mutating_state() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        let sentinel_env = vec!["SENTINEL_ENV=1".to_string()];
+        let sentinel_args = vec!["sentinel-rustc".to_string()];
+        let sentinel_stdout = b"outer-output".to_vec();
+        let sentinel_cwd = b"/outer".to_vec();
+
+        let _outer_state = install_sentinel_invocation_state(
+            sentinel_env.clone(),
+            sentinel_args.clone(),
+            sentinel_stdout.clone(),
+        );
+        let _outer_child = ChildProcessStdioReset::install(Some(ChildProcessStdio::new(
+            sentinel_cwd.clone(),
+            Vec::new(),
+        )));
+
+        let stderr = bounded_rustc_cwd_error(&sentinel_cwd, &"x".repeat(MAX_CHILD_ERROR_BYTES));
+
+        assert_eq!(RUSTC_CWD_ERROR_STATUS, 1);
+        assert_eq!(stderr.len(), MAX_CHILD_ERROR_BYTES);
+        assert_eq!(VIRTUAL_SHELL_ENV.lock().env, sentinel_env);
+        assert_eq!(command::VIRTUAL_ARGS.lock().args, sentinel_args);
+        CARGO_OUTPUT.with(|output| {
+            assert_eq!(output.borrow().as_ref().unwrap().stdout, sentinel_stdout);
+        });
+        assert_eq!(
+            CHILD_PROCESS_STDIO.lock().as_ref().unwrap().cwd,
+            sentinel_cwd
+        );
+    }
+
+    #[test]
+    fn invocation_state_panic_error_is_bounded_with_status_101() {
+        let stderr = bounded_rustc_panic_error(&"x".repeat(MAX_CHILD_ERROR_BYTES * 2));
+
+        assert_eq!(RUSTC_PANIC_STATUS, 101);
+        assert_eq!(stderr.len(), MAX_CHILD_ERROR_BYTES);
+        assert!(stderr.starts_with(b"embedded rustc panicked: "));
+    }
+
+    #[test]
+    fn invocation_state_success_preserves_output_and_status() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        let _outer_child = ChildProcessStdioReset::install(None);
+        let previous_status = RUSTC_EXIT_STATUS.swap(17, Ordering::SeqCst);
+
+        let (output, status) = run_rustc_invocation(
+            vec!["INNER_ENV=1".to_string()],
+            vec!["inner-rustc".to_string()],
+            b"/inner".to_vec(),
+            b"inner-input".to_vec(),
+            || {
+                let mut child = CHILD_PROCESS_STDIO.lock();
+                let child = child
+                    .as_mut()
+                    .expect("replacement child stdio is installed");
+                child.stdout.write(b"inner-output");
+                child.stderr.write(b"inner-error");
+            },
+        );
+        RUSTC_EXIT_STATUS.store(previous_status, Ordering::SeqCst);
+
+        assert_eq!(status, 17);
+        assert_eq!(output.stdout, b"inner-output");
+        assert_eq!(output.stderr, b"inner-error");
+        assert!(CHILD_PROCESS_STDIO.lock().is_none());
+    }
+
+    #[test]
+    fn invocation_state_unwind_restores_previous_child_stdio() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        let sentinel_env = vec!["SENTINEL_ENV=1".to_string()];
+        let sentinel_args = vec!["sentinel-rustc".to_string()];
+        let sentinel_stdout = b"outer-output".to_vec();
+        let sentinel_cwd = b"/outer".to_vec();
+        let child_stdout = b"child-output".to_vec();
+
+        let _outer_state = install_sentinel_invocation_state(
+            sentinel_env.clone(),
+            sentinel_args.clone(),
+            sentinel_stdout.clone(),
+        );
+        let mut sentinel_child =
+            ChildProcessStdio::new(sentinel_cwd.clone(), b"outer-input".to_vec());
+        sentinel_child.stdout.write(&child_stdout);
+        sentinel_child.stderr.write(b"child-error");
+        let _outer_child = ChildProcessStdioReset::install(Some(sentinel_child));
+
+        let replacement_seen = Cell::new(false);
+        let (panic_output, status) = run_rustc_invocation(
+            vec!["INNER_ENV=1".to_string()],
+            vec!["inner-rustc".to_string()],
+            b"/inner".to_vec(),
+            b"inner-input".to_vec(),
+            || {
+                assert_eq!(VIRTUAL_SHELL_ENV.lock().env, ["INNER_ENV=1"]);
+                assert_eq!(command::VIRTUAL_ARGS.lock().args, ["inner-rustc"]);
+                CARGO_OUTPUT.with(|output| {
+                    assert!(output.borrow().as_ref().unwrap().stdout.is_empty());
+                });
+                let child = CHILD_PROCESS_STDIO.lock();
+                let child = child
+                    .as_ref()
+                    .expect("replacement child stdio is installed");
+                assert_eq!(child.cwd, b"/inner");
+                assert_eq!(
+                    child.stdin.buffer.iter().copied().collect::<Vec<_>>(),
+                    b"inner-input"
+                );
+                replacement_seen.set(true);
+                panic!("rustc invocation failed");
+            },
+        );
+
+        assert!(replacement_seen.get());
+        assert_eq!(status, RUSTC_PANIC_STATUS);
+        assert!(panic_output.stdout.is_empty());
+        assert_eq!(
+            panic_output.stderr,
+            b"embedded rustc panicked: rustc invocation failed"
+        );
+        assert_eq!(VIRTUAL_SHELL_ENV.lock().env, sentinel_env);
+        assert_eq!(command::VIRTUAL_ARGS.lock().args, sentinel_args);
+        CARGO_OUTPUT.with(|output| {
+            assert_eq!(output.borrow().as_ref().unwrap().stdout, sentinel_stdout);
+        });
+        let restored_child = CHILD_PROCESS_STDIO.lock();
+        let restored_child = restored_child.as_ref().unwrap();
+        assert_eq!(restored_child.owner, std::thread::current().id());
+        assert_eq!(restored_child.cwd, sentinel_cwd);
+        assert_eq!(
+            restored_child
+                .stdin
+                .buffer
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            b"outer-input"
+        );
+        assert!(restored_child.stdin.write_closed);
+        assert_eq!(
+            restored_child
+                .stdout
+                .buffer
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            child_stdout
+        );
+        assert_eq!(
+            restored_child
+                .stderr
+                .buffer
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            b"child-error"
+        );
+    }
+
+    #[test]
+    fn invocation_state_unwind_restores_absent_child_stdio() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        let sentinel_env = vec!["SENTINEL_ENV=1".to_string()];
+        let sentinel_args = vec!["sentinel-rustc".to_string()];
+        let sentinel_stdout = b"outer-output".to_vec();
+        let sentinel_cwd = b"/outer".to_vec();
+
+        let _outer_state = install_sentinel_invocation_state(
+            sentinel_env.clone(),
+            sentinel_args.clone(),
+            sentinel_stdout.clone(),
+        );
+        let _outer_child = ChildProcessStdioReset::install(None);
+
+        let replacement_seen = Cell::new(false);
+        let (panic_output, status) = run_rustc_invocation(
+            vec!["INNER_ENV=1".to_string()],
+            vec!["inner-rustc".to_string()],
+            sentinel_cwd.clone(),
+            b"inner-input".to_vec(),
+            || {
+                let child = CHILD_PROCESS_STDIO.lock();
+                let child = child
+                    .as_ref()
+                    .expect("replacement child stdio is installed");
+                assert_eq!(child.cwd, sentinel_cwd);
+                assert_eq!(
+                    child.stdin.buffer.iter().copied().collect::<Vec<_>>(),
+                    b"inner-input"
+                );
+                replacement_seen.set(true);
+                panic!("rustc invocation failed without prior child stdio");
+            },
+        );
+
+        assert!(replacement_seen.get());
+        assert_eq!(status, RUSTC_PANIC_STATUS);
+        assert!(panic_output.stdout.is_empty());
+        assert_eq!(
+            panic_output.stderr,
+            b"embedded rustc panicked: rustc invocation failed without prior child stdio"
+        );
+        assert_eq!(VIRTUAL_SHELL_ENV.lock().env, sentinel_env);
+        assert_eq!(command::VIRTUAL_ARGS.lock().args, sentinel_args);
+        CARGO_OUTPUT.with(|output| {
+            assert_eq!(output.borrow().as_ref().unwrap().stdout, sentinel_stdout);
+        });
+        assert!(CHILD_PROCESS_STDIO.lock().is_none());
     }
 }
 

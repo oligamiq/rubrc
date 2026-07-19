@@ -1,15 +1,11 @@
-import {
-  ConsoleStdout,
-  Directory,
-  File,
-  OpenFile,
-  PreopenDirectory,
-} from "@bjorn3/browser_wasi_shim";
+import { ConsoleStdout, File, OpenFile } from "@bjorn3/browser_wasi_shim";
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
 import {
   createHttpBridge,
   isHttpBridgeMessage,
 } from "../lib/src/http_bridge.ts";
+import { buildPreopenDirectory } from "./build_preopen.ts";
+import { prepareCachedSysroot } from "./sysroot_cache.ts";
 import { computeWorkerWatchdogMs } from "./vfs_debug_config.ts";
 import {
   createChildProcessBridge,
@@ -17,16 +13,15 @@ import {
 } from "../lib/src/child_process_bridge.ts";
 
 const timeoutMs = 120000;
-const cargoArgs = Deno.args.length === 0 ? ["add", "hello"] : Deno.args;
 const commands = Deno.args.length === 0
   ? [
-    ["cargo", ...cargoArgs],
-    ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+    ["cargo", "add", "hello"],
+    ["cargo", "build", "-j", "1"],
   ]
-  : [["cargo", ...cargoArgs]];
+  : [["cargo", ...Deno.args]];
 const workerWatchdogMs = computeWorkerWatchdogMs({
   commandTimeoutMs: timeoutMs,
-  runs: 1,
+  runs: commands.length,
   perRunMultiplier: 1,
   graceMs: 60000,
 });
@@ -37,8 +32,32 @@ const countingFetch: typeof fetch = (input, init) => {
   return fetch(input, init);
 };
 const httpBridge = createHttpBridge(countingFetch);
-const filesystemRoot = new Directory(new Map());
-const preopen = new PreopenDirectory("/", filesystemRoot.contents);
+const testDir = "./test_workspace_cargo_add";
+await Deno.remove(testDir, { recursive: true }).catch((error) => {
+  if (!(error instanceof Deno.errors.NotFound)) {
+    throw error;
+  }
+});
+const sysroot = await prepareCachedSysroot({
+  workspaceSysroot: `${testDir}/sysroot`,
+});
+console.log(
+  `Prepared ${sysroot.expandedSysroot} from ${sysroot.source}: ${sysroot.cacheArchive}`,
+);
+
+const preopen = await (async () => {
+  try {
+    return await buildPreopenDirectory("/", testDir);
+  } finally {
+    await Deno.remove(testDir, { recursive: true }).catch((error) => {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    });
+  }
+})();
+
+const filesystemRoot = preopen.dir;
 let farm: WASIFarm;
 const stdin = new OpenFile(new File([]));
 const stdout = ConsoleStdout.lineBuffered((message) =>
@@ -64,6 +83,7 @@ farm = new WASIFarm(
   stderr,
   [preopen],
   {
+    allocator_size: 100 * 1024 * 1024,
     unknown_fn: (message: unknown) => {
       if (isHttpBridgeMessage(message)) return httpBridge(message);
       if (isChildProcessMessage(message)) return childBridge(message);
@@ -130,25 +150,58 @@ if (!result.ok) {
 
 const returnIndex = result.output.lastIndexOf("[vfs-debug] command:return");
 if (returnIndex === -1) {
-  console.error("cargo add did not return from the command");
+  console.error("final cargo command did not return");
   Deno.exit(1);
 }
 if (result.output.indexOf(" $ ", returnIndex) === -1) {
-  console.error("shell prompt did not return after cargo add");
-  Deno.exit(1);
-}
-if (!/Adding hello v\S+ to dependencies/.test(result.output)) {
-  console.error("cargo add did not report adding hello");
-  Deno.exit(1);
-}
-if (result.output.includes("error:")) {
-  console.error("cargo add reported an error");
+  console.error("shell prompt did not return after the final cargo command");
   Deno.exit(1);
 }
 if (
   Deno.args.length === 0 &&
-  !/"dependencies":\[\{"name":"hello",/.test(result.output)
+  !/Adding hello v\S+ to dependencies/.test(result.output)
 ) {
-  console.error("Cargo.toml does not contain the hello dependency");
+  console.error("cargo add did not report adding hello");
   Deno.exit(1);
+}
+if (result.output.includes("error:")) {
+  console.error("Cargo command reported an error");
+  Deno.exit(1);
+}
+if (Deno.args.length === 0) {
+  if (
+    !/\[vfs-debug\] wasi-ext-spawn:virtual-cwd \/\.cargo\/registry\/src\/index\.crates\.io-[^/\s]+\/hello-1\.0\.4/
+      .test(
+        result.output,
+      )
+  ) {
+    console.error("rustc did not receive the hello registry source cwd");
+    Deno.exit(1);
+  }
+  if (!/Compiling hello v1\.0\.4/.test(result.output)) {
+    console.error("Cargo did not compile hello v1.0.4");
+    Deno.exit(1);
+  }
+  if (!result.output.includes("Finished `dev` profile")) {
+    console.error("Cargo did not report a successful dev build");
+    Deno.exit(1);
+  }
+  if (
+    result.output.includes("failed to set cwd") ||
+    result.output.includes("failed to set virtual cwd")
+  ) {
+    console.error("registry build failed to apply its virtual cwd");
+    Deno.exit(1);
+  }
+  for (
+    const marker of [
+      "[vfs-debug-driver] run:1/2:return cargo add hello",
+      "[vfs-debug-driver] run:2/2:return cargo build -j 1",
+    ]
+  ) {
+    if (!result.output.includes(marker)) {
+      console.error(`missing retained-session marker: ${marker}`);
+      Deno.exit(1);
+    }
+  }
 }

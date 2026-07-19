@@ -3,6 +3,9 @@ name = "vfs-shell"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+debug-log = []
+
 [dependencies]
 # wasi-shell = { path = "../../../sl-rust/crates/wasi-shell" }
 wasi-shell = "1.0.17"
