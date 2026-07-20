@@ -2506,6 +2506,190 @@ pub extern "C" fn terminal_write(session_id: u32, vfs_shell_data_ptr: i32, data_
     crate::vfs::host::bridge::Terminal::terminal_write(session_id, data.as_ptr() as i32, data_len);
 }
 
+#[cfg(target_os = "wasi")]
+const WASM_PAGE_BYTES: usize = 64 * 1024;
+const LSP_RESULT_ALIGNMENT: usize = 8;
+
+#[derive(Clone, Copy, Debug)]
+struct LspResultRegion {
+    ptr: usize,
+    capacity: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LspResultAllocation {
+    requested: usize,
+    capacity: usize,
+}
+
+#[derive(Default)]
+struct LspResultAllocator {
+    free_regions: Vec<LspResultRegion>,
+    allocations: HashMap<usize, LspResultAllocation>,
+}
+
+impl LspResultAllocator {
+    fn allocate(
+        &mut self,
+        requested: usize,
+        mut grow: impl FnMut(usize) -> Result<LspResultRegion, String>,
+    ) -> Result<usize, String> {
+        let capacity = requested
+            .checked_add(LSP_RESULT_ALIGNMENT - 1)
+            .map(|value| value & !(LSP_RESULT_ALIGNMENT - 1))
+            .ok_or_else(|| "LSP result allocation size overflowed".to_string())?;
+
+        let index = match self
+            .free_regions
+            .iter()
+            .position(|region| region.capacity >= capacity)
+        {
+            Some(index) => index,
+            None => {
+                let region = grow(capacity)?;
+                if region.capacity < capacity {
+                    return Err("LSP result memory reservation was too small".to_string());
+                }
+                self.free_regions.push(region);
+                self.free_regions.len() - 1
+            }
+        };
+
+        let region = self.free_regions[index];
+        let ptr = region.ptr;
+        if region.capacity == capacity {
+            self.free_regions.swap_remove(index);
+        } else {
+            self.free_regions[index].ptr += capacity;
+            self.free_regions[index].capacity -= capacity;
+        }
+        self.allocations.insert(
+            ptr,
+            LspResultAllocation {
+                requested,
+                capacity,
+            },
+        );
+        Ok(ptr)
+    }
+
+    fn free(&mut self, ptr: usize, requested: usize) -> bool {
+        let Some(allocation) = self.allocations.remove(&ptr) else {
+            return false;
+        };
+        if allocation.requested != requested {
+            self.allocations.insert(ptr, allocation);
+            return false;
+        }
+
+        self.free_regions.push(LspResultRegion {
+            ptr,
+            capacity: allocation.capacity,
+        });
+        self.free_regions.sort_unstable_by_key(|region| region.ptr);
+        let mut merged: Vec<LspResultRegion> = Vec::with_capacity(self.free_regions.len());
+        for region in self.free_regions.drain(..) {
+            if let Some(previous) = merged.last_mut()
+                && previous.ptr.checked_add(previous.capacity) == Some(region.ptr)
+            {
+                previous.capacity += region.capacity;
+                continue;
+            }
+            merged.push(region);
+        }
+        self.free_regions = merged;
+        true
+    }
+}
+
+fn write_lsp_result_bytes(
+    allocator: &mut LspResultAllocator,
+    bytes: &[u8],
+    grow: impl FnMut(usize) -> Result<LspResultRegion, String>,
+    copy: impl FnOnce(usize, &[u8]),
+) -> Result<(usize, usize), String> {
+    if bytes.is_empty() {
+        return Ok((0, 0));
+    }
+    let ptr = allocator.allocate(bytes.len(), grow)?;
+    copy(ptr, bytes);
+    Ok((ptr, bytes.len()))
+}
+
+static LSP_RESULT_ALLOCATOR: std::sync::LazyLock<parking_lot::Mutex<LspResultAllocator>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(LspResultAllocator::default()));
+
+#[cfg(target_os = "wasi")]
+fn reserve_lsp_result_region(minimum: usize) -> Result<LspResultRegion, String> {
+    let pages = minimum
+        .div_ceil(WASM_PAGE_BYTES)
+        .try_into()
+        .map_err(|_| "LSP result allocation exceeds wasm32 memory".to_string())?;
+    loop {
+        let current = memory_size::<lsp_opt>();
+        let next = current
+            .checked_add(pages)
+            .ok_or_else(|| "LSP result memory size overflowed".to_string())?;
+        if memory_reserve::<lsp_opt>(pages) <= 0 {
+            return Err("failed to reserve LSP result memory".to_string());
+        }
+        if __wasip1_vfs_lsp_opt_own_memory_size_compare_exchange(current, next) == current {
+            let ptr = usize::try_from(current)
+                .ok()
+                .and_then(|page| page.checked_mul(WASM_PAGE_BYTES))
+                .ok_or_else(|| "LSP result pointer overflowed".to_string())?;
+            let capacity = usize::try_from(pages)
+                .ok()
+                .and_then(|page| page.checked_mul(WASM_PAGE_BYTES))
+                .ok_or_else(|| "LSP result capacity overflowed".to_string())?;
+            return Ok(LspResultRegion { ptr, capacity });
+        }
+    }
+}
+
+#[cfg(not(target_os = "wasi"))]
+fn reserve_lsp_result_region(_minimum: usize) -> Result<LspResultRegion, String> {
+    Err("LSP result memory is only available on WASI".to_string())
+}
+
+fn encode_lsp_result_abi(ptr: usize, len: usize) -> Result<(i32, i32), String> {
+    let ptr =
+        u32::try_from(ptr).map_err(|_| "LSP result pointer exceeds wasm32 memory".to_string())?;
+    let len = i32::try_from(len).map_err(|_| "LSP result length exceeds i32".to_string())?;
+    Ok((ptr as i32, len))
+}
+
+fn allocate_lsp_result(bytes: &[u8]) -> Result<(i32, i32), String> {
+    let mut allocator = LSP_RESULT_ALLOCATOR.lock();
+    let (ptr, len) = write_lsp_result_bytes(
+        &mut allocator,
+        bytes,
+        reserve_lsp_result_region,
+        |ptr, bytes| lsp_opt::memcpy(ptr as *mut u8, bytes),
+    )?;
+    match encode_lsp_result_abi(ptr, len) {
+        Ok(result) => Ok(result),
+        Err(error) => {
+            allocator.free(ptr, len);
+            Err(error)
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LspHostProgram {
+    Cargo,
+    Rustc,
+}
+
+fn lsp_host_program(args: &[String]) -> Option<LspHostProgram> {
+    match args.first().map(String::as_str) {
+        Some("cargo") => Some(LspHostProgram::Cargo),
+        Some("rustc") => Some(LspHostProgram::Rustc),
+        _ => None,
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn host_run_cargo(
     req_ptr: i32,
@@ -2521,7 +2705,7 @@ pub extern "C" fn host_run_cargo(
         Ok(request) => request,
         Err(error) => {
             let stderr = format!("invalid cargo request: {error}");
-            write_cargo_result(
+            return write_cargo_result(
                 Vec::new(),
                 stderr.into_bytes(),
                 1,
@@ -2531,12 +2715,11 @@ pub extern "C" fn host_run_cargo(
                 out_stderr_len,
                 out_status,
             );
-            return 0;
         }
     };
 
     let Some(args) = request.get("args").and_then(serde_json::Value::as_array) else {
-        write_cargo_result(
+        return write_cargo_result(
             Vec::new(),
             b"cargo request is missing args".to_vec(),
             1,
@@ -2546,14 +2729,28 @@ pub extern "C" fn host_run_cargo(
             out_stderr_len,
             out_status,
         );
-        return 0;
     };
     let args = args
         .iter()
         .filter_map(serde_json::Value::as_str)
         .map(str::to_owned)
         .collect::<Vec<_>>();
-
+    let Some(program) = lsp_host_program(&args) else {
+        return write_cargo_result(
+            Vec::new(),
+            format!(
+                "unsupported LSP host program: {}",
+                args.first().map(String::as_str).unwrap_or("missing")
+            )
+            .into_bytes(),
+            127,
+            out_stdout_ptr,
+            out_stdout_len,
+            out_stderr_ptr,
+            out_stderr_len,
+            out_status,
+        );
+    };
     let _run_guard = CARGO_RUN_LOCK.lock();
     let old_env = {
         let mut env = VIRTUAL_SHELL_ENV.lock();
@@ -2570,35 +2767,58 @@ pub extern "C" fn host_run_cargo(
         }
         old
     };
-    let old_cwd = std::env::current_dir().ok();
-    if let Some(cwd) = request.get("cwd").and_then(serde_json::Value::as_str) {
-        if let Err(error) = std::env::set_current_dir(cwd) {
-            VIRTUAL_SHELL_ENV.lock().env = old_env;
-            write_cargo_result(
-                Vec::new(),
-                format!("failed to set cwd `{cwd}`: {error}").into_bytes(),
-                1,
-                out_stdout_ptr,
-                out_stdout_len,
-                out_stderr_ptr,
-                out_stderr_len,
-                out_status,
-            );
-            return 0;
+    let (output, status) = match program {
+        LspHostProgram::Cargo => {
+            let old_cwd = std::env::current_dir().ok();
+            if let Some(cwd) = request.get("cwd").and_then(serde_json::Value::as_str)
+                && let Err(error) = std::env::set_current_dir(cwd)
+            {
+                VIRTUAL_SHELL_ENV.lock().env = old_env;
+                return write_cargo_result(
+                    Vec::new(),
+                    format!("failed to set cwd `{cwd}`: {error}").into_bytes(),
+                    1,
+                    out_stdout_ptr,
+                    out_stdout_len,
+                    out_stderr_ptr,
+                    out_stderr_len,
+                    out_status,
+                );
+            }
+
+            command::set_cargo_opt_args(&args);
+            CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
+            run_cargo();
+            let output = CARGO_OUTPUT
+                .with(|output| output.borrow_mut().take())
+                .unwrap_or_default();
+            let status = CARGO_EXIT_STATUS.load(Ordering::SeqCst);
+            if let Some(old_cwd) = old_cwd {
+                let _ = std::env::set_current_dir(old_cwd);
+            }
+            (output, status)
         }
-    }
-
-    command::set_cargo_opt_args(&args);
-    CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
-    run_cargo();
-    let output = CARGO_OUTPUT
-        .with(|output| output.borrow_mut().take())
-        .unwrap_or_default();
-    let status = CARGO_EXIT_STATUS.load(Ordering::SeqCst);
-
-    if let Some(old_cwd) = old_cwd {
-        let _ = std::env::set_current_dir(old_cwd);
-    }
+        LspHostProgram::Rustc => {
+            let _rustc_guard = RUSTC_RUN_LOCK.lock();
+            let mut args = args;
+            if !args
+                .iter()
+                .skip(1)
+                .any(|arg| arg == "--sysroot" || arg.starts_with("--sysroot="))
+            {
+                args.push("--sysroot".to_string());
+                args.push("/sysroot".to_string());
+            }
+            let env = VIRTUAL_SHELL_ENV.lock().env.clone();
+            let cwd = request
+                .get("cwd")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .as_bytes()
+                .to_vec();
+            run_rustc_invocation(env, args, cwd, Vec::new(), run_rustc)
+        }
+    };
     VIRTUAL_SHELL_ENV.lock().env = old_env;
 
     write_cargo_result(
@@ -2610,8 +2830,7 @@ pub extern "C" fn host_run_cargo(
         out_stderr_ptr,
         out_stderr_len,
         out_status,
-    );
-    0
+    )
 }
 
 #[unsafe(no_mangle)]
@@ -2619,10 +2838,7 @@ pub extern "C" fn host_free_memory(ptr: i32, len: i32) {
     if ptr == 0 || len <= 0 {
         return;
     }
-    let slice = std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize);
-    unsafe {
-        drop(Box::from_raw(slice));
-    }
+    LSP_RESULT_ALLOCATOR.lock().free(ptr as usize, len as usize);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2635,24 +2851,26 @@ fn write_cargo_result(
     out_stderr_ptr: i32,
     out_stderr_len: i32,
     out_status: i32,
-) {
-    fn into_raw(data: Vec<u8>) -> (i32, i32) {
-        if data.is_empty() {
-            return (0, 0);
+) -> i32 {
+    let (stdout_ptr, stdout_len) = match allocate_lsp_result(&stdout) {
+        Ok(result) => result,
+        Err(_) => return 1,
+    };
+    let (stderr_ptr, stderr_len) = match allocate_lsp_result(&stderr) {
+        Ok(result) => result,
+        Err(_) => {
+            LSP_RESULT_ALLOCATOR
+                .lock()
+                .free(stdout_ptr as usize, stdout_len as usize);
+            return 1;
         }
-        let data = data.into_boxed_slice();
-        let len = data.len() as i32;
-        let ptr = Box::into_raw(data) as *mut u8 as i32;
-        (ptr, len)
-    }
-
-    let (stdout_ptr, stdout_len) = into_raw(stdout);
-    let (stderr_ptr, stderr_len) = into_raw(stderr);
+    };
     lsp_opt::memcpy(out_stdout_ptr as *mut u8, &stdout_ptr.to_ne_bytes());
     lsp_opt::memcpy(out_stdout_len as *mut u8, &stdout_len.to_ne_bytes());
     lsp_opt::memcpy(out_stderr_ptr as *mut u8, &stderr_ptr.to_ne_bytes());
     lsp_opt::memcpy(out_stderr_len as *mut u8, &stderr_len.to_ne_bytes());
     lsp_opt::memcpy(out_status as *mut u8, &status.to_ne_bytes());
+    0
 }
 
 #[cfg(test)]
@@ -4273,5 +4491,76 @@ mod http_tests {
                 "state {state} started a new request before recovery"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod lsp_cargo_result_tests {
+    use super::{
+        LspHostProgram, LspResultAllocator, LspResultRegion, encode_lsp_result_abi,
+        lsp_host_program, write_lsp_result_bytes,
+    };
+    use std::cell::RefCell;
+
+    #[test]
+    fn cargo_result_bytes_are_returned_from_lsp_memory() {
+        let rustc_version = b"rustc 1.95.0 (59807616e 2026-04-14)\n";
+        let target_memory = RefCell::new(vec![0u8; 32]);
+        let mut allocator = LspResultAllocator::default();
+
+        let (ptr, len) = write_lsp_result_bytes(
+            &mut allocator,
+            rustc_version,
+            |minimum| {
+                let mut memory = target_memory.borrow_mut();
+                let ptr = memory.len();
+                let capacity = minimum.max(64);
+                memory.resize(ptr + capacity, 0);
+                Ok(LspResultRegion { ptr, capacity })
+            },
+            |ptr, bytes| {
+                target_memory.borrow_mut()[ptr..ptr + bytes.len()].copy_from_slice(bytes);
+            },
+        )
+        .expect("rustc version should fit in target memory");
+
+        assert_eq!(len, rustc_version.len());
+        assert_eq!(&target_memory.borrow()[ptr..ptr + len], rustc_version);
+
+        assert!(allocator.free(ptr, len));
+        let (reused_ptr, reused_len) = write_lsp_result_bytes(
+            &mut allocator,
+            b"cargo 1.95.0\n",
+            |_| panic!("freed target memory was not reused"),
+            |ptr, bytes| {
+                target_memory.borrow_mut()[ptr..ptr + bytes.len()].copy_from_slice(bytes);
+            },
+        )
+        .expect("freed target memory should be reusable");
+        assert_eq!(reused_ptr, ptr);
+        assert_eq!(
+            &target_memory.borrow()[reused_ptr..reused_ptr + reused_len],
+            b"cargo 1.95.0\n"
+        );
+    }
+
+    #[test]
+    fn rustc_requests_are_dispatched_to_embedded_rustc() {
+        assert_eq!(
+            lsp_host_program(&["rustc".to_string(), "--version".to_string()]),
+            Some(LspHostProgram::Rustc)
+        );
+        assert_eq!(
+            lsp_host_program(&["cargo".to_string(), "metadata".to_string()]),
+            Some(LspHostProgram::Cargo)
+        );
+    }
+
+    #[test]
+    fn lsp_result_pointer_preserves_the_wasm32_bit_pattern() {
+        assert_eq!(
+            encode_lsp_result_abi(i32::MAX as usize + 1, 7),
+            Ok((i32::MIN, 7))
+        );
     }
 }
