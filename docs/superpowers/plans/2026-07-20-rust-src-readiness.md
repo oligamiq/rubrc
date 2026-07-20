@@ -510,7 +510,7 @@ Update metadata reads to use `current_sysroot_file.isDirectory`.
 
 - [ ] **Step 5: Run tests, type checks, and formatting**
 
-Run: `deno test --allow-read page/src/sysroot_archive_test.ts && deno fmt --check lib/src/brotli_stream.ts page/src/sysroot_archive.ts page/src/sysroot_archive_test.ts page/src/xterm.tsx && bun run page:build`
+Run: `deno test --allow-read page/src/sysroot_archive_test.ts && deno fmt --check lib/src/brotli_stream.ts page/src/sysroot_archive.ts page/src/sysroot_archive_test.ts page/src/xterm.tsx && bun run --cwd page build`
 
 Expected: 2 tests PASS, formatting PASS, page build exits 0.
 
@@ -684,7 +684,7 @@ const sharedReady = new SharedObject((result: VfsReadyResult) => {
 
 - [ ] **Step 6: Run tests and build**
 
-Run: `deno test --allow-read page/src/vfs_readiness_test.ts page/src/lsp_start_gate_test.ts && deno fmt --check page/src/vfs_readiness.ts page/src/vfs_readiness_test.ts page/src/lsp_start_gate.ts page/src/lsp_start_gate_test.ts page/src/worker_process/util_cmd.ts page/src/App.tsx && bun run page:build`
+Run: `deno test --allow-read page/src/vfs_readiness_test.ts page/src/lsp_start_gate_test.ts && deno fmt --check page/src/vfs_readiness.ts page/src/vfs_readiness_test.ts page/src/lsp_start_gate.ts page/src/lsp_start_gate_test.ts page/src/worker_process/util_cmd.ts page/src/App.tsx && bun run --cwd page build`
 
 Expected: all focused tests PASS, formatting PASS, page build exits 0.
 
@@ -839,7 +839,7 @@ Expected: every command exits 0.
 
 - [ ] **Step 2: Rebuild and rerun the real server**
 
-Run: `bun run vfs:build && deno run --no-lock -A scripts/vfs_lsp_diagnostics_test.ts && bun run page:build`
+Run: `bun run vfs:build && deno run --no-lock -A scripts/vfs_lsp_diagnostics_test.ts && bun run --cwd page build`
 
 Expected: all commands exit 0; integration prints `rust-analyzer published and cleared diagnostics`.
 
