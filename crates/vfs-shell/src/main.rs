@@ -1,3 +1,5 @@
+mod rust_src_bootstrap;
+
 use colored::*;
 use dashmap::DashMap;
 use std::cell::RefCell;
@@ -10,7 +12,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use strum::FromRepr;
 use unicode_width::UnicodeWidthStr;
 use wasi_shell::{
-    handle_parallel, CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor,
+    CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor, handle_parallel,
 };
 
 macro_rules! debug_log {
@@ -268,7 +270,14 @@ fn format_size(size: usize) -> String {
 static BUILTIN_REGISTRY: LazyLock<Arc<CommandRegistry>> =
     LazyLock::new(|| Arc::new(CommandRegistry::with_builtins()));
 
-const VFS_COMMANDS: &[&str] = &["cargo", "clang", "download", "llvm", "rust-analyzer", "rustc"];
+const VFS_COMMANDS: &[&str] = &[
+    "cargo",
+    "clang",
+    "download",
+    "llvm",
+    "rust-analyzer",
+    "rustc",
+];
 const SESSION_COMMANDS: &[&str] = &["load_src", "load_sysroot"];
 
 fn print_available_commands(io: &mut IoContext) {
