@@ -1,33 +1,40 @@
-export function closeUnderlyingChannel(sharedObj: unknown) {
-  const obj = sharedObj as { bc?: { close(): void } };
-  obj?.bc?.close();
-}
+import { closeUnderlyingChannel } from "./shared_object_channel.ts";
 
-export function disposeRustLspResources(
+export async function disposeRustLspResources(
   sync: { dispose(): Promise<void> } | undefined,
   client: { needsStop(): boolean; stop(): Promise<void> } | undefined,
   connection: { dispose(): void } | undefined,
   vfsSharedRef: unknown | undefined
 ): Promise<void> {
-  return (async () => {
-    try {
-      await sync?.dispose();
-    } finally {
-      try {
-        if (client?.needsStop()) {
-          await client.stop();
-        }
-      } finally {
-        try {
-          connection?.dispose();
-        } finally {
-          if (vfsSharedRef) {
-            closeUnderlyingChannel(vfsSharedRef);
-          }
-        }
-      }
-    }
-  })();
+  const errors: unknown[] = [];
+
+  try {
+    if (sync) await sync.dispose();
+  } catch (e) {
+    errors.push(e);
+  }
+
+  try {
+    if (client?.needsStop()) await client.stop();
+  } catch (e) {
+    errors.push(e);
+  }
+
+  try {
+    if (connection) connection.dispose();
+  } catch (e) {
+    errors.push(e);
+  }
+
+  try {
+    if (vfsSharedRef) closeUnderlyingChannel(vfsSharedRef);
+  } catch (e) {
+    errors.push(e);
+  }
+
+  if (errors.length > 0) {
+    throw new AggregateError(errors, "LSP resource cleanup failed");
+  }
 }
 
 export class RustLspResourceOwner {

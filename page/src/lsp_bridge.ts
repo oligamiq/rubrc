@@ -13,15 +13,7 @@ import {
   OrderedLspSender,
 } from "./lsp_protocol";
 
-/**
- * Helper to safely close the underlying BroadcastChannel.
- * The dependency uses a TypeScript `private bc` field, not a JS `#private` field,
- * so we use a structural cast to access it and close the connection without leaking.
- */
-export function closeUnderlyingChannel(sharedObj: unknown) {
-  const obj = sharedObj as { bc?: { close(): void } };
-  obj?.bc?.close();
-}
+import { closeUnderlyingChannel } from "./shared_object_channel.ts";
 
 class MyMessageReader extends AbstractMessageReader {
   private readonly decoder = new LspFrameDecoder();
