@@ -5,11 +5,18 @@ import { rust_file } from "./config";
 import { createLspConnection } from "./lsp_bridge";
 import { RustDocumentSync } from "./rust_document_sync";
 import { VFS_SYNC_SESSION_ID } from "./lsp_protocol";
+import { RustLspResourceOwner } from "./rust_lsp_client_dispose";
 
 export async function startRustLspClient(ctx: Ctx) {
-  const input = new SharedObjectRef(ctx.input_string_id).proxy<
+  const owner = new RustLspResourceOwner();
+
+  const vfsSharedRef = new SharedObjectRef(ctx.input_string_id);
+  owner.setVfsSharedRef(vfsSharedRef);
+
+  const input = vfsSharedRef.proxy<
     (args: { sessionId: number; data: string }) => Promise<void>
   >();
+
   const sync = new RustDocumentSync(async (path, content) => {
     if (path === "/src/main.rs") rust_file.data = new TextEncoder().encode(content);
     await input({
@@ -17,7 +24,11 @@ export async function startRustLspClient(ctx: Ctx) {
       data: JSON.stringify({ path, content }),
     });
   });
+  owner.setSync(sync);
+
   const connection = createLspConnection(ctx);
+  owner.setConnection(connection);
+
   const client = new MonacoLanguageClient({
     name: "Rust Language Client",
     clientOptions: {
@@ -33,18 +44,16 @@ export async function startRustLspClient(ctx: Ctx) {
     },
     messageTransports: connection,
   });
+  owner.setClient(client);
+
   try {
     await client.start();
   } catch (error) {
-    await sync.dispose();
-    connection.dispose();
+    await owner.dispose();
     throw error;
   }
+
   return {
-    async dispose() {
-      await sync.dispose();
-      if (client.needsStop()) await client.stop();
-      connection.dispose();
-    },
+    dispose: () => owner.dispose(),
   };
 }
