@@ -18,7 +18,7 @@ import {
  * The dependency uses a TypeScript `private bc` field, not a JS `#private` field,
  * so we use a structural cast to access it and close the connection without leaking.
  */
-function closeUnderlyingChannel(sharedObj: unknown) {
+export function closeUnderlyingChannel(sharedObj: unknown) {
   const obj = sharedObj as { bc?: { close(): void } };
   obj?.bc?.close();
 }
