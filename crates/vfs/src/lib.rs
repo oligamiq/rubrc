@@ -2686,6 +2686,10 @@ fn encode_lsp_result_abi(ptr: usize, len: usize) -> Result<(i32, i32), String> {
     Ok((ptr as i32, len))
 }
 
+fn decode_lsp_result_pointer(ptr: i32) -> usize {
+    (ptr as u32) as usize
+}
+
 fn allocate_lsp_result(bytes: &[u8]) -> Result<(i32, i32), String> {
     let mut allocator = LSP_RESULT_ALLOCATOR.lock();
     let (ptr, len) = write_lsp_result_bytes(
@@ -2865,7 +2869,9 @@ pub extern "C" fn host_free_memory(ptr: i32, len: i32) {
     if ptr == 0 || len <= 0 {
         return;
     }
-    LSP_RESULT_ALLOCATOR.lock().free(ptr as usize, len as usize);
+    LSP_RESULT_ALLOCATOR
+        .lock()
+        .free(decode_lsp_result_pointer(ptr), len as usize);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2888,7 +2894,7 @@ fn write_cargo_result(
         Err(_) => {
             LSP_RESULT_ALLOCATOR
                 .lock()
-                .free(stdout_ptr as usize, stdout_len as usize);
+                .free(decode_lsp_result_pointer(stdout_ptr), stdout_len as usize);
             return 1;
         }
     };
@@ -4525,7 +4531,7 @@ mod http_tests {
 mod lsp_cargo_result_tests {
     use super::{
         LspHostProgram, LspResultAllocator, LspResultRegion, claim_lsp_result_pages,
-        encode_lsp_result_abi, lsp_host_program, write_lsp_result_bytes,
+        decode_lsp_result_pointer, encode_lsp_result_abi, lsp_host_program, write_lsp_result_bytes,
     };
     use std::cell::{Cell, RefCell};
     use std::sync::{
@@ -4695,5 +4701,37 @@ mod lsp_cargo_result_tests {
             encode_lsp_result_abi(i32::MAX as usize + 1, 7),
             Ok((i32::MIN, 7))
         );
+    }
+
+    #[test]
+    fn high_bit_lsp_result_pointer_frees_and_reuses_the_allocation() {
+        let high_pointer = 0x8000_0000usize;
+        let mut allocator = LspResultAllocator::default();
+        let (pointer, length) = write_lsp_result_bytes(
+            &mut allocator,
+            b"high pointer",
+            |_| {
+                Ok(LspResultRegion {
+                    ptr: high_pointer,
+                    capacity: 64,
+                })
+            },
+            |_, _| {},
+        )
+        .unwrap();
+        let (abi_pointer, abi_length) = encode_lsp_result_abi(pointer, length).unwrap();
+
+        assert!(abi_pointer < 0);
+        assert_eq!(decode_lsp_result_pointer(abi_pointer), high_pointer);
+        assert!(allocator.free(decode_lsp_result_pointer(abi_pointer), abi_length as usize));
+
+        let (reused_pointer, _) = write_lsp_result_bytes(
+            &mut allocator,
+            b"reuse",
+            |_| panic!("high allocation was not freed"),
+            |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(reused_pointer, high_pointer);
     }
 }
