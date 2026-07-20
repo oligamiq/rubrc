@@ -13,6 +13,7 @@ export interface Root {
   virtualFileSystemWasip1ThreadsExport: typeof Wasip1VfsHostVirtualFileSystemWasip1ThreadsExport,
   flushToVfs(): void,
   flushFromVfs(): void,
+  rustSrcLoadState(): number,
   dispatch(sessionId: number, eventType: number, arg1: number, arg2: number): void,
   allocBuf(len: number): number,
   freeBuf(ptr: number, len: number): void,

@@ -555,6 +555,7 @@ pub enum SessionEventType {
     CreateSession = 3,
     InputString = 4,
     CloseSession = 5,
+    BootstrapRustSrc = 6,
 }
 
 #[derive(Debug)]
@@ -565,6 +566,7 @@ pub enum SessionEvent {
     CreateSession,
     InputString(String),
     CloseSession,
+    BootstrapRustSrc,
 }
 
 impl SessionEvent {
@@ -583,6 +585,7 @@ impl SessionEvent {
                 Some(Self::InputString(s))
             }
             SessionEventType::CloseSession => Some(Self::CloseSession),
+            SessionEventType::BootstrapRustSrc => Some(Self::BootstrapRustSrc),
         }
     }
 }
@@ -593,6 +596,14 @@ struct SessionState {
 }
 
 static SESSIONS: LazyLock<DashMap<u32, SessionState>> = LazyLock::new(|| DashMap::new());
+const RUST_SRC_CORE: &str = "/sysroot/lib/rustlib/src/rust/library/core/src/lib.rs";
+static RUST_SRC_BOOTSTRAP: rust_src_bootstrap::RustSrcBootstrap =
+    rust_src_bootstrap::RustSrcBootstrap::new();
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vfs_shell_rust_src_load_state() -> u32 {
+    RUST_SRC_BOOTSTRAP.state() as u32
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
@@ -761,6 +772,9 @@ impl Read for CommandStdin {
                 SessionEvent::CreateSession => {
                     continue;
                 }
+                SessionEvent::BootstrapRustSrc => {
+                    continue;
+                }
             }
         }
     }
@@ -863,6 +877,28 @@ fn run_session_loop(
             SessionEvent::CreateSession => unreachable!(),
             SessionEvent::CloseSession => {
                 break;
+            }
+            SessionEvent::BootstrapRustSrc => {
+                if !RUST_SRC_BOOTSTRAP.begin() {
+                    continue;
+                }
+                let command_stdin = CommandStdin {
+                    rx: Arc::clone(&rx_arc),
+                    cancellation_token: cancellation_token.clone(),
+                    buffer: Vec::new(),
+                };
+                let results = handle_parallel(
+                    vec!["load_sysroot rust-src".to_string()],
+                    Box::new(command_stdin),
+                    Box::new(SessionStdout::new(session_id)),
+                    Arc::clone(&session_reg),
+                    cancellation_token.clone(),
+                );
+                let ready = results.iter().all(Result::is_ok) && Path::new(RUST_SRC_CORE).is_file();
+                RUST_SRC_BOOTSTRAP.finish(ready);
+                if !ready {
+                    writeln!(stdout, "rust-src bootstrap failed: missing {RUST_SRC_CORE}").unwrap();
+                }
             }
         }
     }

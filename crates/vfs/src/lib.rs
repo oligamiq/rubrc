@@ -24,6 +24,8 @@ wit_bindgen::generate!({
 const LSP_SESSION_ID: u32 = 0xFFFFFFFF;
 const EVENT_TYPE_LSP: u32 = 6;
 const EVENT_TYPE_WRITE_FILE: u32 = 7;
+const EVENT_TYPE_BOOTSTRAP_RUST_SRC: u32 = 8;
+const SHELL_EVENT_BOOTSTRAP_RUST_SRC: u32 = 6;
 const EVENT_TYPE_DEBUG_FIXED_RUSTC: u32 = 1007;
 const EVENT_TYPE_DEBUG_RESERVE_SELF: u32 = 1008;
 const EVENT_TYPE_DEBUG_RESERVE_RUSTC: u32 = 1009;
@@ -438,6 +440,10 @@ impl Guest for Wit {
         }
     }
 
+    fn rust_src_load_state() -> u32 {
+        unsafe { crate::shell::vfs_shell_rust_src_load_state() }
+    }
+
     fn dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
         if session_id == LSP_SESSION_ID {
             if LSP_START_ONCE.try_start() {
@@ -532,6 +538,11 @@ impl Guest for Wit {
                         }
                     }
                 }
+            }
+            return;
+        } else if event_type == EVENT_TYPE_BOOTSTRAP_RUST_SRC {
+            unsafe {
+                crate::shell::vfs_shell_dispatch(session_id, SHELL_EVENT_BOOTSTRAP_RUST_SRC, 0, 0);
             }
             return;
         } else if event_type == EVENT_TYPE_DEBUG_FIXED_RUSTC {
