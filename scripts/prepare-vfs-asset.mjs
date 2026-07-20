@@ -175,6 +175,11 @@ async function main() {
     await copyDir(DIST_DIR, TARGET_DIR);
   }
 
+  // Generate _headers file
+  const headersPath = path.join(TARGET_DIR, '_headers');
+  const headersContent = `/*\n  Cross-Origin-Opener-Policy: same-origin\n  Cross-Origin-Embedder-Policy: require-corp\n`;
+  await fs.promises.writeFile(headersPath, headersContent);
+
   const wasmFiles = await findVfsWasm(TARGET_DIR);
   
   if (wasmFiles.length === 0) {
