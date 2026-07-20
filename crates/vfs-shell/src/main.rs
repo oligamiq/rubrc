@@ -1,4 +1,5 @@
 mod rust_src_bootstrap;
+mod sysroot_extraction;
 
 use colored::*;
 use dashmap::DashMap;
@@ -14,6 +15,8 @@ use unicode_width::UnicodeWidthStr;
 use wasi_shell::{
     CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor, handle_parallel,
 };
+
+use sysroot_extraction::{sysroot_meta_has_file, with_sysroot_load_lock, write_sysroot_entry};
 
 macro_rules! debug_log {
     ($($arg:tt)*) => {
@@ -331,98 +334,91 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
             writeln!(io.stdout, "Loading sysroot: {} ...", triple).unwrap();
         }
 
-        unsafe {
-            sysroot_start_fetch(triple.as_ptr() as i32, triple.len() as i32);
-        }
-
-        let mut files_loaded = 0;
-        let mut total_bytes = 0;
-        let start_time = std::time::Instant::now();
-
         let base_dir = if is_src {
             PathBuf::from("/sysroot/lib/rustlib/src/rust/library")
         } else {
             Path::new("/sysroot/lib/rustlib").join(triple).join("lib")
         };
-
-        if !base_dir.exists() {
-            std::fs::create_dir_all(&base_dir).unwrap_or_default();
-        }
-
-        loop {
-            let mut name_len = 0i32;
-            let mut data_len = 0i32;
-
-            let has_next = unsafe {
-                sysroot_get_next_file_meta(
-                    &mut name_len as *mut _ as i32,
-                    &mut data_len as *mut _ as i32,
-                )
-            };
-            if has_next == 0 {
-                break;
-            }
-
-            let mut name_buf = vec![0u8; name_len as usize];
+        let (files_loaded, total_bytes, total_elapsed) = with_sysroot_load_lock(|| {
             unsafe {
-                sysroot_read_file_name(name_buf.as_mut_ptr() as i32, name_len);
+                sysroot_start_fetch(triple.as_ptr() as i32, triple.len() as i32);
             }
 
-            let mut data_buf = Vec::new();
-            if data_len >= 0 {
-                data_buf = vec![0u8; data_len as usize];
-                let mut remaining = data_len as usize;
-                let mut offset = 0;
-                let chunk_size = 50 * 1024 * 1024;
-                while remaining > 0 {
-                    let to_read = std::cmp::min(remaining, chunk_size);
-                    unsafe {
-                        sysroot_read_file_chunk(
-                            data_buf[offset..].as_mut_ptr() as i32,
-                            to_read as i32,
-                        );
-                    }
-                    offset += to_read;
-                    remaining -= to_read;
-                    total_bytes += to_read;
+            std::fs::create_dir_all(&base_dir).map_err(|error| {
+                format!(
+                    "failed to create sysroot base directory '{}': {error}",
+                    base_dir.display()
+                )
+            })?;
 
-                    let elapsed = start_time.elapsed().as_secs_f64();
-                    let speed = if elapsed > 0.0 {
-                        total_bytes as f64 / elapsed
-                    } else {
-                        0.0
-                    };
+            let mut files_loaded = 0;
+            let mut total_bytes = 0;
+            let start_time = std::time::Instant::now();
 
-                    if data_len > 1024 * 1024 {
-                        let progress = (offset as f64 / data_len as f64) * 100.0;
-                        write!(
-                            io.stdout,
-                            "\r\x1b[KLoading {}... [{:.1}%] Speed: {}/s",
-                            String::from_utf8_lossy(&name_buf),
-                            progress,
-                            format_size(speed as usize)
-                        )
-                        .unwrap();
-                        let _ = io.stdout.flush();
-                    }
+            loop {
+                let mut name_len = 0i32;
+                let mut data_len = 0i32;
+                let has_next = unsafe {
+                    sysroot_get_next_file_meta(
+                        &mut name_len as *mut _ as i32,
+                        &mut data_len as *mut _ as i32,
+                    )
+                };
+                if !sysroot_meta_has_file(has_next, triple)? {
+                    break;
                 }
-            }
+                if name_len < 0 || data_len < -1 {
+                    return Err(format!(
+                        "invalid sysroot archive entry lengths: name={name_len}, data={data_len}"
+                    ));
+                }
 
-            if let Ok(name) = String::from_utf8(name_buf) {
-                let file_path = base_dir.join(&name);
-                if data_len == -1 {
-                    std::fs::create_dir_all(&file_path).unwrap_or_default();
-                } else {
-                    if let Some(parent) = file_path.parent() {
-                        std::fs::create_dir_all(parent).unwrap_or_default();
-                    }
+                let mut name_buf = vec![0u8; name_len as usize];
+                unsafe {
+                    sysroot_read_file_name(name_buf.as_mut_ptr() as i32, name_len);
+                }
 
-                    std::fs::write(&file_path, data_buf).unwrap_or_else(|e| {
-                        writeln!(io.stderr, "Failed to write sysroot file '{}': {}", name, e)
+                let mut data_buf = Vec::new();
+                if data_len >= 0 {
+                    data_buf = vec![0u8; data_len as usize];
+                    let mut remaining = data_len as usize;
+                    let mut offset = 0;
+                    let chunk_size = 50 * 1024 * 1024;
+                    while remaining > 0 {
+                        let to_read = std::cmp::min(remaining, chunk_size);
+                        unsafe {
+                            sysroot_read_file_chunk(
+                                data_buf[offset..].as_mut_ptr() as i32,
+                                to_read as i32,
+                            );
+                        }
+                        offset += to_read;
+                        remaining -= to_read;
+                        total_bytes += to_read;
+
+                        let elapsed = start_time.elapsed().as_secs_f64();
+                        let speed = if elapsed > 0.0 {
+                            total_bytes as f64 / elapsed
+                        } else {
+                            0.0
+                        };
+                        if data_len > 1024 * 1024 {
+                            let progress = (offset as f64 / data_len as f64) * 100.0;
+                            write!(
+                                io.stdout,
+                                "\r\x1b[KLoading {}... [{:.1}%] Speed: {}/s",
+                                String::from_utf8_lossy(&name_buf),
+                                progress,
+                                format_size(speed as usize)
+                            )
                             .unwrap();
-                    });
+                            let _ = io.stdout.flush();
+                        }
+                    }
                 }
 
+                let data = (data_len >= 0).then_some(data_buf.as_slice());
+                write_sysroot_entry(&base_dir, name_buf, data)?;
                 files_loaded += 1;
                 let elapsed = start_time.elapsed().as_secs_f64();
                 let speed = if elapsed > 0.0 {
@@ -430,7 +426,6 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                 } else {
                     0.0
                 };
-
                 write!(
                     io.stdout,
                     "\r\x1b[KLoaded {} files ({} total) - Speed: {}/s",
@@ -440,11 +435,10 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                 )
                 .unwrap();
                 let _ = io.stdout.flush();
-            } else {
-                writeln!(io.stderr, "Failed to decode sysroot file name").unwrap();
             }
-        }
-        let total_elapsed = start_time.elapsed();
+
+            Ok((files_loaded, total_bytes, start_time.elapsed()))
+        })?;
         if is_src {
             writeln!(
                 io.stdout,

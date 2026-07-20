@@ -1,4 +1,5 @@
 import type { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
+import { sysrootMetaStatus, type SysrootMetaResponse } from "../../sysroot_protocol.ts";
 import { createChildProcessImports } from "./child_process_import.ts";
 import { createHttpImports } from "./http_import.ts";
 import { type ImportObject, instantiate } from "./vfs.js";function snakeToCamel(snakeCaseString) {
@@ -108,15 +109,16 @@ export const custom_instantiate = async (
             const res = call_unknown_fn(0, {
               name: "sysrootGetNextFileMeta",
               args: {},
-            }) as { has_file: boolean | number, name_len?: number, data_len?: number };
+            }) as SysrootMetaResponse;
             console.log("sysrootGetNextFileMeta returned", res);
             const view32 = new Int32Array(memory.memory.buffer);
+            const status = sysrootMetaStatus(res);
 
-            if (res && (res.has_file === 1 || res.has_file === true)) {
+            if (status === 1) {
               view32[name_len_ptr / 4] = res.name_len!;
               view32[data_len_ptr / 4] = res.data_len!;
             }
-            return (res && res.has_file) ? 1 : 0;
+            return status;
           },
           sysrootReadFileName: (name_ptr: number): void => {
             const res = call_unknown_fn(0, {

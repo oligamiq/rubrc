@@ -395,6 +395,7 @@ edition = "2021"
 
   let sysroot_queue: SysrootArchiveEntry[] = [];
   let current_sysroot_file: SysrootArchiveEntry | null = null;
+  let sysroot_error: string | null = null;
   const cratesProxyFetch = createCratesProxyFetch({
     proxyBaseUrl: "https://proxy.rubrc.workers.dev",
   });
@@ -449,13 +450,18 @@ edition = "2021"
           const triple = unknown.args.triple;
           sysroot_queue = [];
           current_sysroot_file = null;
+          sysroot_error = null;
           try {
             sysroot_queue = await loadSysrootArchive(triple);
           } catch (error) {
+            sysroot_error = error instanceof Error ? error.message : String(error);
             console.error(`Failed to fetch ${triple}`, error);
           }
           return {};
         } else if (unknown.name === "sysrootGetNextFileMeta") {
+          if (sysroot_error !== null) {
+            return { has_file: -1, name_len: 0, data_len: 0 };
+          }
           if (sysroot_queue.length > 0) {
             current_sysroot_file = sysroot_queue.shift()!;
             return {
