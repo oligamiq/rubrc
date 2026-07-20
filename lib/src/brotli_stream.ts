@@ -47,6 +47,7 @@ export const get_brotli_decompress_stream = async (): Promise<
 
 export const fetch_compressed_stream = async (
   url: string | URL | globalThis.Request,
+  signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> => {
   let response: Response | undefined;
 
@@ -55,13 +56,13 @@ export const fetch_compressed_stream = async (
     response = await cache.match(url);
 
     if (!response) {
-      response = await fetch(url);
+      response = await fetch(url, { signal });
       if (response.ok) {
         await cache.put(url, response.clone());
       }
     }
   } else {
-    response = await fetch(url);
+    response = await fetch(url, { signal });
   }
 
   if (!response.ok) {
