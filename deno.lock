@@ -2843,7 +2843,7 @@
     "packageJson": {
       "dependencies": [
         "npm:@biomejs/biome@2.5.2",
-        "npm:@oligami/browser_wasi_shim-threads@~0.3.7",
+        "npm:@oligami/browser_wasi_shim-threads@~0.4.1",
         "npm:@swc/cli@~0.8.1",
         "npm:@swc/core@^1.15.43",
         "npm:@types/tar-stream@^3.1.4",
@@ -2865,7 +2865,7 @@
         "packageJson": {
           "dependencies": [
             "npm:@bjorn3/browser_wasi_shim@~0.4.2",
-            "npm:@oligami/browser_wasi_shim-threads@~0.3.5",
+            "npm:@oligami/browser_wasi_shim-threads@~0.4.1",
             "npm:brotli-dec-wasm@^2.3.0"
           ]
         }
@@ -2885,7 +2885,7 @@
             "npm:@codingame/monaco-vscode-languages-service-override@^25.1.2",
             "npm:@codingame/monaco-vscode-model-service-override@^25.1.2",
             "npm:@codingame/monaco-vscode-theme-defaults-default-extension@^25.1.2",
-            "npm:@oligami/browser_wasi_shim-threads@~0.3.7",
+            "npm:@oligami/browser_wasi_shim-threads@~0.4.1",
             "npm:@oligami/shared-object@0.1.1",
             "npm:@tailwindcss/vite@^4.3.0",
             "npm:@thisbeyond/solid-select@~0.15.1",

@@ -28,6 +28,7 @@ export default defineConfig({
       "Cross-Origin-Embedder-Policy": "require-corp",
       "Cross-Origin-Opener-Policy": "same-origin",
     },
+    allowedHosts: true,
   },
   build: {
     target: "esnext",

@@ -1,12 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import zlib from 'node:zlib';
+import { spawn } from 'node:child_process';
 import { Writable } from 'node:stream';
 import { pipeline, finished } from 'node:stream/promises';
 
 const DIST_DIR = process.argv[2];
+const OUT_DIR_ARG = process.argv[3];
 if (!DIST_DIR) {
-  console.error("Usage: node prepare-vfs-asset.mjs <dist_dir>");
+  console.error("Usage: node prepare-vfs-asset.mjs <dist_dir> [out_dir]");
   process.exit(1);
 }
 
@@ -17,7 +18,7 @@ if (!Number.isSafeInteger(PART_SIZE) || PART_SIZE < 1 || PART_SIZE > 25165824) {
   process.exit(1);
 }
 
-const brotliQualityStr = process.env.VFS_BROTLI_QUALITY ?? "9";
+const brotliQualityStr = process.env.VFS_BROTLI_QUALITY ?? "11";
 const BROTLI_QUALITY = Number(brotliQualityStr);
 if (!Number.isInteger(BROTLI_QUALITY) || BROTLI_QUALITY < 0 || BROTLI_QUALITY > 11) {
   console.error("Invalid VFS_BROTLI_QUALITY");
@@ -121,9 +122,85 @@ class SplitterStream extends Writable {
   }
 }
 
+async function findVfsManifests(dir) {
+  let manifests = [];
+  const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== "v1") {
+        manifests.push(...await findVfsManifests(fullPath));
+      }
+    } else if (entry.isFile() && /^vfs\.core-.*\.wasm\.br\.json$/.test(entry.name)) {
+      manifests.push(fullPath);
+    }
+  }
+  return manifests;
+}
+
+async function findVfsBr(dir) {
+  let brFiles = [];
+  const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== "v1") {
+        brFiles.push(...await findVfsBr(fullPath));
+      }
+    } else if (entry.isFile() && /^vfs\.core-.*\.wasm\.br$/.test(entry.name)) {
+      brFiles.push(fullPath);
+    }
+  }
+  return brFiles;
+}
+
 async function main() {
-  const wasmFiles = await findVfsWasm(DIST_DIR);
-  if (wasmFiles.length !== 1) {
+  const TARGET_DIR = OUT_DIR_ARG ? path.resolve(OUT_DIR_ARG) : path.resolve(DIST_DIR);
+
+  if (OUT_DIR_ARG && path.resolve(DIST_DIR) !== TARGET_DIR) {
+    console.log(`Copying original folder to output folder to preserve structure and files...`);
+    async function copyDir(src, dest) {
+      await fs.promises.mkdir(dest, { recursive: true });
+      const entries = await fs.promises.readdir(src, { withFileTypes: true });
+      for (const entry of entries) {
+        const srcPath = path.join(src, entry.name);
+        const destPath = path.join(dest, entry.name);
+        if (entry.isDirectory()) {
+          await copyDir(srcPath, destPath);
+        } else {
+          await fs.promises.copyFile(srcPath, destPath);
+        }
+      }
+    }
+    await copyDir(DIST_DIR, TARGET_DIR);
+  }
+
+  // Generate _headers file
+  const headersPath = path.join(TARGET_DIR, '_headers');
+  const headersContent = `/*\n  Cross-Origin-Opener-Policy: same-origin\n  Cross-Origin-Embedder-Policy: require-corp\n`;
+  await fs.promises.writeFile(headersPath, headersContent);
+
+  const wasmFiles = await findVfsWasm(TARGET_DIR);
+  
+  if (wasmFiles.length === 0) {
+    let manifests = [];
+    try { manifests = await findVfsManifests(TARGET_DIR); } catch (e) {}
+
+    if (manifests.length > 0) {
+      console.log("Already processed (WASM file already removed, .br.json exists). Skipping.");
+      process.exit(0);
+    }
+    
+    let brFiles = [];
+    try { brFiles = await findVfsBr(TARGET_DIR); } catch (e) {}
+    if (brFiles.length > 0) {
+      console.error("Error: Found .br cache but .wasm file is missing, cannot determine original size for manifest.");
+      process.exit(1);
+    }
+
+    console.error("Error: Expected exactly 1 vfs.core wasm file, but found 0");
+    process.exit(1);
+  } else if (wasmFiles.length > 1) {
     console.error(`Error: Expected exactly 1 vfs.core wasm file, but found ${wasmFiles.length}`);
     process.exit(1);
   }
@@ -132,28 +209,73 @@ async function main() {
   const outDir = path.dirname(wasmFile);
   const baseName = path.basename(wasmFile);
 
+  const finalManifestPath = path.join(outDir, `${baseName}.br.json`);
+  if (fs.existsSync(finalManifestPath)) {
+    console.log(`Already compressed (${baseName}.br.json exists). Skipping.`);
+    await fs.promises.unlink(wasmFile);
+    process.exit(0);
+  }
+
   const stats = await fs.promises.stat(wasmFile);
   const originalSize = stats.size;
 
   const splitter = new SplitterStream(baseName, outDir);
-  const brotli = zlib.createBrotliCompress({
-    params: {
-      [zlib.constants.BROTLI_PARAM_QUALITY]: BROTLI_QUALITY,
-    },
-  });
-
+  
   const manifestName = `${baseName}.br.json`;
   const manifestPath = path.join(outDir, manifestName);
   const manifestTmpPath = `${manifestPath}.tmp`;
 
   const publishedFiles = [];
   try {
-    // 1. generate tmp parts
-    await pipeline(
-      fs.createReadStream(wasmFile),
-      brotli,
-      splitter
-    );
+    const cachedBrPath = path.join(outDir, `${baseName}.br`);
+    
+    if (fs.existsSync(cachedBrPath)) {
+      console.log(`Found cached ${baseName}.br. Using it for splitting...`);
+      const brStats = await fs.promises.stat(cachedBrPath);
+      const readStream = fs.createReadStream(cachedBrPath);
+      let bytesRead = 0;
+      readStream.on('data', (chunk) => {
+        bytesRead += chunk.length;
+        const percent = ((bytesRead / brStats.size) * 100).toFixed(1);
+        process.stdout.write(`\r[Progress] Splitting cached .br: ${percent}% (${bytesRead}/${brStats.size} bytes)`);
+      });
+      readStream.on('end', () => {
+        process.stdout.write(`\n[Progress] Splitting complete.\n`);
+      });
+      await pipeline(readStream, splitter);
+    } else {
+      const brotliProc = spawn('brotli', ['-q', BROTLI_QUALITY.toString(), '-c']);
+      brotliProc.stderr.on('data', (d) => console.error(`brotli stderr: ${d}`));
+
+      const readStream = fs.createReadStream(wasmFile);
+      let bytesRead = 0;
+      readStream.on('data', (chunk) => {
+        bytesRead += chunk.length;
+        const percent = ((bytesRead / originalSize) * 100).toFixed(1);
+        process.stdout.write(`\r[Progress] Reading & Compressing: ${percent}% (${bytesRead}/${originalSize} bytes)`);
+      });
+      readStream.on('end', () => {
+        process.stdout.write(`\n[Progress] Read complete. Waiting for Brotli to finalize compression...\n`);
+      });
+
+      const p1 = pipeline(readStream, brotliProc.stdin);
+      const p2 = pipeline(brotliProc.stdout, splitter);
+      const procPromise = new Promise((resolve, reject) => {
+        brotliProc.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`brotli command failed with exit code ${code}. Please check stderr logs.`));
+        });
+        brotliProc.on('error', (err) => {
+          if (err.code === 'ENOENT') {
+            reject(new Error("The 'brotli' command was not found. Please ensure the native 'brotli' CLI is installed locally."));
+          } else {
+            reject(new Error(`Failed to execute brotli command: ${err.message}`));
+          }
+        });
+      });
+
+      await Promise.all([p1, p2, procPromise]);
+    }
 
     if (!Number.isSafeInteger(originalSize) || originalSize <= 0) {
       throw new Error("Invalid originalSize");
@@ -176,7 +298,6 @@ async function main() {
       throw new Error("Total parts size mismatch with compressedSize");
     }
 
-    // 2. generate tmp manifest
     const manifest = {
       version: 1,
       encoding: "br",
@@ -188,7 +309,6 @@ async function main() {
 
     await fs.promises.writeFile(manifestTmpPath, JSON.stringify(manifest, null, 2));
 
-    // 3. delete old manifest and parts (only after validation)
     const oldFiles = await fs.promises.readdir(outDir);
     for (const file of oldFiles) {
       if (file === manifestName || file.startsWith(`${baseName}.br.part-`)) {
@@ -198,7 +318,6 @@ async function main() {
       }
     }
 
-    // 4. rename tmp parts to final
     for (const p of splitter.parts) {
       const finalPath = path.join(outDir, p.file);
       await fs.promises.rename(p.tmpFile, finalPath);
@@ -208,17 +327,19 @@ async function main() {
       }
     }
 
-    // 5. rename manifest to final
     await fs.promises.rename(manifestTmpPath, manifestPath);
     publishedFiles.push(manifestPath);
 
-    // 6. remove original wasm
     await fs.promises.unlink(wasmFile);
+
+    if (fs.existsSync(cachedBrPath)) {
+      await fs.promises.unlink(cachedBrPath);
+      console.log(`Deleted cached ${baseName}.br`);
+    }
 
     console.log(`Successfully compressed and split ${baseName}`);
   } catch (err) {
     console.error("Compression/splitting failed:", err);
-    // cleanup temporary and published files from this run
     for (const file of publishedFiles) {
       try { await fs.promises.unlink(file); } catch(e) {}
     }
@@ -227,6 +348,31 @@ async function main() {
       try { await fs.promises.unlink(tmp); } catch(e) {}
     }
     process.exit(1);
+  }
+
+  // Fetch v1 snapshot from git
+  const v1Dir = path.join(TARGET_DIR, 'v1');
+  if (!fs.existsSync(v1Dir)) {
+    console.log(`Fetching v1 snapshot from git (origin/v1-dist)...`);
+    await fs.promises.mkdir(v1Dir, { recursive: true });
+    
+    const { exec } = await import('node:child_process');
+    const util = await import('node:util');
+    const execPromise = util.promisify(exec);
+    
+    try {
+      await execPromise('git fetch --quiet --no-tags --depth=1 origin refs/heads/v1-dist');
+      await execPromise(`git archive --format=tar FETCH_HEAD | tar -xf - -C "${v1Dir}"`);
+      const v1Index = path.join(v1Dir, 'index.html');
+      const st = await fs.promises.stat(v1Index).catch(() => null);
+      if (!st || !st.isFile()) {
+        throw new Error("v1 snapshot is missing index.html");
+      }
+      console.log(`Successfully extracted v1-dist to v1/`);
+    } catch (error) {
+      console.error(`Failed to fetch and extract v1-dist: ${error.message}`);
+      process.exit(1);
+    }
   }
 }
 

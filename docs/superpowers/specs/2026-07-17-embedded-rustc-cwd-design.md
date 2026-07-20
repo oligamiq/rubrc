@@ -86,6 +86,12 @@ This mechanism intentionally cannot preserve absolute paths that are not represe
 
 Empty or malformed paths are forwarded to the inner filesystem, which retains ownership of WASI error semantics.
 
+### Cursor-aware write workaround
+
+`CwdAwareFileSystem` also owns a temporary `fd_write_raw` correction for the pinned WVL dynamic filesystem. WVL's `fd_seek_raw` updates the open descriptor cursor, but `StandardDynamicFileSystem::fd_write_raw` currently calls the append-only LFS write and ignores that cursor. rustc's rlib/rmeta archive writer seeks backward to backpatch metadata; appending those patches instead corrupts the archive and causes a later rustc invocation to report E0786.
+
+The wrapper delegates fd 0/1/2 unchanged. It preserves the requested descriptor flags after successful `path_open_raw` because the pinned WVL dynamic filesystem ignores them. For dynamic file descriptors, normal writes use `fd_pwrite_raw` at the descriptor cursor, while `FDFLAGS_APPEND` writes query the current inode size and start at EOF regardless of a prior seek. APPEND writes are globally serialized across descriptors from EOF lookup through all positioned writes, descriptor cursor update, and `nwritten` storage, so two descriptors for one inode cannot select the same offset. The sole lock order is descriptor entry followed by the append-write mutex; non-append writes never take that mutex. Both paths preserve the existing guest-memory and error behavior. Remove this rubrc-owned workaround once the pinned WVL implementation preserves open flags and makes `fd_write_raw` cursor-aware.
+
 Each intercepted path method holds the target-cwd read lock from lookup through completion of the delegated inner filesystem call. Guard cleanup requires the write lock, so it cannot remove a temporary FD after routing has selected it but before the inner filesystem reads it. Two-directory operations hold one read guard while routing and dispatching both path pairs.
 
 The wrapper also intercepts `fd_close_raw` and `fd_renumber_raw`. Each operation holds the target-cwd read lock from the protected-FD check through completion of any delegated inner mutation. The recorded root FD and every active temporary cwd FD are protected from close, replacement, and renumbering while owned by the wrapper. Attempts return a deterministic WASI error without mutating the inner FD map. All other FD operations delegate unchanged.

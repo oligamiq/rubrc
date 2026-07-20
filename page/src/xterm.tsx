@@ -232,6 +232,9 @@ export const SetupMyTerminal = (props: {
       onData={onData}
       onResize={onResize}
       addons={[fit_addon]}
+      options={{
+        scrollSensitivity: (typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) ? 8 : 1
+      }}
       class="w-full h-full"
     />
   );

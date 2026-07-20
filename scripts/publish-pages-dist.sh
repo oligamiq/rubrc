@@ -37,19 +37,7 @@ bun run vfs:prepare:prod
   sed -i '/<head>/a \    <script src="./mini-coi.js" scope="./"></script>' dist/index.html
 )
 
-# 4.3 v1-distの取得
-rm -rf page/dist/v1
-mkdir -p page/dist/v1
 
-git fetch \
-  --quiet \
-  --no-tags \
-  --depth=1 \
-  origin \
-  refs/heads/v1-dist
-
-git archive --format=tar FETCH_HEAD | tar -xf - -C page/dist/v1
-test -f page/dist/v1/index.html || fail "v1 snapshot is missing index.html"
 
 # 4.4 metadata
 SOURCE_SHA="$SOURCE_SHA" node -e "
