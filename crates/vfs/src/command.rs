@@ -175,6 +175,7 @@ pub fn handle_command(args: Vec<String>) {
             set_lsp_opt_args(&args);
             MEMORY_MANAGER.ensure_once::<crate::lsp_opt>(&LSP_RESERVE_ONCE, LSP_CONFIG);
             crate::lsp_opt::_reset();
+            crate::lsp_opt::_start();
             crate::lsp_opt::_main();
         }
         _ => {
