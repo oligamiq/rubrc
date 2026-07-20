@@ -2625,7 +2625,19 @@ fn claim_lsp_result_pages(
     mut reserve: impl FnMut(i32) -> i32,
     mut compare_exchange: impl FnMut(i32, i32) -> i32,
 ) -> Result<i32, String> {
+    if pages <= 0 {
+        return Err("LSP result memory growth must be positive".to_string());
+    }
+
     let mut current = logical_size();
+    current
+        .checked_add(pages)
+        .ok_or_else(|| "LSP result memory size overflowed".to_string())?;
+    // Reserve once before CAS so every published logical range is already backed.
+    if reserve(pages) < 0 {
+        return Err("failed to reserve LSP result memory".to_string());
+    }
+
     loop {
         let next = current
             .checked_add(pages)
@@ -2635,19 +2647,7 @@ fn claim_lsp_result_pages(
             current = observed;
             continue;
         }
-
-        if reserve(pages) > 0 {
-            return Ok(current);
-        }
-
-        let rollback = compare_exchange(next, current);
-        if rollback == next {
-            return Err("failed to reserve LSP result memory".to_string());
-        }
-        if rollback > next {
-            return Ok(current);
-        }
-        return Err("LSP result memory accounting moved backwards".to_string());
+        return Ok(current);
     }
 }
 
@@ -4528,9 +4528,13 @@ mod lsp_cargo_result_tests {
         encode_lsp_result_abi, lsp_host_program, write_lsp_result_bytes,
     };
     use std::cell::{Cell, RefCell};
+    use std::sync::{
+        Arc, Barrier,
+        atomic::{AtomicI32, AtomicUsize, Ordering},
+    };
 
     #[test]
-    fn lsp_result_reservation_only_grows_after_winning_contention() {
+    fn lsp_result_reservation_reserves_once_across_logical_contention() {
         let attempts = Cell::new(0);
         let reservations = RefCell::new(Vec::new());
         let claims = RefCell::new(Vec::new());
@@ -4540,7 +4544,7 @@ mod lsp_cargo_result_tests {
             || 10,
             |pages| {
                 reservations.borrow_mut().push(pages);
-                12
+                0
             },
             |current, next| {
                 claims.borrow_mut().push((current, next));
@@ -4557,12 +4561,16 @@ mod lsp_cargo_result_tests {
     }
 
     #[test]
-    fn lsp_result_reservation_rolls_back_failed_physical_growth() {
+    fn lsp_result_reservation_failure_publishes_no_logical_region() {
+        let reservations = Cell::new(0);
         let claims = RefCell::new(Vec::new());
         let result = claim_lsp_result_pages(
             2,
             || 10,
-            |_| -1,
+            |_| {
+                reservations.set(reservations.get() + 1);
+                -1
+            },
             |current, next| {
                 claims.borrow_mut().push((current, next));
                 current
@@ -4573,25 +4581,58 @@ mod lsp_cargo_result_tests {
             result,
             Err("failed to reserve LSP result memory".to_string())
         );
-        assert_eq!(&*claims.borrow(), &[(10, 12), (12, 10)]);
+        assert_eq!(reservations.get(), 1);
+        assert!(claims.borrow().is_empty());
     }
 
     #[test]
-    fn lsp_result_reservation_keeps_claim_adopted_by_later_growth() {
-        let attempts = Cell::new(0);
-        let start = claim_lsp_result_pages(
-            2,
-            || 10,
-            |_| -1,
-            |current, _| {
-                let attempt = attempts.get();
-                attempts.set(attempt + 1);
-                if attempt == 0 { current } else { 13 }
-            },
-        )
-        .expect("later logical growth proves existing physical capacity");
+    fn concurrent_lsp_result_reservations_are_distinct_and_fully_backed() {
+        let logical_pages = Arc::new(AtomicI32::new(10));
+        let physical_pages = Arc::new(AtomicI32::new(10));
+        let reservation_calls = Arc::new(AtomicUsize::new(0));
+        let claim_barrier = Arc::new(Barrier::new(2));
 
-        assert_eq!(start, 10);
+        let workers = (0..2)
+            .map(|_| {
+                let logical_pages = Arc::clone(&logical_pages);
+                let physical_pages = Arc::clone(&physical_pages);
+                let reservation_calls = Arc::clone(&reservation_calls);
+                let claim_barrier = Arc::clone(&claim_barrier);
+                std::thread::spawn(move || {
+                    claim_lsp_result_pages(
+                        2,
+                        || {
+                            let current = logical_pages.load(Ordering::SeqCst);
+                            claim_barrier.wait();
+                            current
+                        },
+                        |pages| {
+                            reservation_calls.fetch_add(1, Ordering::SeqCst);
+                            physical_pages.fetch_add(pages, Ordering::SeqCst);
+                            1
+                        },
+                        |current, next| {
+                            assert!(physical_pages.load(Ordering::SeqCst) >= next);
+                            logical_pages
+                                .compare_exchange(current, next, Ordering::SeqCst, Ordering::SeqCst)
+                                .unwrap_or_else(|observed| observed)
+                        },
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut starts = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap().unwrap())
+            .collect::<Vec<_>>();
+        starts.sort_unstable();
+
+        assert_eq!(starts, [10, 12]);
+        assert_eq!(reservation_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(physical_pages.load(Ordering::SeqCst), 14);
+        assert_eq!(logical_pages.load(Ordering::SeqCst), 14);
+        assert!(starts.iter().all(|start| start + 2 <= 14));
     }
 
     #[test]
