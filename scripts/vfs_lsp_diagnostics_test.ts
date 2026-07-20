@@ -3,7 +3,14 @@ import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
 import { parseTar } from "../lib/src/parse_tar.ts";
 import type { SysrootArchiveEntry } from "../page/src/sysroot_archive.ts";
 import { buildPreopenDirectory } from "./build_preopen.ts";
-import { prepareCachedArchive, prepareCachedSysroot } from "./sysroot_cache.ts";
+import {
+  deterministicRustSrcTarArgs,
+  prepareCachedArchive,
+  prepareCachedSysroot,
+  rustSrcCacheMatchesIdentity,
+  rustSrcToolchainIdentity,
+  validateRustSrcArchive,
+} from "./sysroot_cache.ts";
 
 const testDir = "./test_workspace_lsp_diagnostics";
 await Deno.remove(testDir, { recursive: true }).catch((error) => {
@@ -12,35 +19,38 @@ await Deno.remove(testDir, { recursive: true }).catch((error) => {
 await prepareCachedSysroot({ workspaceSysroot: `${testDir}/sysroot` });
 
 const rustSrcCacheArchive = ".rubrc-cache/sysroot/rust-src.tar.br";
-const cachedRustSrcIsValid = await Deno.stat(rustSrcCacheArchive)
-  .then((stat) => stat.size > 1024)
-  .catch((error) => {
+const rustSrcCacheIdentity = `${rustSrcCacheArchive}.identity`;
+const decoder = new TextDecoder();
+const runRustc = async (args: string[]): Promise<string> => {
+  const output = await new Deno.Command("rustc", { args }).output();
+  if (!output.success) throw new Error(decoder.decode(output.stderr));
+  return decoder.decode(output.stdout).trim();
+};
+const sysroot = await runRustc(["--print", "sysroot"]);
+const identity = rustSrcToolchainIdentity(await runRustc(["-vV"]), sysroot);
+const cachedRustSrcIsValid = await (async () => {
+  try {
+    const cachedIdentity = await Deno.readTextFile(rustSrcCacheIdentity);
+    if (!rustSrcCacheMatchesIdentity(identity, cachedIdentity)) return false;
+    return await validateRustSrcArchive(
+      await Deno.readFile(rustSrcCacheArchive),
+    );
+  } catch (error) {
     if (error instanceof Deno.errors.NotFound) return false;
     throw error;
-  });
-if (!cachedRustSrcIsValid) {
-  const rustc = await new Deno.Command("rustc", {
-    args: ["--print", "sysroot"],
-  }).output();
-  if (!rustc.success) {
-    throw new Error(new TextDecoder().decode(rustc.stderr));
   }
-  const sysroot = new TextDecoder().decode(rustc.stdout).trim();
+})();
+if (!cachedRustSrcIsValid) {
   const rustSrcLibrary = `${sysroot}/lib/rustlib/src/rust/library`;
   await Deno.mkdir(".rubrc-cache/sysroot", { recursive: true });
-  const temporaryArchive = `${rustSrcCacheArchive}.tmp`;
+  const temporarySuffix = `${crypto.randomUUID()}.tmp`;
+  const temporaryArchive = `${rustSrcCacheArchive}.${temporarySuffix}`;
+  const temporaryIdentity = `${rustSrcCacheIdentity}.${temporarySuffix}`;
   const tar = await new Deno.Command("tar", {
-    args: [
-      "--create",
-      "--file",
-      "-",
-      "--directory",
-      rustSrcLibrary,
-      ".",
-    ],
+    args: deterministicRustSrcTarArgs(rustSrcLibrary),
   }).output();
   if (!tar.success) {
-    throw new Error(new TextDecoder().decode(tar.stderr));
+    throw new Error(decoder.decode(tar.stderr));
   }
   const tarBuffer = new ArrayBuffer(tar.stdout.byteLength);
   new Uint8Array(tarBuffer).set(tar.stdout);
@@ -49,12 +59,23 @@ if (!cachedRustSrcIsValid) {
       new CompressionStream("brotli"),
     ),
   ).bytes();
+  if (!await validateRustSrcArchive(compressed)) {
+    throw new Error("generated rust-src archive failed validation");
+  }
   await Deno.writeFile(temporaryArchive, compressed);
+  await Deno.writeTextFile(temporaryIdentity, identity);
   await Deno.rename(temporaryArchive, rustSrcCacheArchive);
+  await Deno.rename(temporaryIdentity, rustSrcCacheIdentity);
 }
+console.log(
+  `${cachedRustSrcIsValid ? "reused" : "generated"} validated rust-src cache`,
+);
 const { archive: rustSrcArchive } = await prepareCachedArchive({
   triple: "rust-src",
 });
+if (!await validateRustSrcArchive(rustSrcArchive)) {
+  throw new Error("cached rust-src archive failed validation");
+}
 await Deno.mkdir(`${testDir}/src`, { recursive: true });
 await Deno.writeTextFile(
   `${testDir}/Cargo.toml`,
@@ -78,8 +99,12 @@ const preopen = await (async () => {
 })();
 const lspOutput = new MessageChannel();
 let rustSrcTemplates: readonly Readonly<SysrootArchiveEntry>[] | undefined;
-let sysrootQueue: SysrootArchiveEntry[] = [];
-let currentSysrootFile: SysrootArchiveEntry | null = null;
+type QueuedSysrootEntry = {
+  entry: Readonly<SysrootArchiveEntry>;
+  offset: number;
+};
+let sysrootQueue: QueuedSysrootEntry[] = [];
+let currentSysrootFile: QueuedSysrootEntry | null = null;
 const farm = new WASIFarm(
   new OpenFile(new File([])),
   ConsoleStdout.lineBuffered((message) => console.log(`[stdout] ${message}`)),
@@ -116,13 +141,6 @@ const farm = new WASIFarm(
           );
           const entries: Readonly<SysrootArchiveEntry>[] = [];
           await parseTar(stream, (file) => {
-            if (
-              file.name !== "./core" &&
-              file.name !== "./core/src" &&
-              file.name !== "./core/src/lib.rs"
-            ) {
-              return;
-            }
             entries.push(Object.freeze({
               name: new TextEncoder().encode(file.name),
               data: file.data?.slice() ?? new Uint8Array(),
@@ -131,11 +149,7 @@ const farm = new WASIFarm(
           });
           rustSrcTemplates = Object.freeze(entries);
         }
-        sysrootQueue = rustSrcTemplates.map((entry) => ({
-          name: entry.name.slice(),
-          data: entry.data.slice(),
-          isDirectory: entry.isDirectory,
-        }));
+        sysrootQueue = rustSrcTemplates.map((entry) => ({ entry, offset: 0 }));
         currentSysrootFile = null;
         return {};
       }
@@ -144,26 +158,30 @@ const farm = new WASIFarm(
           currentSysrootFile = sysrootQueue.shift()!;
           return {
             has_file: true,
-            name_len: currentSysrootFile.name.length,
-            data_len: currentSysrootFile.isDirectory
+            name_len: currentSysrootFile.entry.name.length,
+            data_len: currentSysrootFile.entry.isDirectory
               ? -1
-              : currentSysrootFile.data.length,
+              : currentSysrootFile.entry.data.length,
           };
         }
         currentSysrootFile = null;
         return { has_file: false, name_len: 0, data_len: 0 };
       }
       if (name === "sysrootReadFileName") {
-        if (currentSysrootFile?.name) {
-          return { name: Array.from(currentSysrootFile.name) };
+        if (currentSysrootFile?.entry.name) {
+          return { name: Array.from(currentSysrootFile.entry.name) };
         }
         throw new Error("No current sysroot file to read name from");
       }
       if (name === "sysrootReadFileChunk") {
         if (currentSysrootFile) {
           const chunkLength = unknown.args?.chunk_len ?? 0;
-          const chunk = currentSysrootFile.data.slice(0, chunkLength);
-          currentSysrootFile.data = currentSysrootFile.data.slice(chunkLength);
+          const start = currentSysrootFile.offset;
+          const chunk = currentSysrootFile.entry.data.slice(
+            start,
+            start + chunkLength,
+          );
+          currentSysrootFile.offset += chunk.length;
           return { chunk: Array.from(chunk) };
         }
         return { chunk: [] };
@@ -181,9 +199,9 @@ const result = await new Promise<{ ok: boolean; detail: string }>((resolve) => {
     worker.terminate();
     resolve({
       ok: false,
-      detail: "diagnostics worker timed out after 120 seconds",
+      detail: "diagnostics worker timed out after 360 seconds",
     });
-  }, 120_000);
+  }, 360_000);
   worker.onmessage = (event) => {
     clearTimeout(timer);
     resolve(event.data);
@@ -200,4 +218,5 @@ const result = await new Promise<{ ok: boolean; detail: string }>((resolve) => {
 worker.terminate();
 lspOutput.port1.close();
 console.log(result.detail);
+console.log(`served ${rustSrcTemplates?.length ?? 0} rust-src archive entries`);
 if (!result.ok) Deno.exit(1);

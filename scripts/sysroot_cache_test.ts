@@ -1,10 +1,99 @@
 import {
+  deterministicRustSrcTarArgs,
   prepareCachedArchive,
   prepareCachedSysroot,
+  rustSrcCacheMatchesIdentity,
+  rustSrcToolchainIdentity,
   type SysrootCacheDeps,
   sysrootCachePaths,
+  validateRustSrcArchive,
   validateTarEntryName,
 } from "./sysroot_cache.ts";
+
+Deno.test("rust-src cache identity includes exact compiler and sysroot", () => {
+  const identity = rustSrcToolchainIdentity(
+    "rustc 1.95.0-nightly\ncommit-hash: abc123\n",
+    "/toolchains/nightly",
+  );
+  if (!rustSrcCacheMatchesIdentity(identity, `${identity}\n`)) {
+    throw new Error("matching identity was rejected");
+  }
+  if (
+    rustSrcCacheMatchesIdentity(
+      identity,
+      rustSrcToolchainIdentity(
+        "rustc 1.95.0-nightly\ncommit-hash: def456",
+        "/toolchains/nightly",
+      ),
+    )
+  ) {
+    throw new Error("different compiler identity was reused");
+  }
+  if (
+    rustSrcCacheMatchesIdentity(
+      identity,
+      rustSrcToolchainIdentity(
+        "rustc 1.95.0-nightly\ncommit-hash: abc123",
+        "/other",
+      ),
+    )
+  ) {
+    throw new Error("different sysroot identity was reused");
+  }
+});
+
+Deno.test("rust-src tar arguments fix ordering and metadata", () => {
+  const args = deterministicRustSrcTarArgs("/toolchain/library");
+  const expected = [
+    "--create",
+    "--file",
+    "-",
+    "--sort=name",
+    "--mtime=@0",
+    "--owner=0",
+    "--group=0",
+    "--numeric-owner",
+    "--mode=u+rwX,go+rX,go-w",
+    "--pax-option=delete=atime,delete=ctime",
+    "--directory",
+    "/toolchain/library",
+    ".",
+  ];
+  if (args.join("\n") !== expected.join("\n")) {
+    throw new Error(
+      `unexpected deterministic tar arguments:\n${args.join("\n")}`,
+    );
+  }
+});
+
+Deno.test("rust-src archive validation requires complete safe crate roots", async () => {
+  const archive = new Uint8Array([7]);
+  const complete = [
+    "./core/src/lib.rs",
+    "./alloc/src/lib.rs",
+    "./std/src/lib.rs",
+    "./std/src/sys/pal/unix/mod.rs",
+  ];
+  if (!await validateRustSrcArchive(archive, async () => complete)) {
+    throw new Error("complete rust-src archive was rejected");
+  }
+
+  for (const required of complete.slice(0, 3)) {
+    const missing = complete.filter((entry) => entry !== required);
+    if (await validateRustSrcArchive(archive, async () => missing)) {
+      throw new Error(`archive missing ${required} was accepted`);
+    }
+  }
+
+  if (
+    await validateRustSrcArchive(
+      archive,
+      async () => [...complete, "../../escape"],
+    )
+  ) {
+    throw new Error("archive with unsafe path was accepted");
+  }
+});
 
 Deno.test("prepareCachedArchive caches rust-src without target layout", async () => {
   const calls: string[] = [];

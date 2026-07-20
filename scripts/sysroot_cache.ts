@@ -37,6 +37,80 @@ const DEFAULT_TRIPLE = "wasm32-wasip1";
 const DEFAULT_CACHE_DIR = ".rubrc-cache/sysroot";
 const DEFAULT_WORKSPACE_SYSROOT = "test_workspace_rustc/sysroot";
 const DEFAULT_BASE_URL = "https://oligamiq.github.io/rust_wasm/v0.2.0";
+const REQUIRED_RUST_SRC_ENTRIES = [
+  "core/src/lib.rs",
+  "alloc/src/lib.rs",
+  "std/src/lib.rs",
+] as const;
+
+export function rustSrcToolchainIdentity(
+  rustcVerboseVersion: string,
+  sysroot: string,
+): string {
+  return JSON.stringify({
+    schema: 1,
+    rustc: rustcVerboseVersion.trim(),
+    sysroot,
+  });
+}
+
+export function rustSrcCacheMatchesIdentity(
+  expected: string,
+  cached: string,
+): boolean {
+  return expected === cached.trim();
+}
+
+export function deterministicRustSrcTarArgs(libraryPath: string): string[] {
+  return [
+    "--create",
+    "--file",
+    "-",
+    "--sort=name",
+    "--mtime=@0",
+    "--owner=0",
+    "--group=0",
+    "--numeric-owner",
+    "--mode=u+rwX,go+rX,go-w",
+    "--pax-option=delete=atime,delete=ctime",
+    "--directory",
+    libraryPath,
+    ".",
+  ];
+}
+
+type RustSrcArchiveEntryLister = (
+  archive: Uint8Array,
+) => Promise<readonly string[]>;
+
+async function listRustSrcArchiveEntries(
+  archive: Uint8Array,
+): Promise<readonly string[]> {
+  const buffer = new ArrayBuffer(archive.byteLength);
+  new Uint8Array(buffer).set(archive);
+  const stream = new Blob([buffer]).stream().pipeThrough(
+    new DecompressionStream("brotli"),
+  );
+  const entries: string[] = [];
+  await parseTar(stream, (file) => entries.push(file.name));
+  return entries;
+}
+
+export async function validateRustSrcArchive(
+  archive: Uint8Array,
+  listEntries: RustSrcArchiveEntryLister = listRustSrcArchiveEntries,
+): Promise<boolean> {
+  try {
+    const normalized = new Set<string>();
+    for (const entry of await listEntries(archive)) {
+      const name = validateTarEntryName(entry);
+      if (name !== null) normalized.add(name);
+    }
+    return REQUIRED_RUST_SRC_ENTRIES.every((entry) => normalized.has(entry));
+  } catch {
+    return false;
+  }
+}
 
 export function sysrootCachePaths(
   options: Partial<Omit<SysrootCacheOptions, "deps">> = {},

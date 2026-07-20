@@ -1,6 +1,7 @@
 import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 import { set_fake_worker } from "../page/src/worker_process/vfs_bindings/common.ts";
 import { custom_instantiate } from "../page/src/worker_process/vfs_bindings/inst.ts";
+import { dispatchSpecialInput } from "../page/src/worker_process/lsp_dispatch.ts";
 import {
   encodeLspMessage,
   isLspSession,
@@ -16,6 +17,7 @@ const bindingsDir = new URL(
   "../page/src/worker_process/vfs_bindings/",
   import.meta.url,
 );
+const VFS_INITIAL_MEMORY_PAGES = 1032;
 
 globalThis.onmessage = async (event) => {
   try {
@@ -34,13 +36,6 @@ globalThis.onmessage = async (event) => {
           "worker_background_worker.ts",
           bindingsDir,
         ).href,
-        share_memory: {
-          memory: new WebAssembly.Memory({
-            initial: 1032,
-            maximum: 32775,
-            shared: true,
-          }),
-        },
       },
     );
     await animal.wait_worker_background_worker();
@@ -60,12 +55,16 @@ globalThis.onmessage = async (event) => {
     lspOutputPort.onmessage = (outputEvent) => {
       receiveTerminalWrite(outputEvent.data);
     };
-    const sharedMemory = animal.get_share_memory().memory;
+    const sharedMemory = animal.get_share_memory();
+    const currentMemoryPages = sharedMemory.memory.buffer.byteLength / 65_536;
+    if (currentMemoryPages < VFS_INITIAL_MEMORY_PAGES) {
+      sharedMemory.memory.grow(VFS_INITIAL_MEMORY_PAGES - currentMemoryPages);
+    }
     const root = await custom_instantiate(
       wasm,
       animal.wasiImport,
       animal.wasiThreadImport,
-      animal.get_share_memory(),
+      sharedMemory,
       (index, message: { name?: string; args?: Record<string, unknown> }) => {
         if (message.name === "terminalWrite") {
           const args = message.args as { session_id: number; data: unknown };
@@ -77,11 +76,8 @@ globalThis.onmessage = async (event) => {
     );
     animal.start(root);
 
-    Atomics.store(new Uint32Array(sharedMemory.buffer, 1084028, 1), 0, 1000);
-    Atomics.store(new Uint32Array(sharedMemory.buffer, 1083752, 1), 0, 100);
-    Atomics.store(new Uint32Array(sharedMemory.buffer, 1083756, 1), 0, 100);
-
     root.dispatch(0, 3, 0, 0);
+    root.dispatch(0, 1, 100, 100);
     const rustSrcResult = await waitForRustSrcBootstrap(root, async () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
     });
@@ -89,12 +85,15 @@ globalThis.onmessage = async (event) => {
 
     const send = (message: unknown) => {
       const bytes = encodeLspMessage(message);
-      const ptr = root.allocBuf(bytes.length);
-      try {
-        new Uint8Array(sharedMemory.buffer).set(bytes, ptr);
-        root.dispatch(LSP_SESSION_ID, 6, ptr, bytes.length);
-      } finally {
-        root.freeBuf(ptr, bytes.length);
+      if (
+        !dispatchSpecialInput(root, sharedMemory.memory, {
+          sessionId: LSP_SESSION_ID,
+          data: bytes,
+        })
+      ) {
+        throw new Error(
+          "LSP input was not handled by the supported dispatcher",
+        );
       }
     };
 
