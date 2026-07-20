@@ -23,7 +23,7 @@ async function verify() {
   const allV2Files = allDeploymentFiles.filter(f => !f.startsWith(v1Path));
 
   const CF_LIMIT = 26214400; // 25 MiB
-  for (const file of allDeploymentFiles) {
+  for (const file of allV2Files) {
     const stats = await fs.promises.stat(file);
     if (stats.size > CF_LIMIT) {
       console.error(`Error: File ${file} exceeds Cloudflare Pages absolute limit of 25 MiB. Size is ${stats.size}`);

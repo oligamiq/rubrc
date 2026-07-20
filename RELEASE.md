@@ -1,4 +1,10 @@
 # Release notes
+## v2.0.0 (pre-release)
+- Structural overhaul.
+- Improved execution speed (approx. 61s to 12s).
+- Added support for pipes, multiple sessions, panels, and common commands.
+- Added Cargo support, and library support (if there are no external dependencies and procedural macros).
+
 ## v1.0.0 (2024-11-26)
 - Initial release
 

@@ -332,6 +332,11 @@ async function main() {
 
     await fs.promises.unlink(wasmFile);
 
+    if (fs.existsSync(cachedBrPath)) {
+      await fs.promises.unlink(cachedBrPath);
+      console.log(`Deleted cached ${baseName}.br`);
+    }
+
     console.log(`Successfully compressed and split ${baseName}`);
   } catch (err) {
     console.error("Compression/splitting failed:", err);
@@ -343,6 +348,31 @@ async function main() {
       try { await fs.promises.unlink(tmp); } catch(e) {}
     }
     process.exit(1);
+  }
+
+  // Fetch v1 snapshot from git
+  const v1Dir = path.join(TARGET_DIR, 'v1');
+  if (!fs.existsSync(v1Dir)) {
+    console.log(`Fetching v1 snapshot from git (origin/v1-dist)...`);
+    await fs.promises.mkdir(v1Dir, { recursive: true });
+    
+    const { exec } = await import('node:child_process');
+    const util = await import('node:util');
+    const execPromise = util.promisify(exec);
+    
+    try {
+      await execPromise('git fetch --quiet --no-tags --depth=1 origin refs/heads/v1-dist');
+      await execPromise(`git archive --format=tar FETCH_HEAD | tar -xf - -C "${v1Dir}"`);
+      const v1Index = path.join(v1Dir, 'index.html');
+      const st = await fs.promises.stat(v1Index).catch(() => null);
+      if (!st || !st.isFile()) {
+        throw new Error("v1 snapshot is missing index.html");
+      }
+      console.log(`Successfully extracted v1-dist to v1/`);
+    } catch (error) {
+      console.error(`Failed to fetch and extract v1-dist: ${error.message}`);
+      process.exit(1);
+    }
   }
 }
 

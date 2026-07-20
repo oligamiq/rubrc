@@ -7,7 +7,7 @@ This have some bottlenecks, like the lack of thread spawn is very slow.
 
 Currently, the targets for which executable files can be generated are `wasm32-wasip1` and `x86_64-unknown-linux-musl`. Other targets fail during the linking process. If you have any information, we would greatly appreciate it if you could share it in an issue.
 
-Demo: [Rubrc](https://oligamiq.github.io/rubrc/)
+Demo: [Rubrc](https://rubrc.pages.dev/) (v1 is available at [Rubrc v1](https://rubrc.pages.dev/v1/))
 
 # Development
 I am currently developing tools for rubrc acceleration. Please check here for the development status. The estimated completion date is April 2026.
