@@ -6,3 +6,5 @@ page/src/worker_process/vfs_bindings/vfs.core.wasm
 /test_workspace_rustc/sysroot/
 .rubrc-cache/
 /.worktrees/
+dist-bak
+dist-bak2
