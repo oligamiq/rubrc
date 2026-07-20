@@ -1,8 +1,10 @@
+import type { VfsReadyResult } from "./vfs_readiness.ts";
+
 export type DisposableLspSession = { dispose(): Promise<void> };
 
 export class LspStartGate<TMonaco> {
   private monaco: TMonaco | undefined;
-  private vfsReady = false;
+  private vfsResult: VfsReadyResult | undefined;
   private startPromise: Promise<DisposableLspSession> | undefined;
   private session: DisposableLspSession | undefined;
   private disposed = false;
@@ -17,8 +19,9 @@ export class LspStartGate<TMonaco> {
     this.tryStart();
   }
 
-  setVfsReady(): void {
-    this.vfsReady = true;
+  setVfsResult(result: VfsReadyResult): void {
+    if (this.vfsResult !== undefined) return;
+    this.vfsResult = result;
     this.tryStart();
   }
 
@@ -45,7 +48,10 @@ export class LspStartGate<TMonaco> {
   }
 
   private tryStart(): void {
-    if (this.disposed || this.startPromise || !this.vfsReady || !this.monaco) return;
+    if (
+      this.disposed || this.startPromise || this.vfsResult?.ok !== true ||
+      !this.monaco
+    ) return;
     this.startPromise = this.start(this.monaco).then(async (session) => {
       if (this.disposed) await session.dispose();
       else this.session = session;

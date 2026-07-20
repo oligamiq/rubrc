@@ -8,6 +8,7 @@ import { triples } from "./sysroot";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { LspStartGate } from "./lsp_start_gate";
 import { startRustLspClient } from "./rust_lsp_client";
+import type { VfsReadyResult } from "./vfs_readiness";
 
 const Select = lazy(async () => {
   const selector = import("@thisbeyond/solid-select");
@@ -19,7 +20,7 @@ const Select = lazy(async () => {
 });
 
 const MonacoEditor = lazy(() =>
-  import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor })),
+  import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor }))
 );
 
 type Pane = {
@@ -44,14 +45,21 @@ const App = (props: {
     | undefined;
 
   const [triple, setTriple] = createSignal<string | undefined>(undefined);
-  const [panes, setPanes] = createSignal<Pane[]>([{ id: 1, tabs: [0], activeTab: 0 }]);
+  const [panes, setPanes] = createSignal<Pane[]>([{
+    id: 1,
+    tabs: [0],
+    activeTab: 0,
+  }]);
   const [nextPaneId, setNextPaneId] = createSignal(2);
   const [nextSessionId, setNextSessionId] = createSignal(1);
-  const [draggedTab, setDraggedTab] = createSignal<{ paneId: number, sessionId: number } | null>(null);
+  const [draggedTab, setDraggedTab] = createSignal<
+    { paneId: number; sessionId: number } | null
+  >(null);
   const [isReady, setIsReady] = createSignal(false);
-  const sharedReady = new SharedObject(() => {
+  const sharedReady = new SharedObject((result: VfsReadyResult) => {
     setIsReady(true);
-    lspGate.setVfsReady();
+    lspGate.setVfsResult(result);
+    if (!result.ok) console.error(result.error);
   }, props.ctx.vfs_ready_id);
 
   onCleanup(() => {
@@ -59,19 +67,26 @@ const App = (props: {
     void lspGate.dispose();
   });
 
-  const close_session_fn = new SharedObjectRef(props.ctx.close_session_id).proxy<
-    (args: { sessionId: number }) => Promise<void>
-  >();
+  const close_session_fn = new SharedObjectRef(props.ctx.close_session_id)
+    .proxy<
+      (args: { sessionId: number }) => Promise<void>
+    >();
 
   const addTerminalToPane = (paneId: number) => {
     const newSessionId = nextSessionId();
     setNextSessionId(newSessionId + 1);
-    setPanes(panes().map(p => {
-      if (p.id === paneId) {
-        return { ...p, tabs: [...p.tabs, newSessionId], activeTab: newSessionId };
-      }
-      return p;
-    }));
+    setPanes(
+      panes().map((p) => {
+        if (p.id === paneId) {
+          return {
+            ...p,
+            tabs: [...p.tabs, newSessionId],
+            activeTab: newSessionId,
+          };
+        }
+        return p;
+      }),
+    );
   };
 
   const splitPane = (paneId: number) => {
@@ -81,11 +96,15 @@ const App = (props: {
     setNextPaneId(newPaneId + 1);
 
     const currentPanes = panes();
-    const paneIndex = currentPanes.findIndex(p => p.id === paneId);
+    const paneIndex = currentPanes.findIndex((p) => p.id === paneId);
     if (paneIndex === -1) return;
 
     const newPanes = [...currentPanes];
-    newPanes.splice(paneIndex + 1, 0, { id: newPaneId, tabs: [newSessionId], activeTab: newSessionId });
+    newPanes.splice(paneIndex + 1, 0, {
+      id: newPaneId,
+      tabs: [newSessionId],
+      activeTab: newSessionId,
+    });
     setPanes(newPanes);
   };
 
@@ -95,20 +114,24 @@ const App = (props: {
 
     close_session_fn({ sessionId }).catch(console.error);
 
-    setPanes(panes().map(p => {
-      if (p.id === paneId) {
-        const newTabs = p.tabs.filter(t => t !== sessionId);
-        const newActive = p.activeTab === sessionId
-          ? (newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1)
-          : p.activeTab;
-        return { ...p, tabs: newTabs, activeTab: newActive };
-      }
-      return p;
-    }).filter(p => p.tabs.length > 0 || p.id === panes()[0].id));
+    setPanes(
+      panes().map((p) => {
+        if (p.id === paneId) {
+          const newTabs = p.tabs.filter((t) => t !== sessionId);
+          const newActive = p.activeTab === sessionId
+            ? (newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1)
+            : p.activeTab;
+          return { ...p, tabs: newTabs, activeTab: newActive };
+        }
+        return p;
+      }).filter((p) => p.tabs.length > 0 || p.id === panes()[0].id),
+    );
   };
 
   const setActiveTab = (paneId: number, sessionId: number) => {
-    setPanes(panes().map(p => p.id === paneId ? { ...p, activeTab: sessionId } : p));
+    setPanes(
+      panes().map((p) => p.id === paneId ? { ...p, activeTab: sessionId } : p),
+    );
   };
 
   const onDragStart = (e: DragEvent, paneId: number, sessionId: number) => {
@@ -124,19 +147,25 @@ const App = (props: {
     if (!dragged) return;
     if (dragged.paneId === targetPaneId) return;
 
-    setPanes(panes().map(p => {
-      if (p.id === dragged.paneId) {
-        const newTabs = p.tabs.filter(t => t !== dragged.sessionId);
-        const newActive = p.activeTab === dragged.sessionId
-          ? (newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1)
-          : p.activeTab;
-        return { ...p, tabs: newTabs, activeTab: newActive };
-      }
-      if (p.id === targetPaneId) {
-        return { ...p, tabs: [...p.tabs, dragged.sessionId], activeTab: dragged.sessionId };
-      }
-      return p;
-    }).filter(p => p.tabs.length > 0 || p.id === panes()[0].id));
+    setPanes(
+      panes().map((p) => {
+        if (p.id === dragged.paneId) {
+          const newTabs = p.tabs.filter((t) => t !== dragged.sessionId);
+          const newActive = p.activeTab === dragged.sessionId
+            ? (newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1)
+            : p.activeTab;
+          return { ...p, tabs: newTabs, activeTab: newActive };
+        }
+        if (p.id === targetPaneId) {
+          return {
+            ...p,
+            tabs: [...p.tabs, dragged.sessionId],
+            activeTab: dragged.sessionId,
+          };
+        }
+        return p;
+      }).filter((p) => p.tabs.length > 0 || p.id === panes()[0].id),
+    );
 
     setDraggedTab(null);
   };
@@ -180,7 +209,10 @@ const App = (props: {
         <div class="flex">
           <For each={panes()}>
             {(pane, pIndex) => (
-              <div class={`flex-1 flex bg-gray-800 overflow-x-auto min-w-0 ${pIndex() > 0 ? 'border-l border-gray-700' : ''}`}
+              <div
+                class={`flex-1 flex bg-gray-800 overflow-x-auto min-w-0 ${
+                  pIndex() > 0 ? "border-l border-gray-700" : ""
+                }`}
                 onDragOver={onDragOver}
                 onDrop={(e) => onDrop(e, pane.id)}
               >
@@ -198,7 +230,9 @@ const App = (props: {
                     >
                       <button
                         class={`px-4 py-2 text-sm focus:outline-none ${
-                          pane.activeTab === sessionId ? "text-green-400" : "text-gray-400"
+                          pane.activeTab === sessionId
+                            ? "text-green-400"
+                            : "text-gray-400"
                         }`}
                       >
                         Session {sessionId}
@@ -247,35 +281,39 @@ const App = (props: {
 
         <div
           class="flex-1 min-h-0 min-w-0 grid overflow-hidden"
-          style={{ "grid-template-columns": `repeat(${panes().length}, minmax(0, 1fr))` }}
+          style={{
+            "grid-template-columns":
+              `repeat(${panes().length}, minmax(0, 1fr))`,
+          }}
         >
           <For each={allSessionIds()}>
             {(sessionId) => {
-               const paneIndex = () => panes().findIndex(p => p.tabs.includes(sessionId));
-               const isActive = () => {
-                 const pIdx = paneIndex();
-                 if (pIdx === -1) return false;
-                 return panes()[pIdx].activeTab === sessionId;
-               };
+              const paneIndex = () =>
+                panes().findIndex((p) => p.tabs.includes(sessionId));
+              const isActive = () => {
+                const pIdx = paneIndex();
+                if (pIdx === -1) return false;
+                return panes()[pIdx].activeTab === sessionId;
+              };
 
-               return (
-                 <div
-                   class="relative w-full h-full min-w-0 min-h-0 overflow-hidden"
-                   style={{
-                     "grid-column": (paneIndex() + 1).toString(),
-                     "grid-row": "1",
-                     "display": isActive() ? "block" : "none"
-                   }}
-                 >
-                   <SetupMyTerminal
-                     ctx={props.ctx}
-                     sessionId={sessionId}
-                     isMain={sessionId === 0}
-                     isActive={isActive()}
-                     callback={sessionId === 0 ? props.callback : undefined}
-                   />
-                 </div>
-               )
+              return (
+                <div
+                  class="relative w-full h-full min-w-0 min-h-0 overflow-hidden"
+                  style={{
+                    "grid-column": (paneIndex() + 1).toString(),
+                    "grid-row": "1",
+                    "display": isActive() ? "block" : "none",
+                  }}
+                >
+                  <SetupMyTerminal
+                    ctx={props.ctx}
+                    sessionId={sessionId}
+                    isMain={sessionId === 0}
+                    isActive={isActive()}
+                    callback={sessionId === 0 ? props.callback : undefined}
+                  />
+                </div>
+              );
             }}
           </For>
         </div>

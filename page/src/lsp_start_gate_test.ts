@@ -10,16 +10,20 @@ Deno.test("gate starts exactly once after both readiness states", async () => {
     let disposals = 0;
     const gate = new LspStartGate<object>(async () => {
       starts++;
-      return { async dispose() { disposals++; } };
+      return {
+        async dispose() {
+          disposals++;
+        },
+      };
     });
     if (order === "monaco-first") {
       gate.setMonaco({});
-      gate.setVfsReady();
+      gate.setVfsResult({ ok: true });
     } else {
-      gate.setVfsReady();
+      gate.setVfsResult({ ok: true });
       gate.setMonaco({});
     }
-    gate.setVfsReady();
+    gate.setVfsResult({ ok: true });
     gate.setMonaco({});
     await gate.started();
     assert(starts === 1, `${order} started ${starts} times`);
@@ -36,7 +40,7 @@ Deno.test("gate never starts after disposal", async () => {
   });
   await gate.dispose();
   gate.setMonaco({});
-  gate.setVfsReady();
+  gate.setVfsResult({ ok: true });
   assert(starts === 0, "disposed gate started");
 });
 
@@ -47,10 +51,22 @@ Deno.test("failed startup is not retried within the same mount", async () => {
     throw new Error("start failed");
   });
   gate.setMonaco({});
-  gate.setVfsReady();
+  gate.setVfsResult({ ok: true });
   await gate.started()?.catch(() => undefined);
   gate.setMonaco({});
-  gate.setVfsReady();
+  gate.setVfsResult({ ok: true });
   await gate.started()?.catch(() => undefined);
   assert(starts === 1, `failed startup retried ${starts} times`);
+});
+
+Deno.test("failed VFS readiness settles without starting LSP", () => {
+  let starts = 0;
+  const gate = new LspStartGate<object>(async () => {
+    starts++;
+    return { async dispose() {} };
+  });
+  gate.setMonaco({});
+  gate.setVfsResult({ ok: false, error: "rust-src failed" });
+  gate.setVfsResult({ ok: true });
+  assert(starts === 0, "failed VFS bootstrap started LSP");
 });

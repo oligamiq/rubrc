@@ -7,6 +7,10 @@ import { write_data } from "../write_data";
 import { custom_instantiate } from "./vfs_bindings/inst";
 import { set_fake_worker } from "./vfs_bindings/common";
 import { get_brotli_decompress_stream } from "../../../lib/src/brotli_stream";
+import {
+  type VfsReadyResult,
+  waitForRustSrcBootstrap,
+} from "../vfs_readiness.ts";
 
 import thread_spawn_path from "./vfs_bindings/thread_spawn.ts?worker&url";
 import worker_background_worker_url from "./vfs_bindings/worker_background_worker.ts?worker&url";
@@ -109,34 +113,59 @@ globalThis.addEventListener("message", async (event) => {
 
       const manifestRes = await fetch(manifestUrl.href);
       if (!manifestRes.ok) {
-        throw new Error(`Failed to fetch manifest: ${manifestUrl.href} ${manifestRes.status} ${manifestRes.statusText}`);
+        throw new Error(
+          `Failed to fetch manifest: ${manifestUrl.href} ${manifestRes.status} ${manifestRes.statusText}`,
+        );
       }
       const manifest = await manifestRes.json();
 
-      if (manifest.version !== 1 || manifest.encoding !== "br" || !manifest.parts || !Array.isArray(manifest.parts) || manifest.parts.length === 0) {
+      if (
+        manifest.version !== 1 || manifest.encoding !== "br" ||
+        !manifest.parts || !Array.isArray(manifest.parts) ||
+        manifest.parts.length === 0
+      ) {
         throw new Error(`Invalid manifest at ${manifestUrl.href}`);
       }
-      if (typeof manifest.originalFile !== 'string' || !/^vfs\.core-.*\.wasm$/.test(manifest.originalFile) || manifest.originalFile.includes('/') || manifest.originalFile.includes('\\') || manifest.originalFile.includes('..')) {
+      if (
+        typeof manifest.originalFile !== "string" ||
+        !/^vfs\.core-.*\.wasm$/.test(manifest.originalFile) ||
+        manifest.originalFile.includes("/") ||
+        manifest.originalFile.includes("\\") ||
+        manifest.originalFile.includes("..")
+      ) {
         throw new Error(`Invalid originalFile in manifest`);
       }
       if (!manifestUrl.pathname.endsWith(`/${manifest.originalFile}.br.json`)) {
         throw new Error(`Manifest URL basename does not match originalFile`);
       }
-      if (!Number.isSafeInteger(manifest.originalSize) || manifest.originalSize <= 0) {
+      if (
+        !Number.isSafeInteger(manifest.originalSize) ||
+        manifest.originalSize <= 0
+      ) {
         throw new Error(`Invalid originalSize in manifest`);
       }
-      if (!Number.isSafeInteger(manifest.compressedSize) || manifest.compressedSize <= 0) {
+      if (
+        !Number.isSafeInteger(manifest.compressedSize) ||
+        manifest.compressedSize <= 0
+      ) {
         throw new Error(`Invalid compressedSize in manifest`);
       }
 
       let totalPartSize = 0;
       for (let i = 0; i < manifest.parts.length; i++) {
         const part = manifest.parts[i];
-        const expectedPartFile = `${manifest.originalFile}.br.part-${i.toString().padStart(3, "0")}`;
+        const expectedPartFile = `${manifest.originalFile}.br.part-${
+          i.toString().padStart(3, "0")
+        }`;
         if (part.file !== expectedPartFile) {
-          throw new Error(`Invalid part file in manifest: expected ${expectedPartFile}, got ${part.file}`);
+          throw new Error(
+            `Invalid part file in manifest: expected ${expectedPartFile}, got ${part.file}`,
+          );
         }
-        if (!Number.isSafeInteger(part.size) || part.size <= 0 || part.size > 25165824) {
+        if (
+          !Number.isSafeInteger(part.size) || part.size <= 0 ||
+          part.size > 25165824
+        ) {
           throw new Error(`Invalid part size in manifest`);
         }
         totalPartSize += part.size;
@@ -151,7 +180,9 @@ globalThis.addEventListener("message", async (event) => {
       if (vfs_wasm) {
         await terminal({
           sessionId: 0,
-          data: new TextEncoder().encode(`[VFS] Loaded compiled Wasm from local cache.\r\n`),
+          data: new TextEncoder().encode(
+            `[VFS] Loaded compiled Wasm from local cache.\r\n`,
+          ),
         });
       } else {
         const total = manifest.compressedSize;
@@ -168,7 +199,9 @@ globalThis.addEventListener("message", async (event) => {
               const partUrl = new URL(part.file, manifestUrl.href).href;
               const partRes = await fetch(partUrl);
               if (!partRes.ok) {
-                throw new Error(`Failed to fetch part ${partIndex} (${partUrl}): ${partRes.status} ${partRes.statusText}`);
+                throw new Error(
+                  `Failed to fetch part ${partIndex} (${partUrl}): ${partRes.status} ${partRes.statusText}`,
+                );
               }
               const reader = partRes.body?.getReader();
               if (!reader) throw new Error("No body on part response");
@@ -180,10 +213,15 @@ globalThis.addEventListener("message", async (event) => {
 
                 partLoaded += value.byteLength;
                 loaded += value.byteLength;
-                let progressMsg = `\r\x1b[K[VFS] Fetching and streaming compilation: ${(loaded / 1024 / 1024).toFixed(2)} MB`;
+                let progressMsg =
+                  `\r\x1b[K[VFS] Fetching and streaming compilation: ${
+                    (loaded / 1024 / 1024).toFixed(2)
+                  } MB`;
                 if (total > 0) {
                   const percent = Math.round((loaded / total) * 100);
-                  progressMsg += ` / ${(total / 1024 / 1024).toFixed(2)} MB (${percent}%)`;
+                  progressMsg += ` / ${
+                    (total / 1024 / 1024).toFixed(2)
+                  } MB (${percent}%)`;
                 }
                 await terminal({
                   sessionId: 0,
@@ -192,16 +230,22 @@ globalThis.addEventListener("message", async (event) => {
                 await writer.write(value);
               }
               if (partLoaded !== part.size) {
-                throw new Error(`Part size mismatch for ${part.file}: loaded ${partLoaded}, expected ${part.size}`);
+                throw new Error(
+                  `Part size mismatch for ${part.file}: loaded ${partLoaded}, expected ${part.size}`,
+                );
               }
               partIndex++;
             }
             if (loaded !== manifest.compressedSize) {
-              throw new Error(`Total size mismatch: loaded ${loaded}, expected ${manifest.compressedSize}`);
+              throw new Error(
+                `Total size mismatch: loaded ${loaded}, expected ${manifest.compressedSize}`,
+              );
             }
             await terminal({
               sessionId: 0,
-              data: new TextEncoder().encode(`\r\n[VFS] Finalizing compilation...\r\n`),
+              data: new TextEncoder().encode(
+                `\r\n[VFS] Finalizing compilation...\r\n`,
+              ),
             });
             await writer.close();
           } catch (e) {
@@ -214,19 +258,26 @@ globalThis.addEventListener("message", async (event) => {
           transform(chunk, controller) {
             decompressedLoaded += chunk.byteLength;
             if (decompressedLoaded > manifest.originalSize) {
-              controller.error(new Error("Decompressed size exceeds originalSize"));
+              controller.error(
+                new Error("Decompressed size exceeds originalSize"),
+              );
               return;
             }
             controller.enqueue(chunk);
           },
           flush(controller) {
             if (decompressedLoaded !== manifest.originalSize) {
-              controller.error(new Error(`Decompressed size (${decompressedLoaded}) does not match originalSize (${manifest.originalSize})`));
+              controller.error(
+                new Error(
+                  `Decompressed size (${decompressedLoaded}) does not match originalSize (${manifest.originalSize})`,
+                ),
+              );
             }
-          }
+          },
         });
 
-        const decompressedReadable = readable.pipeThrough(decompressStream).pipeThrough(validationStream);
+        const decompressedReadable = readable.pipeThrough(decompressStream)
+          .pipeThrough(validationStream);
 
         vfs_wasm = await WebAssembly.compileStreaming(
           new Response(decompressedReadable, {
@@ -243,10 +294,11 @@ globalThis.addEventListener("message", async (event) => {
     } else {
       let response = await fetch(vfs_wasm_path);
       if (!response.ok) {
-        throw new Error(`Failed to fetch ${vfs_wasm_path}: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `Failed to fetch ${vfs_wasm_path}: ${response.status} ${response.statusText}`,
+        );
       }
-      const etag =
-        response.headers.get("etag") ||
+      const etag = response.headers.get("etag") ||
         response.headers.get("last-modified") ||
         "unknown";
       const cacheKey = `${vfs_wasm_path}?etag=${etag}`;
@@ -278,10 +330,15 @@ globalThis.addEventListener("message", async (event) => {
               const { done, value } = await reader.read();
               if (done) break;
               loaded += value.byteLength;
-              let progressMsg = `\r\x1b[K[VFS] Fetching and streaming compilation: ${(loaded / 1024 / 1024).toFixed(2)} MB`;
+              let progressMsg =
+                `\r\x1b[K[VFS] Fetching and streaming compilation: ${
+                  (loaded / 1024 / 1024).toFixed(2)
+                } MB`;
               if (total > 0) {
                 const percent = Math.round((loaded / total) * 100);
-                progressMsg += ` / ${(total / 1024 / 1024).toFixed(2)} MB (${percent}%)`;
+                progressMsg += ` / ${
+                  (total / 1024 / 1024).toFixed(2)
+                } MB (${percent}%)`;
               }
               await terminal({
                 sessionId: 0,
@@ -362,8 +419,12 @@ globalThis.addEventListener("message", async (event) => {
         routeTerminalWrite(
           unknown.args.session_id,
           unknown.args.data,
-          (data) => { void lsp({ data: data as any }); },
-          (sessionId, data) => { void terminal({ sessionId, data: data as any }); },
+          (data) => {
+            void lsp({ data: data as any });
+          },
+          (sessionId, data) => {
+            void terminal({ sessionId, data: data as any });
+          },
         );
       } else {
         return animal.call_unknown_fn(idx, unknown);
@@ -384,6 +445,7 @@ globalThis.addEventListener("message", async (event) => {
   >();
   const { cols, rows } = await get_terminal_size();
   vfs_root.dispatch(0, 1, cols, rows);
+  const rustSrcResult = await waitForRustSrcBootstrap(vfs_root);
 
   shared.push(
     new SharedObject(({ sessionId }: { sessionId: number }) => {
@@ -429,7 +491,9 @@ globalThis.addEventListener("message", async (event) => {
         try {
           for (const char of data) {
             const codePoint = char.codePointAt(0);
-            if (codePoint !== undefined) vfs_root.dispatch(sessionId, 0, codePoint, 0);
+            if (codePoint !== undefined) {
+              vfs_root.dispatch(sessionId, 0, codePoint, 0);
+            }
           }
         } catch (error) {
           void terminal({
@@ -481,7 +545,7 @@ globalThis.addEventListener("message", async (event) => {
   );
 
   const vfs_ready = new SharedObjectRef(ctx.vfs_ready_id).proxy<
-    () => Promise<void>
+    (result: VfsReadyResult) => Promise<void>
   >();
-  vfs_ready().catch(console.error);
+  await vfs_ready(rustSrcResult);
 });
