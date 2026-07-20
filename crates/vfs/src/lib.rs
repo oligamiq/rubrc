@@ -446,7 +446,8 @@ impl Guest for Wit {
                     crate::shell::vfs_set_current_session_id(LSP_SESSION_ID);
                     crate::command::set_lsp_opt_args(&["rust-analyzer"]);
                     MEMORY_MANAGER.ensure_once::<lsp_opt>(&LSP_RESERVE_ONCE, LSP_CONFIG);
-                    lsp_opt::_start();
+                    lsp_opt::_reset();
+                    lsp_opt::_main();
                 });
             }
         }
