@@ -54,6 +54,39 @@ export function sysrootCachePaths(
   };
 }
 
+export async function prepareCachedArchive(
+  options: Pick<
+    Partial<SysrootCacheOptions>,
+    "triple" | "cacheDir" | "url" | "deps"
+  > = {},
+): Promise<{
+  archive: Uint8Array;
+  source: SysrootCacheSource;
+  cacheArchive: string;
+  url: string;
+}> {
+  const triple = options.triple ?? DEFAULT_TRIPLE;
+  const cacheDir = options.cacheDir ?? DEFAULT_CACHE_DIR;
+  const cacheArchive = `${cacheDir}/${triple}.tar.br`;
+  const url = options.url ?? `${DEFAULT_BASE_URL}/${triple}.tar.br`;
+  const deps = options.deps ?? denoSysrootCacheDeps;
+
+  await deps.mkdir(cacheDir);
+  if (await deps.exists(cacheArchive)) {
+    return {
+      archive: await deps.readFile(cacheArchive),
+      source: "cache",
+      cacheArchive,
+      url,
+    };
+  }
+
+  const archive = await deps.fetchBytes(url);
+  await deps.writeFile(`${cacheArchive}.tmp`, archive);
+  await deps.rename(`${cacheArchive}.tmp`, cacheArchive);
+  return { archive, source: "download", cacheArchive, url };
+}
+
 export async function prepareCachedSysroot(
   options: Partial<SysrootCacheOptions> = {},
 ): Promise<SysrootCacheResult> {
@@ -61,19 +94,7 @@ export async function prepareCachedSysroot(
   const deps = options.deps ?? denoSysrootCacheDeps;
 
   await deps.remove(paths.expandedSysroot);
-  await deps.mkdir(paths.cacheDir);
-
-  let source: SysrootCacheSource;
-  let archive: Uint8Array;
-  if (await deps.exists(paths.cacheArchive)) {
-    source = "cache";
-    archive = await deps.readFile(paths.cacheArchive);
-  } else {
-    source = "download";
-    archive = await deps.fetchBytes(paths.url);
-    await deps.writeFile(`${paths.cacheArchive}.tmp`, archive);
-    await deps.rename(`${paths.cacheArchive}.tmp`, paths.cacheArchive);
-  }
+  const { archive, source } = await prepareCachedArchive(options);
 
   await deps.mkdir(paths.sysrootLibDir);
   await deps.extractTarBr(archive, paths.sysrootLibDir);

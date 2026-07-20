@@ -1,9 +1,43 @@
 import {
+  prepareCachedArchive,
   prepareCachedSysroot,
   type SysrootCacheDeps,
   sysrootCachePaths,
   validateTarEntryName,
 } from "./sysroot_cache.ts";
+
+Deno.test("prepareCachedArchive caches rust-src without target layout", async () => {
+  const calls: string[] = [];
+  const result = await prepareCachedArchive({
+    triple: "rust-src",
+    cacheDir: ".cache/sysroot",
+    deps: {
+      exists: async () => false,
+      remove: async () => {},
+      mkdir: async (path) => {
+        calls.push(`mkdir:${path}`);
+      },
+      readFile: async () => new Uint8Array(),
+      writeFile: async (path) => {
+        calls.push(`write:${path}`);
+      },
+      rename: async (from, to) => {
+        calls.push(`rename:${from}:${to}`);
+      },
+      fetchBytes: async () => new Uint8Array([7]),
+      extractTarBr: async () => {
+        throw new Error("must not extract");
+      },
+    },
+  });
+  if (result.cacheArchive !== ".cache/sysroot/rust-src.tar.br") {
+    throw new Error("wrong cache path");
+  }
+  if (result.archive[0] !== 7) throw new Error("wrong archive bytes");
+  if (calls.some((call) => call.startsWith("extract:"))) {
+    throw new Error("archive was extracted");
+  }
+});
 
 Deno.test("sysrootCachePaths uses repo-local cache and workspace paths", () => {
   const paths = sysrootCachePaths();
