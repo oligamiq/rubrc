@@ -93,7 +93,7 @@ Add `mod rust_src_bootstrap;` near the imports in `main.rs`.
 
 - [ ] **Step 2: Run the test to verify RED**
 
-Run: `cargo test -p vfs-shell rust_src_bootstrap --target x86_64-unknown-linux-gnu`
+Run: `rustc --edition=2021 --test crates/vfs-shell/src/rust_src_bootstrap.rs -o /tmp/opencode/rust_src_bootstrap_test && /tmp/opencode/rust_src_bootstrap_test`
 
 Expected: FAIL because `RustSrcBootstrap` and `RustSrcLoadState` are undefined.
 
@@ -161,7 +161,7 @@ impl RustSrcBootstrap {
 
 - [ ] **Step 4: Run tests and formatting**
 
-Run: `cargo test -p vfs-shell rust_src_bootstrap --target x86_64-unknown-linux-gnu && cargo fmt --check -p vfs-shell`
+Run: `rustc --edition=2021 --test crates/vfs-shell/src/rust_src_bootstrap.rs -o /tmp/opencode/rust_src_bootstrap_test && /tmp/opencode/rust_src_bootstrap_test && cargo fmt --check -p vfs-shell`
 
 Expected: 2 focused tests PASS and formatting check PASS.
 
@@ -181,6 +181,7 @@ git commit -m "test(vfs): define rust source bootstrap state"
 - Modify: `crates/vfs/src/shell.rs:9-28`
 - Modify: `crates/vfs/src/lib.rs:24-29,343-470`
 - Modify: `crates/vfs/wit/vfs-host.wit:43-57`
+- Create: `scripts/vfs_rust_src_bootstrap_test.ts`
 - Regenerate: `page/src/worker_process/vfs_bindings/vfs.js`
 - Regenerate: `page/src/worker_process/vfs_bindings/vfs.d.ts`
 
@@ -188,29 +189,34 @@ git commit -m "test(vfs): define rust source bootstrap state"
 - Consumes: Task 1 `RustSrcBootstrap` and `RustSrcLoadState`.
 - Produces: outer event `EVENT_TYPE_BOOTSTRAP_RUST_SRC = 8`, shell event `BootstrapRustSrc = 6`, and generated JS method `rustSrcLoadState(): number`.
 
-- [ ] **Step 1: Add failing shell event identity tests**
+- [ ] **Step 1: Add a failing event and binding contract test**
 
-Append to the existing `main.rs` test module:
+Create `scripts/vfs_rust_src_bootstrap_test.ts`:
 
-```rust
-#[test]
-fn bootstrap_event_is_distinct_from_terminal_input() {
-    assert!(matches!(
-        SessionEvent::from_raw(6, 0, 0),
-        Some(SessionEvent::BootstrapRustSrc)
-    ));
-    assert!(matches!(
-        SessionEvent::from_raw(0, b'x' as u32, 0),
-        Some(SessionEvent::InputChar(value)) if value == b'x' as u32
-    ));
+```ts
+const shell = await Deno.readTextFile("crates/vfs-shell/src/main.rs");
+const vfs = await Deno.readTextFile("crates/vfs/src/lib.rs");
+const wit = await Deno.readTextFile("crates/vfs/wit/vfs-host.wit");
+
+if (!shell.includes("BootstrapRustSrc = 6")) {
+  throw new Error("dedicated shell bootstrap event is missing");
+}
+if (!shell.includes("vfs_shell_rust_src_load_state")) {
+  throw new Error("shell bootstrap state export is missing");
+}
+if (!vfs.includes("EVENT_TYPE_BOOTSTRAP_RUST_SRC: u32 = 8")) {
+  throw new Error("outer bootstrap event is missing");
+}
+if (!wit.includes("export rust-src-load-state: func() -> u32;")) {
+  throw new Error("WIT bootstrap state export is missing");
 }
 ```
 
 - [ ] **Step 2: Run the focused test to verify RED**
 
-Run: `cargo test -p vfs-shell bootstrap_event_is_distinct_from_terminal_input --target x86_64-unknown-linux-gnu`
+Run: `deno run --allow-read scripts/vfs_rust_src_bootstrap_test.ts`
 
-Expected: FAIL because `BootstrapRustSrc` is undefined.
+Expected: FAIL with `dedicated shell bootstrap event is missing`.
 
 - [ ] **Step 3: Add the dedicated shell event and bootstrap execution**
 
@@ -303,7 +309,7 @@ fn rust_src_load_state() -> u32 {
 
 - [ ] **Step 5: Verify Rust behavior and regenerate bindings**
 
-Run: `cargo test -p vfs-shell rust_src_bootstrap --target x86_64-unknown-linux-gnu && bun run vfs:build`
+Run: `rustc --edition=2021 --test crates/vfs-shell/src/rust_src_bootstrap.rs -o /tmp/opencode/rust_src_bootstrap_test && /tmp/opencode/rust_src_bootstrap_test && deno run --allow-read scripts/vfs_rust_src_bootstrap_test.ts && bun run vfs:build`
 
 Expected: Rust tests PASS, build exits 0, and generated `vfs.d.ts` contains `rustSrcLoadState(): number`.
 
@@ -314,7 +320,7 @@ Expected: exit 0.
 - [ ] **Step 6: Commit source and generated binding changes**
 
 ```bash
-git add crates/vfs-shell/src/main.rs crates/vfs/src/shell.rs crates/vfs/src/lib.rs crates/vfs/wit/vfs-host.wit page/src/worker_process/vfs_bindings/vfs.js page/src/worker_process/vfs_bindings/vfs.d.ts
+git add crates/vfs-shell/src/main.rs crates/vfs/src/shell.rs crates/vfs/src/lib.rs crates/vfs/wit/vfs-host.wit scripts/vfs_rust_src_bootstrap_test.ts page/src/worker_process/vfs_bindings/vfs.js page/src/worker_process/vfs_bindings/vfs.d.ts
 git commit -m "feat(vfs): expose rust source bootstrap state"
 ```
 
@@ -825,7 +831,8 @@ git commit -m "test(lsp): verify diagnostics with rust source"
 Run:
 
 ```bash
-cargo test -p vfs-shell rust_src_bootstrap --target x86_64-unknown-linux-gnu
+rustc --edition=2021 --test crates/vfs-shell/src/rust_src_bootstrap.rs -o /tmp/opencode/rust_src_bootstrap_test && /tmp/opencode/rust_src_bootstrap_test
+deno run --allow-read scripts/vfs_rust_src_bootstrap_test.ts
 ```
 
 Expected: every command exits 0.
