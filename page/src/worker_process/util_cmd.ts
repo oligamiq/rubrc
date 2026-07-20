@@ -13,7 +13,7 @@ import worker_background_worker_url from "./vfs_bindings/worker_background_worke
 
 await set_fake_worker();
 
-const LSP_SESSION_ID = 0xffffffff;
+import { dispatchSpecialInput, routeTerminalWrite } from "./lsp_dispatch.ts";
 
 const shared: SharedObject[] = [];
 
@@ -359,18 +359,12 @@ globalThis.addEventListener("message", async (event) => {
     animal.get_share_memory(),
     (idx, unknown: any) => {
       if (unknown.name === "terminalWrite") {
-        console.log(
-          `[Worker] VFS terminalWrite: session=${unknown.args.session_id}, len=${unknown.args.data.length}`,
+        routeTerminalWrite(
+          unknown.args.session_id,
+          unknown.args.data,
+          (data) => { void lsp({ data: data as any }); },
+          (sessionId, data) => { void terminal({ sessionId, data: data as any }); },
         );
-        if (unknown.args.session_id === LSP_SESSION_ID) {
-          console.log("[Worker] Routing to LSP handler");
-          lsp({ data: unknown.args.data });
-        } else {
-          terminal({
-            sessionId: unknown.args.session_id,
-            data: unknown.args.data,
-          });
-        }
       } else {
         return animal.call_unknown_fn(idx, unknown);
       }
@@ -415,55 +409,34 @@ globalThis.addEventListener("message", async (event) => {
     }, ctx.input_char_id),
   );
 
-  console.log(
-    "[Worker] Registering input_string SharedObject with ID:",
-    ctx.input_string_id,
-  );
   shared.push(
     new SharedObject(
-      ({ sessionId, data }: { sessionId: number; data: string }) => {
-        (async () => {
-          try {
-            console.log(
-              `[Worker] input_string for session ${sessionId}, length: ${data.length}`,
-            );
-            if (sessionId !== LSP_SESSION_ID && sessionId !== 0xeeeeeeee) {
-              for (const char of data) {
-                const codePoint = char.codePointAt(0);
-                if (codePoint !== undefined) {
-                  vfs_root.dispatch(sessionId, 0, codePoint, 0);
-                }
-              }
-              return;
-            }
+      ({ sessionId, data }: {
+        sessionId: number;
+        data: string | number[] | Uint8Array;
+      }) => {
+        if (
+          dispatchSpecialInput(
+            vfs_root,
+            animal.get_share_memory().memory,
+            { sessionId, data },
+          )
+        ) return;
 
-            const bytes = new TextEncoder().encode(data);
-            const ptr = vfs_root.allocBuf(bytes.length);
-            console.log(
-              `[Worker] Allocated buffer at ${ptr}, copying ${bytes.length} bytes`,
-            );
-            const view = new Uint8Array(
-              animal.get_share_memory().memory.buffer,
-            );
-            view.set(bytes, ptr);
-
-            let eventType = sessionId === LSP_SESSION_ID ? 6 : 4; // 6 is EVENT_TYPE_LSP, 4 is InputString
-            if (sessionId === 0xeeeeeeee) {
-              eventType = 7; // EVENT_TYPE_WRITE_FILE
-            }
-            console.log(
-              `[Worker] Dispatching to VFS: session=${sessionId}, eventType=${eventType}, len=${bytes.length}`,
-            );
-            vfs_root.dispatch(sessionId, eventType, ptr, bytes.length);
-            vfs_root.freeBuf(ptr, bytes.length);
-          } catch (e) {
-            console.error(`[Worker] Error in input_string: ${e}`);
-            await terminal({
-              sessionId,
-              data: new TextEncoder().encode(`Error: ${e}\r\n`),
-            });
+        if (typeof data !== "string") {
+          throw new Error("terminal input must be a string");
+        }
+        try {
+          for (const char of data) {
+            const codePoint = char.codePointAt(0);
+            if (codePoint !== undefined) vfs_root.dispatch(sessionId, 0, codePoint, 0);
           }
-        })();
+        } catch (error) {
+          void terminal({
+            sessionId,
+            data: new TextEncoder().encode(`Error: ${error}\r\n`),
+          });
+        }
       },
       ctx.input_string_id,
     ),
