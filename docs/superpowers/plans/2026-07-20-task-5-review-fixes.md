@@ -1,5 +1,11 @@
 # Task 5 Review Fixes Implementation Plan
 
+> **Superseded allocator design:** The CAS-before-reservation/rollback design in
+> this historical document was superseded by commit `dd1ee901`. Rollback could
+> expose logical ranges without physical backing. See the worktree SDD ledger at
+> `.git/worktrees/rust-analyzer-diagnostics/sdd/task-5-report.md` for the final
+> reserve-before-CAS reasoning.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Resolve all four Task 5 review findings with complete rust-src coverage, supported shim initialization, deterministic validated toolchain caching, and leak-free target-memory contention accounting.

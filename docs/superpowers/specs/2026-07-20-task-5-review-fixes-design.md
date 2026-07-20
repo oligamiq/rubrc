@@ -1,5 +1,11 @@
 # Task 5 Review Fixes Design
 
+> **Superseded allocator design:** The CAS-before-reservation/rollback design in
+> this historical document was superseded by commit `dd1ee901`. Rollback could
+> expose logical ranges without physical backing. See the worktree SDD ledger at
+> `.git/worktrees/rust-analyzer-diagnostics/sdd/task-5-report.md` for the final
+> reserve-before-CAS reasoning.
+
 ## Scope
 
 Resolve the four Task 5 review findings without changing lockfiles, generated
