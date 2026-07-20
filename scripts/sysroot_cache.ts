@@ -61,6 +61,41 @@ export function rustSrcCacheMatchesIdentity(
   return expected === cached.trim();
 }
 
+async function archiveSha256(archive: Uint8Array): Promise<string> {
+  const bytes = new Uint8Array(archive.byteLength);
+  bytes.set(archive);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+export async function createRustSrcCacheMetadata(
+  toolchainIdentity: string,
+  archive: Uint8Array,
+): Promise<string> {
+  return JSON.stringify({
+    schema: 2,
+    toolchainIdentity,
+    archiveSha256: await archiveSha256(archive),
+  });
+}
+
+export async function rustSrcCacheMatchesMetadata(
+  expectedToolchainIdentity: string,
+  archive: Uint8Array,
+  cachedMetadata: string,
+): Promise<boolean> {
+  try {
+    const metadata = JSON.parse(cachedMetadata) as Record<string, unknown>;
+    return metadata.schema === 2 &&
+      metadata.toolchainIdentity === expectedToolchainIdentity &&
+      metadata.archiveSha256 === await archiveSha256(archive);
+  } catch {
+    return false;
+  }
+}
+
 export function deterministicRustSrcTarArgs(libraryPath: string): string[] {
   return [
     "--create",
@@ -156,9 +191,14 @@ export async function prepareCachedArchive(
   }
 
   const archive = await deps.fetchBytes(url);
-  await deps.writeFile(`${cacheArchive}.tmp`, archive);
-  await deps.rename(`${cacheArchive}.tmp`, cacheArchive);
-  return { archive, source: "download", cacheArchive, url };
+  const temporaryArchive = `${cacheArchive}.${crypto.randomUUID()}.tmp`;
+  try {
+    await deps.writeFile(temporaryArchive, archive);
+    await deps.rename(temporaryArchive, cacheArchive);
+    return { archive, source: "download", cacheArchive, url };
+  } finally {
+    await deps.remove(temporaryArchive);
+  }
 }
 
 export async function prepareCachedSysroot(
@@ -232,10 +272,7 @@ export function validateTarEntryName(name: string): string | null {
       continue;
     }
     if (part === "..") {
-      if (parts.length === 0) {
-        throw new Error(`unsafe sysroot archive entry: ${name}`);
-      }
-      parts.pop();
+      throw new Error(`unsafe sysroot archive entry: ${name}`);
     } else {
       parts.push(part);
     }

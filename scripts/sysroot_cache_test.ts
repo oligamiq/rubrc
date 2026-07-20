@@ -1,8 +1,10 @@
 import {
+  createRustSrcCacheMetadata,
   deterministicRustSrcTarArgs,
   prepareCachedArchive,
   prepareCachedSysroot,
   rustSrcCacheMatchesIdentity,
+  rustSrcCacheMatchesMetadata,
   rustSrcToolchainIdentity,
   type SysrootCacheDeps,
   sysrootCachePaths,
@@ -39,6 +41,24 @@ Deno.test("rust-src cache identity includes exact compiler and sysroot", () => {
     )
   ) {
     throw new Error("different sysroot identity was reused");
+  }
+});
+
+Deno.test("rust-src cache metadata rejects an archive digest mismatch", async () => {
+  const identity = rustSrcToolchainIdentity("rustc exact", "/exact/sysroot");
+  const original = new Uint8Array([1, 2, 3]);
+  const metadata = await createRustSrcCacheMetadata(identity, original);
+  if (!await rustSrcCacheMatchesMetadata(identity, original, metadata)) {
+    throw new Error("matching cache metadata was rejected");
+  }
+  if (
+    await rustSrcCacheMatchesMetadata(
+      identity,
+      new Uint8Array([1, 2, 4]),
+      metadata,
+    )
+  ) {
+    throw new Error("digest-mismatched archive was accepted");
   }
 });
 
@@ -125,6 +145,44 @@ Deno.test("prepareCachedArchive caches rust-src without target layout", async ()
   if (result.archive[0] !== 7) throw new Error("wrong archive bytes");
   if (calls.some((call) => call.startsWith("extract:"))) {
     throw new Error("archive was extracted");
+  }
+});
+
+Deno.test("prepareCachedArchive uses unique temporary paths per invocation", async () => {
+  const writes: string[] = [];
+  const removals: string[] = [];
+  const deps: SysrootCacheDeps = {
+    exists: async () => false,
+    remove: async (path) => {
+      removals.push(path);
+    },
+    mkdir: async () => {},
+    readFile: async () => new Uint8Array(),
+    writeFile: async (path) => {
+      writes.push(path);
+    },
+    rename: async () => {},
+    fetchBytes: async () => new Uint8Array([7]),
+    extractTarBr: async () => {},
+  };
+
+  await Promise.all([
+    prepareCachedArchive({ triple: "rust-src", cacheDir: ".cache", deps }),
+    prepareCachedArchive({ triple: "rust-src", cacheDir: ".cache", deps }),
+  ]);
+
+  if (writes.length !== 2 || writes[0] === writes[1]) {
+    throw new Error(
+      `temporary cache paths were not unique: ${writes.join(",")}`,
+    );
+  }
+  if (writes.some((path) => path === ".cache/rust-src.tar.br.tmp")) {
+    throw new Error("generic cache used the shared hardcoded temporary path");
+  }
+  for (const path of writes) {
+    if (!removals.includes(path)) {
+      throw new Error(`temporary cache path was not cleaned: ${path}`);
+    }
   }
 });
 
@@ -241,17 +299,29 @@ Deno.test("prepareCachedSysroot downloads and writes cache when archive is missi
   if (result.source !== "download") {
     throw new Error(`expected download source, got ${result.source}`);
   }
-  const expected = [
+  const prefix = [
     "remove:workspace/sysroot",
     "mkdir:.cache/sysroot",
     "exists:.cache/sysroot/wasm32-wasip1.tar.br",
     "fetch:https://example.invalid/sysroot.tar.br",
-    "write:.cache/sysroot/wasm32-wasip1.tar.br.tmp:9,8,7",
-    "rename:.cache/sysroot/wasm32-wasip1.tar.br.tmp:.cache/sysroot/wasm32-wasip1.tar.br",
+  ];
+  if (calls.slice(0, prefix.length).join("\n") !== prefix.join("\n")) {
+    throw new Error(`unexpected calls:\n${calls.join("\n")}`);
+  }
+  const write = calls[4];
+  const temporary = write?.match(/^write:(.+):9,8,7$/)?.[1];
+  if (
+    !temporary || temporary === ".cache/sysroot/wasm32-wasip1.tar.br.tmp"
+  ) {
+    throw new Error(`cache temporary path was not unique: ${write}`);
+  }
+  const suffix = [
+    `rename:${temporary}:.cache/sysroot/wasm32-wasip1.tar.br`,
+    `remove:${temporary}`,
     "mkdir:workspace/sysroot/lib/rustlib/wasm32-wasip1/lib",
     "extract:workspace/sysroot/lib/rustlib/wasm32-wasip1/lib:9,8,7",
   ];
-  if (calls.join("\n") !== expected.join("\n")) {
+  if (calls.slice(5).join("\n") !== suffix.join("\n")) {
     throw new Error(`unexpected calls:\n${calls.join("\n")}`);
   }
 });

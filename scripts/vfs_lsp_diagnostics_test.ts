@@ -1,13 +1,16 @@
 import { ConsoleStdout, File, OpenFile } from "@bjorn3/browser_wasi_shim";
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
 import { parseTar } from "../lib/src/parse_tar.ts";
-import type { SysrootArchiveEntry } from "../page/src/sysroot_archive.ts";
+import {
+  type SysrootArchiveEntry,
+  validateSysrootArchiveEntryName,
+} from "../page/src/sysroot_archive.ts";
 import { buildPreopenDirectory } from "./build_preopen.ts";
 import {
+  createRustSrcCacheMetadata,
   deterministicRustSrcTarArgs,
-  prepareCachedArchive,
   prepareCachedSysroot,
-  rustSrcCacheMatchesIdentity,
+  rustSrcCacheMatchesMetadata,
   rustSrcToolchainIdentity,
   validateRustSrcArchive,
 } from "./sysroot_cache.ts";
@@ -28,19 +31,24 @@ const runRustc = async (args: string[]): Promise<string> => {
 };
 const sysroot = await runRustc(["--print", "sysroot"]);
 const identity = rustSrcToolchainIdentity(await runRustc(["-vV"]), sysroot);
-const cachedRustSrcIsValid = await (async () => {
+const readCachedRustSrc = async (): Promise<Uint8Array | null> => {
   try {
-    const cachedIdentity = await Deno.readTextFile(rustSrcCacheIdentity);
-    if (!rustSrcCacheMatchesIdentity(identity, cachedIdentity)) return false;
-    return await validateRustSrcArchive(
-      await Deno.readFile(rustSrcCacheArchive),
-    );
+    const [archive, metadata] = await Promise.all([
+      Deno.readFile(rustSrcCacheArchive),
+      Deno.readTextFile(rustSrcCacheIdentity),
+    ]);
+    if (!await rustSrcCacheMatchesMetadata(identity, archive, metadata)) {
+      return null;
+    }
+    return await validateRustSrcArchive(archive) ? archive : null;
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return false;
+    if (error instanceof Deno.errors.NotFound) return null;
     throw error;
   }
-})();
-if (!cachedRustSrcIsValid) {
+};
+let rustSrcArchive = await readCachedRustSrc();
+const cachedRustSrcIsValid = rustSrcArchive !== null;
+if (rustSrcArchive === null) {
   const rustSrcLibrary = `${sysroot}/lib/rustlib/src/rust/library`;
   await Deno.mkdir(".rubrc-cache/sysroot", { recursive: true });
   const temporarySuffix = `${crypto.randomUUID()}.tmp`;
@@ -62,17 +70,32 @@ if (!cachedRustSrcIsValid) {
   if (!await validateRustSrcArchive(compressed)) {
     throw new Error("generated rust-src archive failed validation");
   }
-  await Deno.writeFile(temporaryArchive, compressed);
-  await Deno.writeTextFile(temporaryIdentity, identity);
-  await Deno.rename(temporaryArchive, rustSrcCacheArchive);
-  await Deno.rename(temporaryIdentity, rustSrcCacheIdentity);
+  const metadata = await createRustSrcCacheMetadata(identity, compressed);
+  try {
+    await Deno.writeFile(temporaryArchive, compressed);
+    await Deno.writeTextFile(temporaryIdentity, metadata);
+    await Deno.rename(temporaryArchive, rustSrcCacheArchive);
+    await Deno.rename(temporaryIdentity, rustSrcCacheIdentity);
+  } finally {
+    await Promise.all([
+      Deno.remove(temporaryArchive).catch((error) => {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      }),
+      Deno.remove(temporaryIdentity).catch((error) => {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      }),
+    ]);
+  }
+  rustSrcArchive = await readCachedRustSrc();
+  if (rustSrcArchive === null) {
+    throw new Error(
+      "published rust-src cache bytes do not match sidecar metadata",
+    );
+  }
 }
 console.log(
   `${cachedRustSrcIsValid ? "reused" : "generated"} validated rust-src cache`,
 );
-const { archive: rustSrcArchive } = await prepareCachedArchive({
-  triple: "rust-src",
-});
 if (!await validateRustSrcArchive(rustSrcArchive)) {
   throw new Error("cached rust-src archive failed validation");
 }
@@ -141,8 +164,10 @@ const farm = new WASIFarm(
           );
           const entries: Readonly<SysrootArchiveEntry>[] = [];
           await parseTar(stream, (file) => {
+            const name = validateSysrootArchiveEntryName(file.name);
+            if (name === null) return;
             entries.push(Object.freeze({
-              name: new TextEncoder().encode(file.name),
+              name: new TextEncoder().encode(name),
               data: file.data?.slice() ?? new Uint8Array(),
               isDirectory: file.type === "directory",
             }));
