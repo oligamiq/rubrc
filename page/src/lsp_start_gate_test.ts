@@ -1,0 +1,56 @@
+import { LspStartGate } from "./lsp_start_gate.ts";
+
+const assert = (condition: unknown, message: string) => {
+  if (!condition) throw new Error(message);
+};
+
+Deno.test("gate starts exactly once after both readiness states", async () => {
+  for (const order of ["monaco-first", "vfs-first"] as const) {
+    let starts = 0;
+    let disposals = 0;
+    const gate = new LspStartGate<object>(async () => {
+      starts++;
+      return { async dispose() { disposals++; } };
+    });
+    if (order === "monaco-first") {
+      gate.setMonaco({});
+      gate.setVfsReady();
+    } else {
+      gate.setVfsReady();
+      gate.setMonaco({});
+    }
+    gate.setVfsReady();
+    gate.setMonaco({});
+    await gate.started();
+    assert(starts === 1, `${order} started ${starts} times`);
+    await gate.dispose();
+    assert(disposals === 1, `${order} disposed ${disposals} times`);
+  }
+});
+
+Deno.test("gate never starts after disposal", async () => {
+  let starts = 0;
+  const gate = new LspStartGate<object>(async () => {
+    starts++;
+    return { async dispose() {} };
+  });
+  await gate.dispose();
+  gate.setMonaco({});
+  gate.setVfsReady();
+  assert(starts === 0, "disposed gate started");
+});
+
+Deno.test("failed startup is not retried within the same mount", async () => {
+  let starts = 0;
+  const gate = new LspStartGate<object>(async () => {
+    starts++;
+    throw new Error("start failed");
+  });
+  gate.setMonaco({});
+  gate.setVfsReady();
+  await gate.started()?.catch(() => undefined);
+  gate.setMonaco({});
+  gate.setVfsReady();
+  await gate.started()?.catch(() => undefined);
+  assert(starts === 1, `failed startup retried ${starts} times`);
+});

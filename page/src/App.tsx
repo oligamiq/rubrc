@@ -1,4 +1,4 @@
-import { createSignal, For, lazy, Suspense } from "solid-js";
+import { createSignal, For, lazy, onCleanup, Suspense } from "solid-js";
 import { SetupMyTerminal } from "./xterm";
 import type { WASIFarmRef } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
@@ -6,8 +6,8 @@ import { default_value, rust_file } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
-import { createLspConnection } from "./lsp_bridge";
-import { MonacoLanguageClient } from "monaco-languageclient";
+import { LspStartGate } from "./lsp_start_gate";
+import { startRustLspClient } from "./rust_lsp_client";
 
 const Select = lazy(async () => {
   const selector = import("@thisbeyond/solid-select");
@@ -32,58 +32,12 @@ const App = (props: {
   ctx: Ctx;
   callback: (wasi_ref: WASIFarmRef) => void;
 }) => {
-  const handleMount = (_monaco, _editor) => {
-    console.log("[App] Monaco Editor mounted. Starting LSP client...");
-    const connection = createLspConnection(props.ctx);
-    console.log("[App] LSP connection created.");
-    const languageClient = new MonacoLanguageClient({
-      name: "Rust Language Client",
-      clientOptions: {
-        documentSelector: [{ scheme: "file", language: "rust" }],
-        initializationOptions: {
-          cargo: {
-            sysroot: "/sysroot",
-          },
-          linkedProjects: ["/rust-project.json"],
-          procMacro: {
-            enable: false,
-          },
-          checkOnSave: {
-            enable: false,
-          },
-          diagnostics: {
-            enable: true,
-            experimental: {
-              enable: true,
-            },
-          },
-        },
-      },
-      messageTransports: connection
-    });
-    console.log("[App] Starting LanguageClient...");
-    languageClient.start().then(() => {
-      console.log("[App] LanguageClient started successfully.");
-    }).catch(e => {
-      console.error("[App] Failed to start LanguageClient:", e);
-    });
-  };
-  const handleEditorChange = (value) => {
-    // Handle editor value change
-    rust_file.data = new TextEncoder().encode(value);
+  const lspGate = new LspStartGate<unknown>(async () =>
+    await startRustLspClient(props.ctx)
+  );
 
-    // Sync to Rust VFS
-    const input_string = new SharedObjectRef(props.ctx.input_string_id).proxy<
-      (args: { sessionId: number, data: string }) => Promise<void>
-    >();
-
-    // session_id 0 is fine for sync, but we need a specific way to trigger WRITE_FILE
-    // In util_cmd.ts, we'll handle a special sessionId or just add a new SharedObject
-    // For now, let's assume util_cmd.ts will be updated to handle a special sessionId for VFS SYNC
-    input_string({
-      sessionId: 0xEEEEEEEE, // Special ID for VFS Sync
-      data: JSON.stringify({ path: "/src/main.rs", content: value })
-    }).catch(console.error);
+  const handleMount = (monaco: unknown) => {
+    lspGate.setMonaco(monaco);
   };
   let load_additional_sysroot:
     | ((triple: string) => Promise<void>)
@@ -95,13 +49,15 @@ const App = (props: {
   const [nextSessionId, setNextSessionId] = createSignal(1);
   const [draggedTab, setDraggedTab] = createSignal<{ paneId: number, sessionId: number } | null>(null);
   const [isReady, setIsReady] = createSignal(false);
+  const sharedReady = new SharedObject(() => {
+    setIsReady(true);
+    lspGate.setVfsReady();
+  }, props.ctx.vfs_ready_id);
 
-  let shared_ready: SharedObject | undefined;
-  if (!shared_ready) {
-    shared_ready = new SharedObject(() => {
-      setIsReady(true);
-    }, props.ctx.vfs_ready_id);
-  }
+  onCleanup(() => {
+    sharedReady.bc.close();
+    void lspGate.dispose();
+  });
 
   const close_session_fn = new SharedObjectRef(props.ctx.close_session_id).proxy<
     (args: { sessionId: number }) => Promise<void>
@@ -217,7 +173,6 @@ const App = (props: {
           value={default_value}
           height="30vh"
           onMount={handleMount}
-          onChange={handleEditorChange}
         />
       </Suspense>
 
