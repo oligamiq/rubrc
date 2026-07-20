@@ -2619,32 +2619,59 @@ fn write_lsp_result_bytes(
 static LSP_RESULT_ALLOCATOR: std::sync::LazyLock<parking_lot::Mutex<LspResultAllocator>> =
     std::sync::LazyLock::new(|| parking_lot::Mutex::new(LspResultAllocator::default()));
 
+fn claim_lsp_result_pages(
+    pages: i32,
+    mut logical_size: impl FnMut() -> i32,
+    mut reserve: impl FnMut(i32) -> i32,
+    mut compare_exchange: impl FnMut(i32, i32) -> i32,
+) -> Result<i32, String> {
+    let mut current = logical_size();
+    loop {
+        let next = current
+            .checked_add(pages)
+            .ok_or_else(|| "LSP result memory size overflowed".to_string())?;
+        let observed = compare_exchange(current, next);
+        if observed != current {
+            current = observed;
+            continue;
+        }
+
+        if reserve(pages) > 0 {
+            return Ok(current);
+        }
+
+        let rollback = compare_exchange(next, current);
+        if rollback == next {
+            return Err("failed to reserve LSP result memory".to_string());
+        }
+        if rollback > next {
+            return Ok(current);
+        }
+        return Err("LSP result memory accounting moved backwards".to_string());
+    }
+}
+
 #[cfg(target_os = "wasi")]
 fn reserve_lsp_result_region(minimum: usize) -> Result<LspResultRegion, String> {
     let pages = minimum
         .div_ceil(WASM_PAGE_BYTES)
         .try_into()
         .map_err(|_| "LSP result allocation exceeds wasm32 memory".to_string())?;
-    loop {
-        let current = memory_size::<lsp_opt>();
-        let next = current
-            .checked_add(pages)
-            .ok_or_else(|| "LSP result memory size overflowed".to_string())?;
-        if memory_reserve::<lsp_opt>(pages) <= 0 {
-            return Err("failed to reserve LSP result memory".to_string());
-        }
-        if __wasip1_vfs_lsp_opt_own_memory_size_compare_exchange(current, next) == current {
-            let ptr = usize::try_from(current)
-                .ok()
-                .and_then(|page| page.checked_mul(WASM_PAGE_BYTES))
-                .ok_or_else(|| "LSP result pointer overflowed".to_string())?;
-            let capacity = usize::try_from(pages)
-                .ok()
-                .and_then(|page| page.checked_mul(WASM_PAGE_BYTES))
-                .ok_or_else(|| "LSP result capacity overflowed".to_string())?;
-            return Ok(LspResultRegion { ptr, capacity });
-        }
-    }
+    let current = claim_lsp_result_pages(
+        pages,
+        memory_size::<lsp_opt>,
+        memory_reserve::<lsp_opt>,
+        |current, next| __wasip1_vfs_lsp_opt_own_memory_size_compare_exchange(current, next),
+    )?;
+    let ptr = usize::try_from(current)
+        .ok()
+        .and_then(|page| page.checked_mul(WASM_PAGE_BYTES))
+        .ok_or_else(|| "LSP result pointer overflowed".to_string())?;
+    let capacity = usize::try_from(pages)
+        .ok()
+        .and_then(|page| page.checked_mul(WASM_PAGE_BYTES))
+        .ok_or_else(|| "LSP result capacity overflowed".to_string())?;
+    Ok(LspResultRegion { ptr, capacity })
 }
 
 #[cfg(not(target_os = "wasi"))]
@@ -4497,10 +4524,75 @@ mod http_tests {
 #[cfg(test)]
 mod lsp_cargo_result_tests {
     use super::{
-        LspHostProgram, LspResultAllocator, LspResultRegion, encode_lsp_result_abi,
-        lsp_host_program, write_lsp_result_bytes,
+        LspHostProgram, LspResultAllocator, LspResultRegion, claim_lsp_result_pages,
+        encode_lsp_result_abi, lsp_host_program, write_lsp_result_bytes,
     };
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
+
+    #[test]
+    fn lsp_result_reservation_only_grows_after_winning_contention() {
+        let attempts = Cell::new(0);
+        let reservations = RefCell::new(Vec::new());
+        let claims = RefCell::new(Vec::new());
+
+        let start = claim_lsp_result_pages(
+            2,
+            || 10,
+            |pages| {
+                reservations.borrow_mut().push(pages);
+                12
+            },
+            |current, next| {
+                claims.borrow_mut().push((current, next));
+                let attempt = attempts.get();
+                attempts.set(attempt + 1);
+                if attempt == 0 { 12 } else { current }
+            },
+        )
+        .expect("the second logical claim should win");
+
+        assert_eq!(start, 12);
+        assert_eq!(&*claims.borrow(), &[(10, 12), (12, 14)]);
+        assert_eq!(&*reservations.borrow(), &[2]);
+    }
+
+    #[test]
+    fn lsp_result_reservation_rolls_back_failed_physical_growth() {
+        let claims = RefCell::new(Vec::new());
+        let result = claim_lsp_result_pages(
+            2,
+            || 10,
+            |_| -1,
+            |current, next| {
+                claims.borrow_mut().push((current, next));
+                current
+            },
+        );
+
+        assert_eq!(
+            result,
+            Err("failed to reserve LSP result memory".to_string())
+        );
+        assert_eq!(&*claims.borrow(), &[(10, 12), (12, 10)]);
+    }
+
+    #[test]
+    fn lsp_result_reservation_keeps_claim_adopted_by_later_growth() {
+        let attempts = Cell::new(0);
+        let start = claim_lsp_result_pages(
+            2,
+            || 10,
+            |_| -1,
+            |current, _| {
+                let attempt = attempts.get();
+                attempts.set(attempt + 1);
+                if attempt == 0 { current } else { 13 }
+            },
+        )
+        .expect("later logical growth proves existing physical capacity");
+
+        assert_eq!(start, 10);
+    }
 
     #[test]
     fn cargo_result_bytes_are_returned_from_lsp_memory() {
