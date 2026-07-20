@@ -1,5 +1,5 @@
 # Release notes
-## v2.0.0 (pre-release)
+## v2.0.0 (pre-release) (2026-07-20)
 - Structural overhaul.
 - Improved execution speed (approx. 61s to 12s).
 - Added support for pipes, multiple sessions, panels, and common commands.
