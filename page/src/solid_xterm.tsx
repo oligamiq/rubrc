@@ -9,6 +9,7 @@ import {
   Terminal,
 } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { installMobileTerminalGestures } from "./mobile_terminal_gestures";
 
 export type OnMountCleanup = () => void | (() => Promise<void>) | undefined;
 
@@ -172,8 +173,17 @@ const XTerm = ({
 }: XTermProps) => {
   const [terminal, setTerminal] = createSignal<Terminal | undefined>();
 
+  let disposeMobileTerminalGestures: (() => void) | undefined;
+
   const handleRef = (terminalContainerRef: HTMLDivElement) => {
     const newTerminal = new Terminal(options);
+
+    disposeMobileTerminalGestures =
+      installMobileTerminalGestures(
+        terminalContainerRef,
+        newTerminal,
+      );
+
     newTerminal.open(terminalContainerRef);
 
     // biome-ignore lint/complexity/noForEach: <explanation>
@@ -189,6 +199,8 @@ const XTerm = ({
   };
 
   onCleanup(() => {
+    disposeMobileTerminalGestures?.();
+    disposeMobileTerminalGestures = undefined;
     const currentTerminal = terminal();
     if (!currentTerminal) return;
     currentTerminal.dispose();
