@@ -3,6 +3,9 @@ import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import XTerm from "./solid_xterm";
+import {
+  isTouchCapableDevice,
+} from "./mobile_terminal_gestures";
 import { WASIFarm, type WASIFarmRef, wait_async_polyfill } from "@oligami/browser_wasi_shim-threads";
 import {
   Directory,
@@ -84,7 +87,9 @@ export const SetupMyTerminal = (props: {
       const terminal = xterm;
       const timeout = window.setTimeout(() => {
         fit_addon.fit();
-        terminal.focus();
+        if (!isTouchCapableDevice()) {
+          terminal.focus();
+        }
         resize_fn({ sessionId: props.sessionId, cols: terminal.cols, rows: terminal.rows }).catch(console.error);
       }, 0);
       onCleanup(() => window.clearTimeout(timeout));
@@ -173,7 +178,9 @@ export const SetupMyTerminal = (props: {
       return true;
     });
 
-    terminal.focus();
+    if (props.isActive && !isTouchCapableDevice()) {
+      terminal.focus();
+    }
 
     return () => {
       terminals.delete(props.sessionId);
@@ -233,7 +240,7 @@ export const SetupMyTerminal = (props: {
       onResize={onResize}
       addons={[fit_addon]}
       options={{
-        scrollSensitivity: (typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) ? 8 : 1
+        scrollSensitivity: isTouchCapableDevice() ? 8 : 1
       }}
       class="w-full h-full"
     />
