@@ -66,11 +66,12 @@ class MyMessageWriter extends AbstractMessageWriter {
   constructor(ctx: Ctx) {
     super();
     this.sharedRef = new SharedObjectRef(ctx.input_string_id);
-    this.inputStringProxy = this.sharedRef.proxy<
-      (args: { sessionId: number; data: string | number[] }) => Promise<void>
-    >();
+    this.inputStringProxy =
+      this.sharedRef.proxy<
+        (args: { sessionId: number; data: string | number[] }) => Promise<void>
+      >();
     this.sender = new OrderedLspSender((data) =>
-      this.inputStringProxy({ sessionId: LSP_SESSION_ID, data })
+      this.inputStringProxy({ sessionId: LSP_SESSION_ID, data }),
     );
   }
 

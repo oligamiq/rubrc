@@ -45,12 +45,37 @@ const document = (
   } as never;
 };
 
+Deno.test("didOpen completion follows the VFS write and LSP continuation", async () => {
+  const order: string[] = [];
+  const sync = new RustDocumentSync(
+    async () => {
+      order.push("write");
+    },
+    {
+      onDidOpenComplete: (uri: string) => order.push(`complete:${uri}`),
+    } as never,
+  );
+
+  const opened = document("file:///src/main.rs", "fn main() {}", 1);
+  await sync.middleware.didOpen!(opened, async () => {
+    order.push("didOpen");
+  });
+
+  assert(
+    order.join(",") === "write,didOpen,complete:file:///src/main.rs",
+    `wrong didOpen completion order: ${order}`,
+  );
+});
+
 Deno.test("didChange forwards immediately and debounces only VFS", async () => {
   const writes: Array<[string, string]> = [];
   const scheduler = new FakeScheduler();
-  const sync = new RustDocumentSync(async (path, text) => {
-    writes.push([path, text]);
-  }, { scheduler });
+  const sync = new RustDocumentSync(
+    async (path, text) => {
+      writes.push([path, text]);
+    },
+    { scheduler },
+  );
   const calls: string[] = [];
   const first = document("file:///src/main.rs", "fn main(){ let x = ; }", 2);
   await sync.middleware.didChange!(
@@ -77,18 +102,27 @@ Deno.test("didChange forwards immediately and debounces only VFS", async () => {
 Deno.test("different Rust file URIs retain independent snapshots", async () => {
   const writes: string[] = [];
   const scheduler = new FakeScheduler();
-  const sync = new RustDocumentSync(async (path) => {
-    writes.push(path);
-  }, { scheduler });
+  const sync = new RustDocumentSync(
+    async (path) => {
+      writes.push(path);
+    },
+    { scheduler },
+  );
   const next = async () => {};
-  await sync.middleware.didChange!({
-    document: document("file:///src/main.rs", "fn main() {}", 2),
-    contentChanges: [],
-  } as never, next);
-  await sync.middleware.didChange!({
-    document: document("file:///src/secondary.rs", "pub fn value() {}", 1),
-    contentChanges: [],
-  } as never, next);
+  await sync.middleware.didChange!(
+    {
+      document: document("file:///src/main.rs", "fn main() {}", 2),
+      contentChanges: [],
+    } as never,
+    next,
+  );
+  await sync.middleware.didChange!(
+    {
+      document: document("file:///src/secondary.rs", "pub fn value() {}", 1),
+      contentChanges: [],
+    } as never,
+    next,
+  );
   scheduler.runAll();
   await sync.dispose();
   assert(
@@ -100,9 +134,12 @@ Deno.test("different Rust file URIs retain independent snapshots", async () => {
 Deno.test("didClose flushes VFS before standard close", async () => {
   const order: string[] = [];
   const scheduler = new FakeScheduler();
-  const sync = new RustDocumentSync(async () => {
-    order.push("write");
-  }, { scheduler });
+  const sync = new RustDocumentSync(
+    async () => {
+      order.push("write");
+    },
+    { scheduler },
+  );
   const changed = document("file:///src/main.rs", "fn main() {}", 2);
   await sync.middleware.didChange!(
     { document: changed, contentChanges: [] } as never,

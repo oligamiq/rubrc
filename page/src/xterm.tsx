@@ -31,6 +31,8 @@ import {
   loadSysrootArchive,
   type SysrootArchiveEntry,
 } from "./sysroot_archive";
+import { routeWasiTerminalWrite } from "./worker_process/lsp_dispatch";
+import { populateWebRustSrc } from "./web_sysroot";
 
 wait_async_polyfill();
 
@@ -90,26 +92,33 @@ export const SetupMyTerminal = (props: {
 
   const fit_addon = new FitAddon();
 
-  createEffect(on(() => props.isActive, (active) => {
-    if (active && xterm) {
-      const terminal = xterm;
-      const timeout = window.setTimeout(() => {
-        fit_addon.fit();
-        terminal.focus();
-        resize_fn({
-          sessionId: props.sessionId,
-          cols: terminal.cols,
-          rows: terminal.rows,
-        }).catch(console.error);
-      }, 0);
-      onCleanup(() => window.clearTimeout(timeout));
-    }
-  }, { defer: true }));
+  createEffect(
+    on(
+      () => props.isActive,
+      (active) => {
+        if (active && xterm) {
+          const terminal = xterm;
+          const timeout = window.setTimeout(() => {
+            fit_addon.fit();
+            terminal.focus();
+            resize_fn({
+              sessionId: props.sessionId,
+              cols: terminal.cols,
+              rows: terminal.rows,
+            }).catch(console.error);
+          }, 0);
+          onCleanup(() => window.clearTimeout(timeout));
+        }
+      },
+      { defer: true },
+    ),
+  );
 
   if (!shared_xterm) {
-    const terminal_handler = (
-      args: { sessionId: number; data: Uint8Array },
-    ) => {
+    const terminal_handler = (args: {
+      sessionId: number;
+      data: Uint8Array;
+    }) => {
       write_to_terminal(args.sessionId, args.data);
     };
 
@@ -151,6 +160,9 @@ export const SetupMyTerminal = (props: {
   const input_string = new SharedObjectRef(props.ctx.input_string_id).proxy<
     (args: { sessionId: number; data: string }) => Promise<void>
   >();
+  const lsp = new SharedObjectRef(props.ctx.ls_id).proxy<
+    (args: { data: unknown }) => Promise<void>
+  >();
 
   const interrupt_fn = new SharedObjectRef(props.ctx.interrupt_id).proxy<
     (args: { sessionId: number }) => Promise<void>
@@ -161,12 +173,11 @@ export const SetupMyTerminal = (props: {
     terminals.set(props.sessionId, terminal);
 
     if (props.isMain && props.callback) {
-      get_ref(terminal, props.callback);
+      get_ref(terminal, props.callback, lsp);
     } else {
-      const create_session_fn = new SharedObjectRef(props.ctx.create_session_id)
-        .proxy<
-          (args: { sessionId: number }) => Promise<void>
-        >();
+      const create_session_fn = new SharedObjectRef(
+        props.ctx.create_session_id,
+      ).proxy<(args: { sessionId: number }) => Promise<void>>();
       create_session_fn({ sessionId: props.sessionId }).catch(console.error);
     }
 
@@ -189,13 +200,15 @@ export const SetupMyTerminal = (props: {
 
     terminal.attachCustomKeyEventHandler((e) => {
       if (
-        e.type === "keydown" && (e.ctrlKey || e.metaKey) &&
+        e.type === "keydown" &&
+        (e.ctrlKey || e.metaKey) &&
         (e.key.toLowerCase() === "v" || e.code === "KeyV")
       ) {
         return false;
       }
       if (
-        e.type === "keydown" && (e.ctrlKey || e.metaKey) &&
+        e.type === "keydown" &&
+        (e.ctrlKey || e.metaKey) &&
         (e.key.toLowerCase() === "c" || e.code === "KeyC")
       ) {
         if (terminal.hasSelection()) {
@@ -216,9 +229,9 @@ export const SetupMyTerminal = (props: {
 
   const onData = (data: string) => {
     console.log(
-      `[UI] onData received for session ${props.sessionId}, length: ${data.length}, first char code: ${
-        data.charCodeAt(0)
-      }`,
+      `[UI] onData received for session ${props.sessionId}, length: ${data.length}, first char code: ${data.charCodeAt(
+        0,
+      )}`,
     );
 
     // Map ANSI escape sequences to custom wasi-shell key codes
@@ -271,8 +284,11 @@ export const SetupMyTerminal = (props: {
   };
 
   const onResize = (size: { cols: number; rows: number }) => {
-    resize_fn({ sessionId: props.sessionId, cols: size.cols, rows: size.rows })
-      .catch(console.error);
+    resize_fn({
+      sessionId: props.sessionId,
+      cols: size.cols,
+      rows: size.rows,
+    }).catch(console.error);
   };
 
   return (
@@ -286,7 +302,11 @@ export const SetupMyTerminal = (props: {
   );
 };
 
-const get_ref = (term, callback) => {
+const get_ref = (
+  term,
+  callback,
+  lsp: (args: { data: unknown }) => Promise<void>,
+) => {
   class XtermStdio extends Fd {
     term: Terminal;
 
@@ -350,42 +370,42 @@ const get_ref = (term, callback) => {
     return map;
   };
 
+  const sysrootContents = new Map<string, Inode>();
   const root_dir = new PreopenDirectory(
     "/",
     toMap([
-      ["sysroot", new Directory([])],
-      [
-        "src",
-        new Directory(toMap([
-          ["main.rs", rust_file],
-        ])),
-      ],
+      ["sysroot", new Directory(sysrootContents)],
+      ["src", new Directory(toMap([["main.rs", rust_file]]))],
       [
         "Cargo.toml",
-        new File(new TextEncoder().encode(`[package]
+        new File(
+          new TextEncoder().encode(`[package]
 name = "main"
 version = "0.1.0"
 edition = "2021"
-`)),
+`),
+        ),
       ],
       [
         ".cargo",
-        new Directory(toMap([
-          ["config.toml", new File(new Uint8Array())],
-        ])),
+        new Directory(toMap([["config.toml", new File(new Uint8Array())]])),
       ],
       [
         "rust-project.json",
-        new File(new TextEncoder().encode(JSON.stringify({
-          sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
-          crates: [
-            {
-              root_module: "/src/main.rs",
-              edition: "2021",
-              deps: [],
-            },
-          ],
-        }))),
+        new File(
+          new TextEncoder().encode(
+            JSON.stringify({
+              sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
+              crates: [
+                {
+                  root_module: "/src/main.rs",
+                  edition: "2021",
+                  deps: [],
+                },
+              ],
+            }),
+          ),
+        ),
       ],
     ]),
   );
@@ -412,94 +432,94 @@ edition = "2021"
     executionTimeoutMs: 120000,
   });
 
-  farm = new WASIFarm(
-    stdin,
-    stdout,
-    stderr,
-    [root_dir],
-    {
-      allocator_size: 100 * 1024 * 1024, // 100MB
-      base_call_allocator_size: 64 * 1024 * 1024, // 64 MiB
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      unknown_fn: async (unknown: any) => {
-        if (isHttpBridgeMessage(unknown)) {
-          return await httpBridge(unknown);
-        } else if (isChildProcessMessage(unknown)) {
-          return await childBridge(unknown);
-        } else if (unknown.name === "downloadFileStart") {
-          download_name = unknown.args.name;
-          download_chunks = [];
-        } else if (unknown.name === "downloadFileChunk") {
-          const chunk = toUint8Array(unknown.args.data);
-          download_chunks.push(chunk);
-        } else if (unknown.name === "downloadFileEnd") {
-          const blob = new Blob(download_chunks);
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = getDownloadFileName(download_name);
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
+  farm = new WASIFarm(stdin, stdout, stderr, [root_dir], {
+    allocator_size: 100 * 1024 * 1024, // 100MB
+    base_call_allocator_size: 64 * 1024 * 1024, // 64 MiB
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    unknown_fn: async (unknown: any) => {
+      if (isHttpBridgeMessage(unknown)) {
+        return await httpBridge(unknown);
+      } else if (isChildProcessMessage(unknown)) {
+        return await childBridge(unknown);
+      } else if (unknown.name === "downloadFileStart") {
+        download_name = unknown.args.name;
+        download_chunks = [];
+      } else if (unknown.name === "downloadFileChunk") {
+        const chunk = toUint8Array(unknown.args.data);
+        download_chunks.push(chunk);
+      } else if (unknown.name === "downloadFileEnd") {
+        const blob = new Blob(download_chunks);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = getDownloadFileName(download_name);
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
 
-          // reset the download state
-          download_name = "";
-          download_chunks = [];
-        } else if (unknown.name === "sysrootStartFetch") {
-          const triple = unknown.args.triple;
-          sysroot_queue = [];
-          current_sysroot_file = null;
-          sysroot_error = null;
-          try {
-            sysroot_queue = await loadSysrootArchive(triple);
-          } catch (error) {
-            sysroot_error = error instanceof Error ? error.message : String(error);
-            console.error(`Failed to fetch ${triple}`, error);
+        // reset the download state
+        download_name = "";
+        download_chunks = [];
+      } else if (unknown.name === "sysrootStartFetch") {
+        const triple = unknown.args.triple;
+        sysroot_queue = [];
+        current_sysroot_file = null;
+        sysroot_error = null;
+        try {
+          sysroot_queue = await loadSysrootArchive(triple);
+          if (triple === "rust-src") {
+            populateWebRustSrc(sysrootContents, sysroot_queue);
           }
-          return {};
-        } else if (unknown.name === "sysrootGetNextFileMeta") {
-          if (sysroot_error !== null) {
-            return { has_file: -1, name_len: 0, data_len: 0 };
-          }
-          if (sysroot_queue.length > 0) {
-            current_sysroot_file = sysroot_queue.shift()!;
-            return {
-              has_file: true,
-              name_len: current_sysroot_file.name.length,
-              data_len: current_sysroot_file.isDirectory
-                ? -1
-                : current_sysroot_file.data.length,
-            };
-          } else {
-            current_sysroot_file = null;
-            return { has_file: false, name_len: 0, data_len: 0 };
-          }
-        } else if (unknown.name === "sysrootReadFileName") {
-          if (current_sysroot_file?.name) {
-            return { name: Array.from(current_sysroot_file.name) };
-          }
-          throw new Error("No current sysroot file to read name from");
-        } else if (unknown.name === "sysrootReadFileChunk") {
-          if (current_sysroot_file) {
-            const chunk_len = unknown.args.chunk_len as number;
-            const chunk = current_sysroot_file.data.slice(0, chunk_len);
-            current_sysroot_file.data = current_sysroot_file.data.slice(
-              chunk_len,
-            );
-            return { chunk: Array.from(chunk) };
-          }
-          return { chunk: [] };
-        } else if (unknown.name === "terminalWrite") {
-          const { session_id, data } = unknown.args;
-          write_to_terminal(session_id, data);
-        } else {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          console.warn("Unknown function called", unknown);
+        } catch (error) {
+          sysroot_error =
+            error instanceof Error ? error.message : String(error);
+          console.error(`Failed to fetch ${triple}`, error);
         }
-      },
+        return {};
+      } else if (unknown.name === "sysrootGetNextFileMeta") {
+        if (sysroot_error !== null) {
+          return { has_file: -1, name_len: 0, data_len: 0 };
+        }
+        if (sysroot_queue.length > 0) {
+          current_sysroot_file = sysroot_queue.shift()!;
+          return {
+            has_file: true,
+            name_len: current_sysroot_file.name.length,
+            data_len: current_sysroot_file.isDirectory
+              ? -1
+              : current_sysroot_file.data.length,
+          };
+        } else {
+          current_sysroot_file = null;
+          return { has_file: false, name_len: 0, data_len: 0 };
+        }
+      } else if (unknown.name === "sysrootReadFileName") {
+        if (current_sysroot_file?.name) {
+          return { name: Array.from(current_sysroot_file.name) };
+        }
+        throw new Error("No current sysroot file to read name from");
+      } else if (unknown.name === "sysrootReadFileChunk") {
+        if (current_sysroot_file) {
+          const chunk_len = unknown.args.chunk_len as number;
+          const chunk = current_sysroot_file.data.slice(0, chunk_len);
+          current_sysroot_file.data =
+            current_sysroot_file.data.slice(chunk_len);
+          return { chunk: Array.from(chunk) };
+        }
+        return { chunk: [] };
+      } else if (unknown.name === "terminalWrite") {
+        routeWasiTerminalWrite(
+          unknown.args,
+          (message) => void lsp(message),
+          write_to_terminal,
+        );
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        console.warn("Unknown function called", unknown);
+      }
     },
-  );
+  });
 
   callback(farm.get_ref());
 };

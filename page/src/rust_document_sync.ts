@@ -20,6 +20,7 @@ export class RustDocumentSync {
   private readonly debounceMs: number;
   private readonly scheduler: TimerScheduler;
   private readonly logger: (message: string, error: unknown) => void;
+  private readonly onDidOpenComplete?: (uri: string) => void;
   private readonly pending = new Map<string, PendingSnapshot>();
   private readonly writes = new Map<string, Promise<void>>();
   private disposed = false;
@@ -30,12 +31,14 @@ export class RustDocumentSync {
       debounceMs?: number;
       scheduler?: TimerScheduler;
       logger?: (message: string, error: unknown) => void;
+      onDidOpenComplete?: (uri: string) => void;
     } = {},
   ) {
     this.debounceMs = options.debounceMs ?? 300;
     this.scheduler = options.scheduler ?? defaultScheduler;
-    this.logger = options.logger ??
-      ((message, error) => console.error(message, error));
+    this.logger =
+      options.logger ?? ((message, error) => console.error(message, error));
+    this.onDidOpenComplete = options.onDidOpenComplete;
     this.middleware = {
       didOpen: async (document, next) => {
         const snapshot = this.snapshot(document);
@@ -43,6 +46,7 @@ export class RustDocumentSync {
           if (snapshot) await this.queueWrite(snapshot);
         } finally {
           await next(document);
+          this.onDidOpenComplete?.(document.uri.toString());
         }
       },
       didChange: (event, next) => {
@@ -76,9 +80,12 @@ export class RustDocumentSync {
   private snapshot(document: TextDocument): Snapshot | undefined {
     const { uri } = document;
     if (
-      document.languageId !== "rust" || uri.scheme !== "file" ||
-      uri.authority !== "" || !uri.path.startsWith("/")
-    ) return undefined;
+      document.languageId !== "rust" ||
+      uri.scheme !== "file" ||
+      uri.authority !== "" ||
+      !uri.path.startsWith("/")
+    )
+      return undefined;
     return { uri: uri.toString(), path: uri.path, content: document.getText() };
   }
 

@@ -2,10 +2,35 @@ import {
   loadSysrootArchive,
   validateSysrootArchiveEntryName,
 } from "./sysroot_archive.ts";
+import * as sysrootArchive from "./sysroot_archive.ts";
 
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
 };
+
+Deno.test("rust-src uses same-origin asset while target sysroots stay remote", () => {
+  const sysrootArchiveUrl = (
+    sysrootArchive as unknown as {
+      sysrootArchiveUrl?: (triple: string, pageUrl?: string) => string;
+    }
+  ).sysrootArchiveUrl;
+  assert(
+    typeof sysrootArchiveUrl === "function",
+    "archive URL selector is missing",
+  );
+  assert(
+    sysrootArchiveUrl("rust-src", "https://example.test/rubrc/index.html") ===
+      "https://example.test/rubrc/rust-src.tar.vfsbr",
+    "rust-src did not select the same-origin asset",
+  );
+  assert(
+    sysrootArchiveUrl(
+      "wasm32-wasip1",
+      "https://example.test/rubrc/index.html",
+    ) === "https://oligamiq.github.io/rust_wasm/v0.2.0/wasm32-wasip1.tar.br",
+    "target sysroot URL changed",
+  );
+});
 
 Deno.test("sysroot archive returns complete entries atomically", async () => {
   const entries = await loadSysrootArchive("rust-src", {
@@ -36,9 +61,8 @@ Deno.test("sysroot archive rejects at the bounded timeout", async () => {
       fetchStream: (_url, currentSignal) => {
         signal = currentSignal;
         return new Promise<ReadableStream<Uint8Array>>((_resolve, reject) => {
-          currentSignal.addEventListener(
-            "abort",
-            () => reject(currentSignal.reason),
+          currentSignal.addEventListener("abort", () =>
+            reject(currentSignal.reason),
           );
         });
       },
@@ -70,8 +94,7 @@ Deno.test("sysroot archive rejects unsafe production entry paths", async () => {
 
 Deno.test("sysroot archive normalizes safe production entry paths", () => {
   assert(
-    validateSysrootArchiveEntryName("./core/src/lib.rs") ===
-      "core/src/lib.rs",
+    validateSysrootArchiveEntryName("./core/src/lib.rs") === "core/src/lib.rs",
     "safe path was not normalized",
   );
 });

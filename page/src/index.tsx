@@ -15,7 +15,7 @@ if (!window.__MONACO_VSCODE_INITIALIZED__) {
     $type: "extended",
     viewsConfig: { $type: "EditorService" },
     userConfiguration: {
-      json: "{\"editor.fontSize\": 14}"
+      json: '{"editor.fontSize": 14}',
     },
     workspaceConfig: {
       workspaceProvider: {
@@ -37,7 +37,9 @@ if (!window.__MONACO_VSCODE_INITIALIZED__) {
 
 const { default: App } = await import("./App");
 const { gen_ctx } = await import("./ctx");
-const { default: MainWorkerPath } = await import("./worker_process/worker?worker&url");
+const { default: MainWorkerPath } = await import(
+  "./worker_process/worker?worker&url"
+);
 const { parser_setup } = await import("./cmd_parser");
 await import("./monaco_worker");
 const { compile_and_run_setup } = await import("./compile_and_run");

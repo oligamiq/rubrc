@@ -6,14 +6,8 @@ import {
   validateSysrootArchiveEntryName,
 } from "../page/src/sysroot_archive.ts";
 import { buildPreopenDirectory } from "./build_preopen.ts";
-import {
-  createRustSrcCacheMetadata,
-  deterministicRustSrcTarArgs,
-  prepareCachedSysroot,
-  rustSrcCacheMatchesMetadata,
-  rustSrcToolchainIdentity,
-  validateRustSrcArchive,
-} from "./sysroot_cache.ts";
+import { prepareCachedSysroot } from "./sysroot_cache.ts";
+import { prepareInstalledRustSrcArchive } from "./rust_src_archive.ts";
 
 const testDir = "./test_workspace_lsp_diagnostics";
 await Deno.remove(testDir, { recursive: true }).catch((error) => {
@@ -21,84 +15,11 @@ await Deno.remove(testDir, { recursive: true }).catch((error) => {
 });
 await prepareCachedSysroot({ workspaceSysroot: `${testDir}/sysroot` });
 
-const rustSrcCacheArchive = ".rubrc-cache/sysroot/rust-src.tar.br";
-const rustSrcCacheIdentity = `${rustSrcCacheArchive}.identity`;
-const decoder = new TextDecoder();
-const runRustc = async (args: string[]): Promise<string> => {
-  const output = await new Deno.Command("rustc", { args }).output();
-  if (!output.success) throw new Error(decoder.decode(output.stderr));
-  return decoder.decode(output.stdout).trim();
-};
-const sysroot = await runRustc(["--print", "sysroot"]);
-const identity = rustSrcToolchainIdentity(await runRustc(["-vV"]), sysroot);
-const readCachedRustSrc = async (): Promise<Uint8Array | null> => {
-  try {
-    const [archive, metadata] = await Promise.all([
-      Deno.readFile(rustSrcCacheArchive),
-      Deno.readTextFile(rustSrcCacheIdentity),
-    ]);
-    if (!await rustSrcCacheMatchesMetadata(identity, archive, metadata)) {
-      return null;
-    }
-    return await validateRustSrcArchive(archive) ? archive : null;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return null;
-    throw error;
-  }
-};
-let rustSrcArchive = await readCachedRustSrc();
-const cachedRustSrcIsValid = rustSrcArchive !== null;
-if (rustSrcArchive === null) {
-  const rustSrcLibrary = `${sysroot}/lib/rustlib/src/rust/library`;
-  await Deno.mkdir(".rubrc-cache/sysroot", { recursive: true });
-  const temporarySuffix = `${crypto.randomUUID()}.tmp`;
-  const temporaryArchive = `${rustSrcCacheArchive}.${temporarySuffix}`;
-  const temporaryIdentity = `${rustSrcCacheIdentity}.${temporarySuffix}`;
-  const tar = await new Deno.Command("tar", {
-    args: deterministicRustSrcTarArgs(rustSrcLibrary),
-  }).output();
-  if (!tar.success) {
-    throw new Error(decoder.decode(tar.stderr));
-  }
-  const tarBuffer = new ArrayBuffer(tar.stdout.byteLength);
-  new Uint8Array(tarBuffer).set(tar.stdout);
-  const compressed = await new Response(
-    new Blob([tarBuffer]).stream().pipeThrough(
-      new CompressionStream("brotli"),
-    ),
-  ).bytes();
-  if (!await validateRustSrcArchive(compressed)) {
-    throw new Error("generated rust-src archive failed validation");
-  }
-  const metadata = await createRustSrcCacheMetadata(identity, compressed);
-  try {
-    await Deno.writeFile(temporaryArchive, compressed);
-    await Deno.writeTextFile(temporaryIdentity, metadata);
-    await Deno.rename(temporaryArchive, rustSrcCacheArchive);
-    await Deno.rename(temporaryIdentity, rustSrcCacheIdentity);
-  } finally {
-    await Promise.all([
-      Deno.remove(temporaryArchive).catch((error) => {
-        if (!(error instanceof Deno.errors.NotFound)) throw error;
-      }),
-      Deno.remove(temporaryIdentity).catch((error) => {
-        if (!(error instanceof Deno.errors.NotFound)) throw error;
-      }),
-    ]);
-  }
-  rustSrcArchive = await readCachedRustSrc();
-  if (rustSrcArchive === null) {
-    throw new Error(
-      "published rust-src cache bytes do not match sidecar metadata",
-    );
-  }
-}
+const { archive: rustSrcArchive, source: rustSrcSource } =
+  await prepareInstalledRustSrcArchive();
 console.log(
-  `${cachedRustSrcIsValid ? "reused" : "generated"} validated rust-src cache`,
+  `${rustSrcSource === "cache" ? "reused" : "generated"} validated rust-src cache`,
 );
-if (!await validateRustSrcArchive(rustSrcArchive)) {
-  throw new Error("cached rust-src archive failed validation");
-}
 await Deno.mkdir(`${testDir}/src`, { recursive: true });
 await Deno.writeTextFile(
   `${testDir}/Cargo.toml`,
@@ -145,8 +66,9 @@ const farm = new WASIFarm(
         return { request_id: 0, state: 0, status: 0, error_len: 0 };
       }
       if (name === "terminalWrite") {
-        const args =
-          (message as { args?: { session_id?: number; data?: number[] } }).args;
+        const args = (
+          message as { args?: { session_id?: number; data?: number[] } }
+        ).args;
         lspOutput.port1.postMessage(args);
         return {};
       }
@@ -159,18 +81,20 @@ const farm = new WASIFarm(
         if (!rustSrcTemplates) {
           const archive = new ArrayBuffer(rustSrcArchive.byteLength);
           new Uint8Array(archive).set(rustSrcArchive);
-          const stream = new Blob([archive]).stream().pipeThrough(
-            new DecompressionStream("brotli"),
-          );
+          const stream = new Blob([archive])
+            .stream()
+            .pipeThrough(new DecompressionStream("brotli"));
           const entries: Readonly<SysrootArchiveEntry>[] = [];
           await parseTar(stream, (file) => {
             const name = validateSysrootArchiveEntryName(file.name);
             if (name === null) return;
-            entries.push(Object.freeze({
-              name: new TextEncoder().encode(name),
-              data: file.data?.slice() ?? new Uint8Array(),
-              isDirectory: file.type === "directory",
-            }));
+            entries.push(
+              Object.freeze({
+                name: new TextEncoder().encode(name),
+                data: file.data?.slice() ?? new Uint8Array(),
+                isDirectory: file.type === "directory",
+              }),
+            );
           });
           rustSrcTemplates = Object.freeze(entries);
         }

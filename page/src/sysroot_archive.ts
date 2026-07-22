@@ -18,6 +18,17 @@ type ArchiveOptions = {
 };
 
 const BASE_URL = "https://oligamiq.github.io/rust_wasm/v0.2.0";
+const RUST_SRC_ASSET = "rust-src.tar.vfsbr";
+
+export function sysrootArchiveUrl(
+  triple: string,
+  pageUrl = typeof location === "undefined" ? undefined : location.href,
+): string {
+  if (triple !== "rust-src") return `${BASE_URL}/${triple}.tar.br`;
+  return pageUrl === undefined
+    ? `./${RUST_SRC_ASSET}`
+    : new URL(RUST_SRC_ASSET, pageUrl).href;
+}
 
 export function validateSysrootArchiveEntryName(name: string): string | null {
   if (name.startsWith("/")) {
@@ -55,12 +66,13 @@ export async function loadSysrootArchive(
     }
   };
   const operation = (async () => {
-    const fetchStream = options.fetchStream ??
+    const fetchStream =
+      options.fetchStream ??
       (await import("../../lib/src/brotli_stream.ts")).fetch_compressed_stream;
-    const parse = options.parse ??
-      (await import("../../lib/src/parse_tar.ts")).parseTar;
+    const parse =
+      options.parse ?? (await import("../../lib/src/parse_tar.ts")).parseTar;
     const stream = await fetchStream(
-      `${BASE_URL}/${triple}.tar.br`,
+      sysrootArchiveUrl(triple),
       controller.signal,
     );
     const entries: SysrootArchiveEntry[] = [];

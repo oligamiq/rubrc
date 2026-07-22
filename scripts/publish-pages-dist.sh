@@ -30,6 +30,7 @@ rm -rf page/dist
 bun install --frozen-lockfile
 bun run build:prod
 bun run vfs:prepare:prod
+bun run rust-src:prepare-asset
 
 (
   cd page

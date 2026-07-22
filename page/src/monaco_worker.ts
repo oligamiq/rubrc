@@ -5,6 +5,8 @@ import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 
+monaco.languages.register({ id: "rust", extensions: [".rs"] });
+
 // @ts-ignore
 self.MonacoEnvironment = {
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>

@@ -1,4 +1,5 @@
-import { createSignal, For, lazy, onCleanup, Suspense } from "solid-js";
+import { createSignal, For, lazy, onCleanup, Show, Suspense } from "solid-js";
+import * as monaco from "monaco-editor";
 import { SetupMyTerminal } from "./xterm";
 import type { WASIFarmRef } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
@@ -9,6 +10,7 @@ import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { LspStartGate } from "./lsp_start_gate";
 import { startRustLspClient } from "./rust_lsp_client";
 import type { VfsReadyResult } from "./vfs_readiness";
+import { exposeMonaco, markLspReady } from "./lsp_test_api";
 
 const Select = lazy(async () => {
   const selector = import("@thisbeyond/solid-select");
@@ -20,7 +22,7 @@ const Select = lazy(async () => {
 });
 
 const MonacoEditor = lazy(() =>
-  import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor }))
+  import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor })),
 );
 
 type Pane = {
@@ -33,32 +35,40 @@ const App = (props: {
   ctx: Ctx;
   callback: (wasi_ref: WASIFarmRef) => void;
 }) => {
-  const lspGate = new LspStartGate<unknown>(async () =>
-    await startRustLspClient(props.ctx)
+  const lspGate = new LspStartGate<typeof import("monaco-editor")>(
+    async (monaco) => await startRustLspClient(props.ctx, monaco),
   );
+  lspGate.setMonaco(monaco);
 
-  const handleMount = (monaco: unknown) => {
-    lspGate.setMonaco(monaco);
+  const handleMount = (mountedMonaco: typeof import("monaco-editor")) => {
+    exposeMonaco(mountedMonaco);
+    markLspReady();
   };
-  let load_additional_sysroot:
-    | ((triple: string) => Promise<void>)
-    | undefined;
+  let load_additional_sysroot: ((triple: string) => Promise<void>) | undefined;
 
   const [triple, setTriple] = createSignal<string | undefined>(undefined);
-  const [panes, setPanes] = createSignal<Pane[]>([{
-    id: 1,
-    tabs: [0],
-    activeTab: 0,
-  }]);
+  const [panes, setPanes] = createSignal<Pane[]>([
+    {
+      id: 1,
+      tabs: [0],
+      activeTab: 0,
+    },
+  ]);
   const [nextPaneId, setNextPaneId] = createSignal(2);
   const [nextSessionId, setNextSessionId] = createSignal(1);
-  const [draggedTab, setDraggedTab] = createSignal<
-    { paneId: number; sessionId: number } | null
-  >(null);
+  const [draggedTab, setDraggedTab] = createSignal<{
+    paneId: number;
+    sessionId: number;
+  } | null>(null);
   const [isReady, setIsReady] = createSignal(false);
+  const [isLspReady, setIsLspReady] = createSignal(false);
   const sharedReady = new SharedObject((result: VfsReadyResult) => {
     setIsReady(true);
     lspGate.setVfsResult(result);
+    void lspGate
+      .started()
+      ?.then(() => setIsLspReady(true))
+      .catch(console.error);
     if (!result.ok) console.error(result.error);
   }, props.ctx.vfs_ready_id);
 
@@ -67,10 +77,9 @@ const App = (props: {
     void lspGate.dispose();
   });
 
-  const close_session_fn = new SharedObjectRef(props.ctx.close_session_id)
-    .proxy<
-      (args: { sessionId: number }) => Promise<void>
-    >();
+  const close_session_fn = new SharedObjectRef(
+    props.ctx.close_session_id,
+  ).proxy<(args: { sessionId: number }) => Promise<void>>();
 
   const addTerminalToPane = (paneId: number) => {
     const newSessionId = nextSessionId();
@@ -115,22 +124,29 @@ const App = (props: {
     close_session_fn({ sessionId }).catch(console.error);
 
     setPanes(
-      panes().map((p) => {
-        if (p.id === paneId) {
-          const newTabs = p.tabs.filter((t) => t !== sessionId);
-          const newActive = p.activeTab === sessionId
-            ? (newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1)
-            : p.activeTab;
-          return { ...p, tabs: newTabs, activeTab: newActive };
-        }
-        return p;
-      }).filter((p) => p.tabs.length > 0 || p.id === panes()[0].id),
+      panes()
+        .map((p) => {
+          if (p.id === paneId) {
+            const newTabs = p.tabs.filter((t) => t !== sessionId);
+            const newActive =
+              p.activeTab === sessionId
+                ? newTabs.length > 0
+                  ? newTabs[newTabs.length - 1]
+                  : -1
+                : p.activeTab;
+            return { ...p, tabs: newTabs, activeTab: newActive };
+          }
+          return p;
+        })
+        .filter((p) => p.tabs.length > 0 || p.id === panes()[0].id),
     );
   };
 
   const setActiveTab = (paneId: number, sessionId: number) => {
     setPanes(
-      panes().map((p) => p.id === paneId ? { ...p, activeTab: sessionId } : p),
+      panes().map((p) =>
+        p.id === paneId ? { ...p, activeTab: sessionId } : p,
+      ),
     );
   };
 
@@ -148,23 +164,28 @@ const App = (props: {
     if (dragged.paneId === targetPaneId) return;
 
     setPanes(
-      panes().map((p) => {
-        if (p.id === dragged.paneId) {
-          const newTabs = p.tabs.filter((t) => t !== dragged.sessionId);
-          const newActive = p.activeTab === dragged.sessionId
-            ? (newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1)
-            : p.activeTab;
-          return { ...p, tabs: newTabs, activeTab: newActive };
-        }
-        if (p.id === targetPaneId) {
-          return {
-            ...p,
-            tabs: [...p.tabs, dragged.sessionId],
-            activeTab: dragged.sessionId,
-          };
-        }
-        return p;
-      }).filter((p) => p.tabs.length > 0 || p.id === panes()[0].id),
+      panes()
+        .map((p) => {
+          if (p.id === dragged.paneId) {
+            const newTabs = p.tabs.filter((t) => t !== dragged.sessionId);
+            const newActive =
+              p.activeTab === dragged.sessionId
+                ? newTabs.length > 0
+                  ? newTabs[newTabs.length - 1]
+                  : -1
+                : p.activeTab;
+            return { ...p, tabs: newTabs, activeTab: newActive };
+          }
+          if (p.id === targetPaneId) {
+            return {
+              ...p,
+              tabs: [...p.tabs, dragged.sessionId],
+              activeTab: dragged.sessionId,
+            };
+          }
+          return p;
+        })
+        .filter((p) => p.tabs.length > 0 || p.id === panes()[0].id),
     );
 
     setDraggedTab(null);
@@ -186,7 +207,8 @@ const App = (props: {
 
   return (
     <div class="h-screen flex flex-col overflow-hidden">
-      <Suspense
+      <Show
+        when={isLspReady()}
         fallback={
           <div
             class="p-4 text-white"
@@ -196,14 +218,16 @@ const App = (props: {
           </div>
         }
       >
-        <MonacoEditor
-          language="rust"
-          path="/src/main.rs"
-          value={default_value}
-          height="30vh"
-          onMount={handleMount}
-        />
-      </Suspense>
+        <Suspense>
+          <MonacoEditor
+            language="rust"
+            path="/src/main.rs"
+            value={default_value}
+            height="30vh"
+            onMount={handleMount}
+          />
+        </Suspense>
+      </Show>
 
       <div class="flex-1 flex flex-col min-h-0 bg-black border-t border-gray-700">
         <div class="flex">
@@ -282,8 +306,7 @@ const App = (props: {
         <div
           class="flex-1 min-h-0 min-w-0 grid overflow-hidden"
           style={{
-            "grid-template-columns":
-              `repeat(${panes().length}, minmax(0, 1fr))`,
+            "grid-template-columns": `repeat(${panes().length}, minmax(0, 1fr))`,
           }}
         >
           <For each={allSessionIds()}>
@@ -302,7 +325,7 @@ const App = (props: {
                   style={{
                     "grid-column": (paneIndex() + 1).toString(),
                     "grid-row": "1",
-                    "display": isActive() ? "block" : "none",
+                    display: isActive() ? "block" : "none",
                   }}
                 >
                   <SetupMyTerminal
@@ -328,10 +351,7 @@ const App = (props: {
             options={triples}
             class="text-sm text-green-700"
             onChange={(value) => {
-              if (
-                typeof value !== "string" ||
-                !triples.includes(value)
-              ) {
+              if (typeof value !== "string" || !triples.includes(value)) {
                 return;
               }
 

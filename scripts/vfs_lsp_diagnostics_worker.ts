@@ -42,9 +42,10 @@ globalThis.onmessage = async (event) => {
 
     const messages: any[] = [];
     const decoder = new LspFrameDecoder();
-    const receiveTerminalWrite = (
-      args: { session_id: number; data: unknown },
-    ) => {
+    const receiveTerminalWrite = (args: {
+      session_id: number;
+      data: unknown;
+    }) => {
       const bytes = toLspBytes(args.data);
       if (isLspSession(args.session_id)) {
         const decoded = decoder.push(bytes);
@@ -120,16 +121,20 @@ globalThis.onmessage = async (event) => {
         capabilities: { textDocument: { publishDiagnostics: {} } },
         initializationOptions: {
           cargo: { sysroot: "/sysroot" },
-          linkedProjects: [{
-            sysroot: "/sysroot",
-            sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
-            sysroot_project: { crates: [] },
-            crates: [{
-              root_module: "/src/main.rs",
-              edition: "2021",
-              deps: [],
-            }],
-          }],
+          linkedProjects: [
+            {
+              sysroot: "/sysroot",
+              sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
+              sysroot_project: { crates: [] },
+              crates: [
+                {
+                  root_module: "/src/main.rs",
+                  edition: "2021",
+                  deps: [],
+                },
+              ],
+            },
+          ],
           procMacro: { enable: false },
           checkOnSave: { enable: false },
           cachePriming: { enable: false },
@@ -161,8 +166,9 @@ globalThis.onmessage = async (event) => {
     await waitForMessage(
       (message) =>
         isPublication(message) &&
-        message.params.diagnostics.some((diagnostic: any) =>
-          diagnostic.severity === 1 && diagnostic.range?.start?.line === 0
+        message.params.diagnostics.some(
+          (diagnostic: any) =>
+            diagnostic.severity === 1 && diagnostic.range?.start?.line === 0,
         ),
       "invalid Rust diagnostic",
     );
@@ -181,8 +187,8 @@ globalThis.onmessage = async (event) => {
     await waitForMessage(
       (message) =>
         isPublication(message) &&
-        !message.params.diagnostics.some((diagnostic: any) =>
-          diagnostic.severity === 1
+        !message.params.diagnostics.some(
+          (diagnostic: any) => diagnostic.severity === 1,
         ),
       "cleared Rust diagnostic",
     );
@@ -194,9 +200,8 @@ globalThis.onmessage = async (event) => {
   } catch (error) {
     globalThis.postMessage({
       ok: false,
-      detail: error instanceof Error
-        ? (error.stack ?? error.message)
-        : String(error),
+      detail:
+        error instanceof Error ? (error.stack ?? error.message) : String(error),
     });
   }
 };
