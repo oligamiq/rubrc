@@ -3,8 +3,11 @@ import "./index.css";
 import { render } from "solid-js/web";
 
 import { MonacoVscodeApiWrapper } from "monaco-languageclient/vscodeApiWrapper";
+import { registerWorkspaceFileProvider } from "./workspace_file_provider";
 
 import "@codingame/monaco-vscode-theme-defaults-default-extension";
+
+registerWorkspaceFileProvider();
 
 // @ts-ignore
 if (!window.__MONACO_VSCODE_INITIALIZED__) {
