@@ -120,17 +120,27 @@ provider rather than attempting an invalid post-initialization replacement.
 
 ### Document Synchronization
 
-`RustDocumentSync` continues to send immediate LSP document notifications and
-immediate VFS synchronization commands. Its local write dependency changes to
-the shared workspace mutation operation.
+`RustDocumentSync` continues to send LSP document-change notifications
+immediately. Shared workspace writes and VFS synchronization preserve the
+existing per-document 300 ms trailing debounce. Its local write dependency
+changes to the shared workspace mutation operation.
 
-For each accepted Rust document change, ordering remains:
+For `didOpen`, ordering remains:
 
 1. Silently update the shared browser-side workspace file.
 2. Propagate the same path and content to the running Rust VFS session.
-3. Complete the existing `didOpen` or `didChange` flow.
+3. Forward the LSP `didOpen` notification.
 
-This preserves the current no-debounce LSP behavior and the existing VFS
+For `didChange`, two paths run independently:
+
+1. Forward the LSP `didChange` notification immediately.
+2. Replace the document's pending workspace snapshot.
+3. After 300 ms without another change, silently update the shared workspace
+   file and propagate the same snapshot to the Rust VFS session.
+
+`didClose` flushes the latest pending snapshot before forwarding the close
+notification. Disposal also flushes pending snapshots. This preserves
+immediate LSP `didChange`, bounded workspace/VFS writes, and the existing VFS
 session contract while removing the special-case direct assignment to the
 exported `rust_file` object.
 
@@ -148,10 +158,12 @@ At startup:
 For editor changes:
 
 1. Monaco updates the text model.
-2. `RustDocumentSync` writes the shared `File.data`.
-3. `RustDocumentSync` forwards the update through the existing VFS sync
+2. The language client receives the corresponding LSP notification
+   immediately.
+3. `RustDocumentSync` replaces that document's pending workspace snapshot.
+4. After 300 ms without another change for that document, it writes the shared
+   `File.data` and forwards the same snapshot through the existing VFS sync
    session.
-4. The language client sends the corresponding LSP notification.
 
 For file-service reads, the provider traverses the shared tree and returns the
 current `File.data` directly. No worker RPC or content mirror is involved.
@@ -162,13 +174,13 @@ The provider supports multiple files under the workspace, not only
 `/src/main.rs`. This matches existing secondary-document synchronization and
 avoids another single-file special case.
 
-Rubrc intentionally uses immediate-persistence editing rather than a separate
+Rubrc intentionally uses automatic persistence rather than a separate
 Save/Revert lifecycle. Every accepted Monaco model change becomes the current
-WASI workspace content and compiler input immediately. Closing an editor does
-not discard those changes, and the application does not present them as an
-unsaved disk buffer. Introducing conventional save, discard, and revert
-semantics would require a separate buffer-versus-workspace design and is
-outside this change.
+WASI workspace content and compiler input after the 300 ms trailing debounce;
+close and disposal flush pending content. Closing an editor does not discard
+those changes, and the application does not present them as an unsaved disk
+buffer. Introducing conventional save, discard, and revert semantics would
+require a separate buffer-versus-workspace design and is outside this change.
 
 Writes committed through the provider emit file events. Model-originated
 `RustDocumentSync` writes are silent by design. The current browser WASI shim
@@ -216,8 +228,9 @@ Focused workspace tests verify:
 - Deleting a file removes it from both the VS Code and WASI views without a
   lower-layer reappearance.
 
-Document synchronization tests verify the shared-tree write, VFS propagation,
-and LSP completion order for both main and secondary Rust files.
+Document synchronization tests verify immediate LSP forwarding, the 300 ms
+per-document workspace/VFS debounce, flush behavior, and write ordering for
+both main and secondary Rust files.
 
 Browser verification reloads the extended editor service, confirms
 `file:///src/main.rs` resolves without `FileOperationError`, and preserves the
