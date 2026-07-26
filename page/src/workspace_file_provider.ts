@@ -110,7 +110,7 @@ export class WasiWorkspaceFileProvider
 
   async readFile(resource: URI): Promise<Uint8Array> {
     try {
-      return this.workspace.readFile(this.path(resource));
+      return this.workspace.readFile(this.path(resource)).slice();
     } catch (error) {
       return mapError(error);
     }

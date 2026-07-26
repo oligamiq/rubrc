@@ -38,4 +38,8 @@ Deno.test("workspace writer creates secondary Rust files", async () => {
     JSON.parse(messages[0]).path === "/src/secondary.rs",
     "wrong propagated path",
   );
+  assert(
+    JSON.parse(messages[0]).content === "pub fn secondary() {}\n",
+    "wrong propagated content",
+  );
 });

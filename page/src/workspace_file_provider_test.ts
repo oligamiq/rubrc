@@ -37,6 +37,20 @@ Deno.test("provider resolves main source from the WASI tree", async () => {
   );
 });
 
+Deno.test("provider read bytes do not mutate the WASI tree", async () => {
+  const workspace = new WorkspaceFileSystem("fn main() {}\n");
+  const provider = new WasiWorkspaceFileProvider(workspace);
+  const content = await provider.readFile(URI.parse("file:///src/main.rs"));
+
+  content[0] = "x".charCodeAt(0);
+
+  assert(
+    new TextDecoder().decode(workspace.readFile("/src/main.rs")) ===
+      "fn main() {}\n",
+    "provider read exposed shared WASI bytes",
+  );
+});
+
 Deno.test("provider writes shared bytes and emits provider events", async () => {
   const workspace = new WorkspaceFileSystem("old");
   const provider = new WasiWorkspaceFileProvider(workspace);
