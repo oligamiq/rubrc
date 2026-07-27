@@ -2,7 +2,7 @@
 
 ## Goal
 
-Identify the exact wait condition that prevents browser rust-analyzer startup from advancing beyond `querying project metadata`. The investigation must distinguish a rubrc scheduling or lifecycle defect from a stall inside embedded Cargo or another external component.
+Identify the exact wait condition that prevents browser rust-analyzer startup from advancing beyond `querying project metadata`. The investigation must distinguish a rubrc scheduling or lifecycle defect from a stall inside embedded Cargo or `wasi_virt_layer`.
 
 Syntax highlighting is outside this investigation. Its direct cause is already known: the Rust default extension and its TextMate grammar are not registered.
 
@@ -16,7 +16,9 @@ Syntax highlighting is outside this investigation. Its direct cause is already k
 
 ## Scope
 
-Instrumentation is limited to rubrc-owned code, primarily `crates/vfs/src/lib.rs`. The investigation will not modify Cargo, rustc, rust-analyzer, `wasi_virt_layer`, or browser shim packages.
+Instrumentation may modify rubrc and the existing adjacent `wasi_virt_layer` worktree at `/home/oligami/projects/rubrc/.worktrees/wasi_virt_layer/wasi_virt_layer`, which rubrc already selects through `.cargo/config.toml`. The investigation will not modify Cargo, rustc, rust-analyzer, browser shim packages, or registry caches.
+
+Changes in `wasi_virt_layer` are limited to feature-gated observation APIs and counters for its own thread-pool lifecycle. They must be independently tested in that repository and must not change queueing, capacity, join, or completion behavior.
 
 Detailed traces are enabled only when `VFS_DEBUG_TRACE=1`. Normal execution must retain its existing output and control flow. Existing user changes and protected generated files remain untouched.
 
@@ -28,12 +30,13 @@ Low-volume boundary events use existing child, command, worker, and channel iden
 
 - entry and return of the embedded Cargo invocation;
 - child command spawn, dispatch, return status, and reap completion;
-- virtual thread pool enqueue, dequeue, execution start, execution return, and worker exit;
-- completion channel send, receive, disconnect, and endpoint drop;
+- thread-pool enqueue, dequeue, execution start, execution return, and worker exit;
+- thread-pool snapshots including capacity, worker count, queue depth, in-flight runs, and completion request/result counters;
+- add-thread and termination completion channel send, receive, disconnect, and endpoint drop;
 - stdout and stderr pipe creation, drain progress, EOF, and endpoint drop;
 - joins or waits immediately surrounding Cargo and child execution.
 
-The triggered snapshot records active workers, queued jobs, outstanding child and pipe endpoints, completion channel endpoints, and known join or wait locations. Events and snapshots describe state rather than dump command output or source payloads. Queue depth and endpoint state are included only when already available without acquiring a new cross-thread lock.
+The triggered snapshot records thread-pool capacity, worker count, queue depth, in-flight runs, completion counters, outstanding rubrc-owned child and pipe state, and known joins or waits. New thread-pool counters use atomics behind the existing trace feature. Snapshot access may use the queue's existing observation lock but must not add a lock to enqueue, dequeue, execution, or completion paths. Events and snapshots describe state rather than dump command output or source payloads.
 
 Trace egress uses a fixed-size ring buffer. Overflow increments a dropped-event counter instead of allocating without bound or synchronously flushing from worker threads. The browser test retrieves the ring and wait-state snapshot through rubrc-owned host glue after the watchdog fires. Rubrc's JavaScript call boundaries record request, callback, Promise resolution or rejection, and response delivery without modifying `wasi_virt_layer` or browser shim packages.
 
@@ -45,7 +48,7 @@ Failure reports retrieve the bounded event ring and the complete triggered wait-
 
 1. the last completed lifecycle phase for each correlated child, pipe, job, and completion endpoint;
 2. the first lifecycle phase present in the passing path but incomplete in the browser path;
-3. the outstanding queue, worker, child, pipe, join, channel, or host-call state at that point.
+3. the outstanding queue, worker, child, pipe, join, completion, or host-call state observable at that point.
 
 One variable is changed per experiment. Repeated runs are required only if event ordering is nondeterministic enough to prevent a conclusion.
 
@@ -59,7 +62,8 @@ The result is classified by the first unmatched wait condition:
 - an unfinished worker or join;
 - an undrained stdout or stderr pipe;
 - a rubrc host call whose callback or Promise does not complete;
-- a Cargo-internal wait after all rubrc-managed work has completed;
+- a `wasi_virt_layer` lifecycle wait after all rubrc-managed child work has completed;
+- a Cargo-internal wait after all rubrc and `wasi_virt_layer` managed work has completed;
 - another boundary demonstrated by the trace.
 
 If the defect is in rubrc, the investigation produces the smallest corrective design and a regression test. If the stall is beyond rubrc's ownership boundary, it produces a minimal reproduction, complete boundary trace, and a precise external blocker statement instead of speculative compatibility code.
