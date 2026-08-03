@@ -4,6 +4,33 @@ const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
 };
 
+Deno.test("browser startup uses the non-progress sequencer", async () => {
+  const source = await Deno.readTextFile("page/src/rust_lsp_client.ts");
+
+  assert(
+    source.includes("runRustLspStartup"),
+    "startup sequencer is not used",
+  );
+  assert(
+    !source.includes("const projectReady"),
+    "Fetching still gates startup",
+  );
+});
+
+Deno.test("Fetching progress remains attached to resource ownership", async () => {
+  const source = await Deno.readTextFile("page/src/rust_lsp_client.ts");
+  const listenerIndex = source.indexOf("client.onProgress(");
+  const recordIndex = source.indexOf("recordLspProgress(value)", listenerIndex);
+  const ownerIndex = source.indexOf(
+    "owner.setProgressDisposable(progressDisposable)",
+    recordIndex,
+  );
+
+  assert(listenerIndex >= 0, "Fetching progress listener is missing");
+  assert(recordIndex > listenerIndex, "Fetching progress is not recorded");
+  assert(ownerIndex > recordIndex, "progress listener is not resource-owned");
+});
+
 Deno.test("RustLspResourceOwner disposes all resources even if one throws", async () => {
   const owner = new RustLspResourceOwner();
   
@@ -85,6 +112,21 @@ Deno.test("RustLspResourceOwner gracefully handles missing resources", async () 
 
   await owner.dispose();
   assert(clientStopped, "client not stopped");
+});
+
+Deno.test("RustLspResourceOwner disposes the progress listener", async () => {
+  const owner = new RustLspResourceOwner();
+  let disposed = 0;
+
+  owner.setProgressDisposable({
+    dispose: () => {
+      disposed++;
+    },
+  });
+  await owner.dispose();
+  await owner.dispose();
+
+  assert(disposed === 1, `progress listener disposed ${disposed} times`);
 });
 
 Deno.test("disposeRustLspResources tests synchronous construction failure cleanly", async () => {

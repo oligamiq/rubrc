@@ -13,7 +13,9 @@ import { RustDocumentSync } from "./rust_document_sync";
 import { VFS_SYNC_SESSION_ID } from "./lsp_protocol";
 import { RustLspResourceOwner } from "./rust_lsp_client_dispose";
 import { createRustAnalyzerInitializationOptions } from "./rust_lsp_config";
+import { runRustLspStartup } from "./rust_lsp_startup";
 import { recordDidOpenComplete, recordVfsWrite } from "./lsp_test_api";
+import * as lspTestApi from "./lsp_test_api";
 
 class RustMonacoLanguageClient extends MonacoLanguageClient {
   protected override fillInitializeParams(params: InitializeParams): void {
@@ -39,19 +41,19 @@ export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
         (args: { sessionId: number; data: string }) => Promise<void>
       >();
 
-    const sync = new RustDocumentSync(
-      async (path, content) => {
-        if (path === "/src/main.rs") {
-          rust_file.data = new TextEncoder().encode(content);
-        }
-        await input({
-          sessionId: VFS_SYNC_SESSION_ID,
-          data: JSON.stringify({ path, content }),
-        });
-        recordVfsWrite(path, content);
-      },
-      { onDidOpenComplete: recordDidOpenComplete },
-    );
+    const writeAndRecordWorkspace = async (path: string, content: string) => {
+      if (path === "/src/main.rs") {
+        rust_file.data = new TextEncoder().encode(content);
+      }
+      await input({
+        sessionId: VFS_SYNC_SESSION_ID,
+        data: JSON.stringify({ path, content }),
+      });
+      recordVfsWrite(path, content);
+    };
+    const sync = new RustDocumentSync(writeAndRecordWorkspace, {
+      onDidOpenComplete: recordDidOpenComplete,
+    });
     owner.setSync(sync);
 
     const connection = createLspConnection(ctx);
@@ -76,32 +78,24 @@ export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
     });
     owner.setClient(client);
 
-    let progressDisposable: { dispose(): void } | undefined;
-    let progressTimer: ReturnType<typeof setTimeout> | undefined;
-    const projectReady = new Promise<void>((resolve, reject) => {
-      progressDisposable = client.onProgress(
-        new ProgressType<{ kind: string }>(),
-        "rustAnalyzer/Fetching",
-        (value) => {
-          if (value.kind === "end") resolve();
-        },
-      );
-      progressTimer = setTimeout(
-        () => reject(new Error("rust-analyzer project loading timed out")),
-        120_000,
-      );
-    });
-    await client.start();
-    const uri = monaco.Uri.parse("file:///src/main.rs");
-    if (!monaco.editor.getModel(uri)) {
-      monaco.editor.createModel(default_value, "rust", uri);
-    }
-    try {
-      await projectReady;
-    } finally {
-      if (progressTimer !== undefined) clearTimeout(progressTimer);
-      progressDisposable?.dispose();
-    }
+    const progressDisposable = client.onProgress(
+      new ProgressType<{ kind: string }>(),
+      "rustAnalyzer/Fetching",
+      (value) => lspTestApi.recordLspProgress(value),
+    );
+    owner.setProgressDisposable(progressDisposable);
+
+    await runRustLspStartup({
+      prepopulateMain: () =>
+        writeAndRecordWorkspace("/src/main.rs", default_value),
+      startClient: () => client.start(),
+      createMainModel: () => {
+        const uri = monaco.Uri.parse("file:///src/main.rs");
+        if (!monaco.editor.getModel(uri)) {
+          monaco.editor.createModel(default_value, "rust", uri);
+        }
+      },
+    }, 300_000);
   } catch (error) {
     try {
       await owner.dispose();
