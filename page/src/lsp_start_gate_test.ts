@@ -70,3 +70,26 @@ Deno.test("failed VFS readiness settles without starting LSP", () => {
   gate.setVfsResult({ ok: true });
   assert(starts === 0, "failed VFS bootstrap started LSP");
 });
+
+Deno.test("App mounts the editor before LSP startup can succeed", async () => {
+  const source = await Deno.readTextFile("page/src/App.tsx");
+  const mountIndex = source.indexOf("const handleMount");
+  const mountedMonacoIndex = source.indexOf(
+    "lspGate.setMonaco(mountedMonaco)",
+    mountIndex,
+  );
+
+  assert(mountIndex >= 0, "Monaco mount handler is missing");
+  assert(
+    mountedMonacoIndex > mountIndex,
+    "mounted Monaco does not satisfy the LSP startup gate",
+  );
+  assert(
+    !source.includes("lspGate.setMonaco(monaco);"),
+    "module-level Monaco satisfies the gate before editor mount",
+  );
+  assert(
+    !source.includes("when={isLspReady()}"),
+    "editor rendering is blocked on successful LSP startup",
+  );
+});

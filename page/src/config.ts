@@ -1,5 +1,3 @@
-import { File } from "@bjorn3/browser_wasi_shim";
-
 export const default_value = `// /src/main.rs
 fn main() {
     let first_time = std::time::SystemTime::now();
@@ -15,7 +13,3 @@ fn main() {
     println!("Time: {:?}", first_time.elapsed().unwrap());
 }
 `;
-
-export const rust_file: File = new File(
-  new TextEncoder().encode(default_value),
-);

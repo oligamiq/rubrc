@@ -1,4 +1,7 @@
-import { RustLspResourceOwner, disposeRustLspResources } from "./rust_lsp_client_dispose.ts";
+import {
+  disposeRustLspResources,
+  RustLspResourceOwner,
+} from "./rust_lsp_client_dispose.ts";
 
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
@@ -31,15 +34,37 @@ Deno.test("Fetching progress remains attached to resource ownership", async () =
   assert(ownerIndex > recordIndex, "progress listener is not resource-owned");
 });
 
+Deno.test("syntax-tree requests are exposed only in LSP test builds", async () => {
+  const clientSource = await Deno.readTextFile("page/src/rust_lsp_client.ts");
+  const apiSource = await Deno.readTextFile("page/src/lsp_test_api.ts");
+  const guardIndex = clientSource.indexOf(
+    'if (import.meta.env.VITE_RUBRC_LSP_TEST === "1")',
+  );
+  const exposureIndex = clientSource.indexOf(
+    "exposeSyntaxTreeRequest(client)",
+    guardIndex,
+  );
+
+  assert(guardIndex >= 0, "syntax-tree test request build guard is missing");
+  assert(
+    exposureIndex > guardIndex,
+    "syntax-tree test request is exposed outside its build guard",
+  );
+  assert(
+    apiSource.includes('client.sendRequest("rust-analyzer/viewSyntaxTree"'),
+    "test API does not send the syntax-tree request through the active client",
+  );
+});
+
 Deno.test("RustLspResourceOwner disposes all resources even if one throws", async () => {
   const owner = new RustLspResourceOwner();
-  
+
   let syncDisposed = false;
   owner.setSync({
     dispose: async () => {
       syncDisposed = true;
       throw new Error("sync dispose failed");
-    }
+    },
   });
 
   let clientStopped = false;
@@ -48,7 +73,7 @@ Deno.test("RustLspResourceOwner disposes all resources even if one throws", asyn
     stop: async () => {
       clientStopped = true;
       throw new Error("client stop failed");
-    }
+    },
   });
 
   let connectionDisposed = false;
@@ -56,7 +81,7 @@ Deno.test("RustLspResourceOwner disposes all resources even if one throws", asyn
     dispose: () => {
       connectionDisposed = true;
       throw new Error("connection dispose failed");
-    }
+    },
   });
 
   let sharedRefClosed = false;
@@ -64,8 +89,8 @@ Deno.test("RustLspResourceOwner disposes all resources even if one throws", asyn
     bc: {
       close: () => {
         sharedRefClosed = true;
-      }
-    }
+      },
+    },
   });
 
   let errorThrown = false;
@@ -85,29 +110,29 @@ Deno.test("RustLspResourceOwner disposes all resources even if one throws", asyn
 
 Deno.test("RustLspResourceOwner is idempotent", async () => {
   const owner = new RustLspResourceOwner();
-  
+
   let disposes = 0;
   owner.setSync({
     dispose: async () => {
       disposes++;
-    }
+    },
   });
 
   await owner.dispose();
   await owner.dispose();
-  
+
   assert(disposes === 1, "disposed multiple times");
 });
 
 Deno.test("RustLspResourceOwner gracefully handles missing resources", async () => {
   const owner = new RustLspResourceOwner();
-  
+
   let clientStopped = false;
   owner.setClient({
     needsStop: () => true,
     stop: async () => {
       clientStopped = true;
-    }
+    },
   });
 
   await owner.dispose();
@@ -134,10 +159,20 @@ Deno.test("disposeRustLspResources tests synchronous construction failure cleanl
   let sharedRefClosed = false;
 
   await disposeRustLspResources(
-    { dispose: async () => { syncDisposed = true; } },
+    {
+      dispose: async () => {
+        syncDisposed = true;
+      },
+    },
     undefined, // client failed to construct
     undefined, // connection failed to construct
-    { bc: { close: () => { sharedRefClosed = true; } } }
+    {
+      bc: {
+        close: () => {
+          sharedRefClosed = true;
+        },
+      },
+    },
   );
 
   assert(syncDisposed, "sync should be disposed");
@@ -150,7 +185,7 @@ Deno.test("startRustLspClient preserves original construction error when cleanup
   owner.setSync({
     dispose: async () => {
       throw new Error("cleanup rejected");
-    }
+    },
   });
 
   const originalError = new Error("construction failed");
@@ -163,7 +198,10 @@ Deno.test("startRustLspClient preserves original construction error when cleanup
       await owner.dispose();
     } catch (cleanupError) {
       // cleanupError is caught and logged, but originalError is preserved
-      assert(cleanupError instanceof AggregateError, "Cleanup should throw AggregateError");
+      assert(
+        cleanupError instanceof AggregateError,
+        "Cleanup should throw AggregateError",
+      );
     }
     caughtError = error;
   }

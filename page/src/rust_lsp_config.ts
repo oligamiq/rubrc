@@ -1,6 +1,6 @@
 export function createRustAnalyzerInitializationOptions() {
   return {
-    cargo: { sysroot: "/sysroot" },
+    cargo: { sysroot: "/sysroot", buildScripts: { enable: false } },
     linkedProjects: [
       {
         sysroot: "/sysroot",

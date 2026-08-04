@@ -127,3 +127,23 @@ Deno.test("workspace rejects paths outside the POSIX root", () => {
     assert(rejected, `accepted invalid path: ${path}`);
   }
 });
+
+Deno.test("terminal consumes the shared preopen instead of constructing a private root", async () => {
+  const source = await Deno.readTextFile("page/src/xterm.tsx");
+  assert(
+    source.includes("workspaceFileSystem.preopen"),
+    "shared preopen missing",
+  );
+  assert(
+    source.includes("workspaceFileSystem.rootDirectory"),
+    "shared child root missing",
+  );
+  assert(
+    source.includes("workspaceFileSystem.sysrootContents"),
+    "shared sysroot missing",
+  );
+  assert(
+    !source.includes("new PreopenDirectory("),
+    "terminal still constructs a private preopen",
+  );
+});

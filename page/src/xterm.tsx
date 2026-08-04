@@ -8,15 +8,8 @@ import {
   WASIFarm,
   type WASIFarmRef,
 } from "@oligami/browser_wasi_shim-threads";
-import {
-  Directory,
-  Fd,
-  File,
-  type Inode,
-  PreopenDirectory,
-} from "@bjorn3/browser_wasi_shim";
+import { Fd } from "@bjorn3/browser_wasi_shim";
 import type { Ctx } from "./ctx";
-import { rust_file } from "./config";
 import {
   createHttpBridge,
   isHttpBridgeMessage,
@@ -33,6 +26,7 @@ import {
 } from "./sysroot_archive";
 import { routeWasiTerminalWrite } from "./worker_process/lsp_dispatch";
 import { populateWebRustSrc } from "./web_sysroot";
+import { workspaceFileSystem } from "./workspace_fs";
 
 wait_async_polyfill();
 
@@ -229,9 +223,11 @@ export const SetupMyTerminal = (props: {
 
   const onData = (data: string) => {
     console.log(
-      `[UI] onData received for session ${props.sessionId}, length: ${data.length}, first char code: ${data.charCodeAt(
-        0,
-      )}`,
+      `[UI] onData received for session ${props.sessionId}, length: ${data.length}, first char code: ${
+        data.charCodeAt(
+          0,
+        )
+      }`,
     );
 
     // Map ANSI escape sequences to custom wasi-shell key codes
@@ -362,54 +358,6 @@ const get_ref = (
     }
   }
 
-  const toMap = (arr: Array<[string, Inode]>) => {
-    const map = new Map<string, Inode>();
-    for (const [key, value] of arr) {
-      map.set(key, value);
-    }
-    return map;
-  };
-
-  const sysrootContents = new Map<string, Inode>();
-  const root_dir = new PreopenDirectory(
-    "/",
-    toMap([
-      ["sysroot", new Directory(sysrootContents)],
-      ["src", new Directory(toMap([["main.rs", rust_file]]))],
-      [
-        "Cargo.toml",
-        new File(
-          new TextEncoder().encode(`[package]
-name = "main"
-version = "0.1.0"
-edition = "2021"
-`),
-        ),
-      ],
-      [
-        ".cargo",
-        new Directory(toMap([["config.toml", new File(new Uint8Array())]])),
-      ],
-      [
-        "rust-project.json",
-        new File(
-          new TextEncoder().encode(
-            JSON.stringify({
-              sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
-              crates: [
-                {
-                  root_module: "/src/main.rs",
-                  edition: "2021",
-                  deps: [],
-                },
-              ],
-            }),
-          ),
-        ),
-      ],
-    ]),
-  );
-
   let download_name = "";
   let download_chunks: Uint8Array[] = [];
 
@@ -427,12 +375,12 @@ edition = "2021"
   const childBridge = createChildProcessBridge({
     getWasiRef: () => farm.get_ref(),
     workerUrl: childProcessWorkerUrl,
-    filesystemRoot: root_dir.dir,
+    filesystemRoot: workspaceFileSystem.rootDirectory,
     uploadTimeoutMs: 30000,
     executionTimeoutMs: 120000,
   });
 
-  farm = new WASIFarm(stdin, stdout, stderr, [root_dir], {
+  farm = new WASIFarm(stdin, stdout, stderr, [workspaceFileSystem.preopen], {
     allocator_size: 100 * 1024 * 1024, // 100MB
     base_call_allocator_size: 64 * 1024 * 1024, // 64 MiB
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -469,11 +417,15 @@ edition = "2021"
         try {
           sysroot_queue = await loadSysrootArchive(triple);
           if (triple === "rust-src") {
-            populateWebRustSrc(sysrootContents, sysroot_queue);
+            populateWebRustSrc(
+              workspaceFileSystem.sysrootContents,
+              sysroot_queue,
+            );
           }
         } catch (error) {
-          sysroot_error =
-            error instanceof Error ? error.message : String(error);
+          sysroot_error = error instanceof Error
+            ? error.message
+            : String(error);
           console.error(`Failed to fetch ${triple}`, error);
         }
         return {};
@@ -503,8 +455,9 @@ edition = "2021"
         if (current_sysroot_file) {
           const chunk_len = unknown.args.chunk_len as number;
           const chunk = current_sysroot_file.data.slice(0, chunk_len);
-          current_sysroot_file.data =
-            current_sysroot_file.data.slice(chunk_len);
+          current_sysroot_file.data = current_sysroot_file.data.slice(
+            chunk_len,
+          );
           return { chunk: Array.from(chunk) };
         }
         return { chunk: [] };

@@ -7,15 +7,20 @@ import {
   ProgressType,
 } from "vscode-languageclient/browser.js";
 import type { Ctx } from "./ctx";
-import { default_value, rust_file } from "./config";
+import { default_value } from "./config";
 import { createLspConnection } from "./lsp_bridge";
 import { RustDocumentSync } from "./rust_document_sync";
-import { VFS_SYNC_SESSION_ID } from "./lsp_protocol";
 import { RustLspResourceOwner } from "./rust_lsp_client_dispose";
 import { createRustAnalyzerInitializationOptions } from "./rust_lsp_config";
 import { runRustLspStartup } from "./rust_lsp_startup";
-import { recordDidOpenComplete, recordVfsWrite } from "./lsp_test_api";
-import * as lspTestApi from "./lsp_test_api";
+import { createWorkspaceVfsWriter } from "./workspace_sync";
+import {
+  exposeSyntaxTreeRequest,
+  handlePublishedDiagnostics,
+  recordDidOpenComplete,
+  recordLspProgress,
+  recordVfsWrite,
+} from "./lsp_test_api";
 
 class RustMonacoLanguageClient extends MonacoLanguageClient {
   protected override fillInitializeParams(params: InitializeParams): void {
@@ -36,19 +41,13 @@ export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
     const vfsSharedRef = new SharedObjectRef(ctx.input_string_id);
     owner.setVfsSharedRef(vfsSharedRef);
 
-    const input =
-      vfsSharedRef.proxy<
-        (args: { sessionId: number; data: string }) => Promise<void>
-      >();
+    const input = vfsSharedRef.proxy<
+      (args: { sessionId: number; data: string }) => Promise<void>
+    >();
 
+    const writeWorkspace = createWorkspaceVfsWriter(input);
     const writeAndRecordWorkspace = async (path: string, content: string) => {
-      if (path === "/src/main.rs") {
-        rust_file.data = new TextEncoder().encode(content);
-      }
-      await input({
-        sessionId: VFS_SYNC_SESSION_ID,
-        data: JSON.stringify({ path, content }),
-      });
+      await writeWorkspace(path, content);
       recordVfsWrite(path, content);
     };
     const sync = new RustDocumentSync(writeAndRecordWorkspace, {
@@ -70,6 +69,7 @@ export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
         },
         middleware: {
           ...sync.middleware,
+          handleDiagnostics: handlePublishedDiagnostics,
           provideDiagnostics: () => ({ kind: "full", items: [] }),
         },
         initializationOptions: createRustAnalyzerInitializationOptions(),
@@ -77,11 +77,14 @@ export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
       messageTransports: connection,
     });
     owner.setClient(client);
+    if (import.meta.env.VITE_RUBRC_LSP_TEST === "1") {
+      exposeSyntaxTreeRequest(client);
+    }
 
     const progressDisposable = client.onProgress(
       new ProgressType<{ kind: string }>(),
       "rustAnalyzer/Fetching",
-      (value) => lspTestApi.recordLspProgress(value),
+      (value) => recordLspProgress(value),
     );
     owner.setProgressDisposable(progressDisposable);
 

@@ -1,9 +1,9 @@
-import { createSignal, For, lazy, onCleanup, Show, Suspense } from "solid-js";
+import { createSignal, For, lazy, onCleanup, Suspense } from "solid-js";
 import * as monaco from "monaco-editor";
 import { SetupMyTerminal } from "./xterm";
 import type { WASIFarmRef } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
-import { default_value, rust_file } from "./config";
+import { default_value } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
@@ -22,7 +22,7 @@ const Select = lazy(async () => {
 });
 
 const MonacoEditor = lazy(() =>
-  import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor })),
+  import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor }))
 );
 
 type Pane = {
@@ -38,10 +38,18 @@ const App = (props: {
   const lspGate = new LspStartGate<typeof import("monaco-editor")>(
     async (monaco) => await startRustLspClient(props.ctx, monaco),
   );
-  lspGate.setMonaco(monaco);
+  let lspStartObserved = false;
+  const observeLspStart = () => {
+    const started = lspGate.started();
+    if (!started || lspStartObserved) return;
+    lspStartObserved = true;
+    void started.catch(console.error);
+  };
 
   const handleMount = (mountedMonaco: typeof import("monaco-editor")) => {
     exposeMonaco(mountedMonaco);
+    lspGate.setMonaco(mountedMonaco);
+    observeLspStart();
     markLspReady();
   };
   let load_additional_sysroot: ((triple: string) => Promise<void>) | undefined;
@@ -56,19 +64,17 @@ const App = (props: {
   ]);
   const [nextPaneId, setNextPaneId] = createSignal(2);
   const [nextSessionId, setNextSessionId] = createSignal(1);
-  const [draggedTab, setDraggedTab] = createSignal<{
-    paneId: number;
-    sessionId: number;
-  } | null>(null);
+  const [draggedTab, setDraggedTab] = createSignal<
+    {
+      paneId: number;
+      sessionId: number;
+    } | null
+  >(null);
   const [isReady, setIsReady] = createSignal(false);
-  const [isLspReady, setIsLspReady] = createSignal(false);
   const sharedReady = new SharedObject((result: VfsReadyResult) => {
     setIsReady(true);
     lspGate.setVfsResult(result);
-    void lspGate
-      .started()
-      ?.then(() => setIsLspReady(true))
-      .catch(console.error);
+    observeLspStart();
     if (!result.ok) console.error(result.error);
   }, props.ctx.vfs_ready_id);
 
@@ -128,12 +134,9 @@ const App = (props: {
         .map((p) => {
           if (p.id === paneId) {
             const newTabs = p.tabs.filter((t) => t !== sessionId);
-            const newActive =
-              p.activeTab === sessionId
-                ? newTabs.length > 0
-                  ? newTabs[newTabs.length - 1]
-                  : -1
-                : p.activeTab;
+            const newActive = p.activeTab === sessionId
+              ? newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1
+              : p.activeTab;
             return { ...p, tabs: newTabs, activeTab: newActive };
           }
           return p;
@@ -144,9 +147,7 @@ const App = (props: {
 
   const setActiveTab = (paneId: number, sessionId: number) => {
     setPanes(
-      panes().map((p) =>
-        p.id === paneId ? { ...p, activeTab: sessionId } : p,
-      ),
+      panes().map((p) => p.id === paneId ? { ...p, activeTab: sessionId } : p),
     );
   };
 
@@ -168,12 +169,9 @@ const App = (props: {
         .map((p) => {
           if (p.id === dragged.paneId) {
             const newTabs = p.tabs.filter((t) => t !== dragged.sessionId);
-            const newActive =
-              p.activeTab === dragged.sessionId
-                ? newTabs.length > 0
-                  ? newTabs[newTabs.length - 1]
-                  : -1
-                : p.activeTab;
+            const newActive = p.activeTab === dragged.sessionId
+              ? newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1
+              : p.activeTab;
             return { ...p, tabs: newTabs, activeTab: newActive };
           }
           if (p.id === targetPaneId) {
@@ -207,8 +205,7 @@ const App = (props: {
 
   return (
     <div class="h-screen flex flex-col overflow-hidden">
-      <Show
-        when={isLspReady()}
+      <Suspense
         fallback={
           <div
             class="p-4 text-white"
@@ -218,16 +215,14 @@ const App = (props: {
           </div>
         }
       >
-        <Suspense>
-          <MonacoEditor
-            language="rust"
-            path="/src/main.rs"
-            value={default_value}
-            height="30vh"
-            onMount={handleMount}
-          />
-        </Suspense>
-      </Show>
+        <MonacoEditor
+          language="rust"
+          path="file:///src/main.rs"
+          value={default_value}
+          height="30vh"
+          onMount={handleMount}
+        />
+      </Suspense>
 
       <div class="flex-1 flex flex-col min-h-0 bg-black border-t border-gray-700">
         <div class="flex">
@@ -306,7 +301,8 @@ const App = (props: {
         <div
           class="flex-1 min-h-0 min-w-0 grid overflow-hidden"
           style={{
-            "grid-template-columns": `repeat(${panes().length}, minmax(0, 1fr))`,
+            "grid-template-columns":
+              `repeat(${panes().length}, minmax(0, 1fr))`,
           }}
         >
           <For each={allSessionIds()}>
