@@ -58,7 +58,9 @@ export const fetch_compressed_stream = async (
     if (!response) {
       response = await fetch(url, { signal });
       if (response.ok) {
-        await cache.put(url, response.clone());
+        void cache.put(url, response.clone()).catch((error) => {
+          console.warn("Failed to cache compressed asset", error);
+        });
       }
     }
   } else {
