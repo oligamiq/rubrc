@@ -9,6 +9,45 @@ import { buildPreopenDirectory } from "./build_preopen.ts";
 import { prepareCachedSysroot } from "./sysroot_cache.ts";
 import { prepareInstalledRustSrcArchive } from "./rust_src_archive.ts";
 
+function assertAtLeastFourPairedHostCargoCalls(trace: string): void {
+  const events = Array.from(
+    trace.matchAll(
+      /\[vfs-debug\] host-cargo:(request|response|reject) id=(\d+)(?: status=(-?\d+))?/g,
+    ),
+    (match) => ({ phase: match[1], id: Number(match[2]) }),
+  );
+  const requestIds = events.filter((event) => event.phase === "request").map(
+    (event) => event.id,
+  );
+  const uniqueRequestIds = new Set(requestIds);
+  const outcomeIds = events.filter((event) => event.phase !== "request").map(
+    (event) => event.id,
+  );
+  if (requestIds.length < 4 || uniqueRequestIds.size !== requestIds.length) {
+    throw new Error(
+      `expected at least four distinct host-cargo requests, received ${
+        requestIds.join(",")
+      }`,
+    );
+  }
+  if (
+    outcomeIds.length !== requestIds.length ||
+    outcomeIds.some((id) => !uniqueRequestIds.has(id))
+  ) {
+    throw new Error("host-cargo trace contains an orphan outcome");
+  }
+  for (const id of uniqueRequestIds) {
+    const outcomes = events.filter((event) =>
+      event.id === id && event.phase !== "request"
+    );
+    if (outcomes.length !== 1 || outcomes[0].phase !== "response") {
+      throw new Error(
+        `host-cargo id=${id} did not have one paired response`,
+      );
+    }
+  }
+}
+
 const testDir = "./test_workspace_lsp_diagnostics";
 await Deno.remove(testDir, { recursive: true }).catch((error) => {
   if (!(error instanceof Deno.errors.NotFound)) throw error;
@@ -18,7 +57,9 @@ await prepareCachedSysroot({ workspaceSysroot: `${testDir}/sysroot` });
 const { archive: rustSrcArchive, source: rustSrcSource } =
   await prepareInstalledRustSrcArchive();
 console.log(
-  `${rustSrcSource === "cache" ? "reused" : "generated"} validated rust-src cache`,
+  `${
+    rustSrcSource === "cache" ? "reused" : "generated"
+  } validated rust-src cache`,
 );
 await Deno.mkdir(`${testDir}/src`, { recursive: true });
 await Deno.writeTextFile(
@@ -143,29 +184,48 @@ const worker = new Worker(
   new URL("./vfs_lsp_diagnostics_worker.ts", import.meta.url),
   { type: "module" },
 );
-const result = await new Promise<{ ok: boolean; detail: string }>((resolve) => {
-  const timer = setTimeout(() => {
-    worker.terminate();
-    resolve({
-      ok: false,
-      detail: "diagnostics worker timed out after 360 seconds",
-    });
-  }, 360_000);
-  worker.onmessage = (event) => {
-    clearTimeout(timer);
-    resolve(event.data);
-  };
-  worker.onerror = (event) => {
-    clearTimeout(timer);
-    resolve({ ok: false, detail: event.message });
-  };
-  worker.postMessage(
-    { wasiRef: farm.get_ref(), lspOutputPort: lspOutput.port2 },
-    [lspOutput.port2],
-  );
-});
+const result = await new Promise<
+  {
+    ok: boolean;
+    detail: string;
+    trace: string;
+    traceDroppedChunks: number;
+  }
+>(
+  (resolve) => {
+    const timer = setTimeout(() => {
+      worker.terminate();
+      resolve({
+        ok: false,
+        detail: "diagnostics worker timed out after 360 seconds",
+        trace: "",
+        traceDroppedChunks: 0,
+      });
+    }, 360_000);
+    worker.onmessage = (event) => {
+      clearTimeout(timer);
+      resolve(event.data);
+    };
+    worker.onerror = (event) => {
+      clearTimeout(timer);
+      resolve({
+        ok: false,
+        detail: event.message,
+        trace: "",
+        traceDroppedChunks: 0,
+      });
+    };
+    worker.postMessage(
+      { wasiRef: farm.get_ref(), lspOutputPort: lspOutput.port2 },
+      [lspOutput.port2],
+    );
+  },
+);
 worker.terminate();
 lspOutput.port1.close();
 console.log(result.detail);
+console.log(result.trace);
+console.log(`trace dropped chunks: ${result.traceDroppedChunks}`);
+if (result.ok) assertAtLeastFourPairedHostCargoCalls(result.trace);
 console.log(`served ${rustSrcTemplates?.length ?? 0} rust-src archive entries`);
 if (!result.ok) Deno.exit(1);

@@ -1,8 +1,16 @@
 import { spawn } from "node:child_process";
 import puppeteer from "puppeteer";
+import {
+  ANALYSIS_TIMEOUT_MS,
+  DIAGNOSTICS_TIMEOUT_MS,
+  STARTUP_TIMEOUT_MS,
+  waitForDiagnosticsQuiescence,
+} from "./lsp_browser_quiescence.mjs";
+import { safeFailureState } from "./lsp_browser_failure_state.mjs";
+import { VfsDebugTraceCollector } from "../page/src/vfs_debug_trace.ts";
 
 const url = "http://127.0.0.1:4173";
-const invalidMain = "fn main() { let value = ; }\n";
+const invalidMain = 'fn main() { let value: i32 = "wrong"; }\n';
 const validMain = "fn main() {}\n";
 const invalidSecondary = "pub fn secondary() { let value = ; }\n";
 let browser;
@@ -32,93 +40,186 @@ try {
   preview.stderr.resume();
   await waitForServer();
 
-  browser = await puppeteer.launch({ headless: true });
+  browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
   const page = await browser.newPage();
   const browserErrors = [];
-  page.on("pageerror", (error) =>
-    browserErrors.push(error.stack ?? error.message),
+  const traceCollector = new VfsDebugTraceCollector();
+  page.on(
+    "pageerror",
+    (error) => browserErrors.push(error.stack ?? error.message),
   );
   page.on("console", (message) => {
+    const text = message.text();
+    console.log(`[Browser Console] ${text}`);
+    if (text.startsWith("[vfs-stall-trace]")) {
+      traceCollector.push(
+        text.slice("[vfs-stall-trace]".length).replace(/^ /, ""),
+      );
+    }
     if (
       message.type() === "error" &&
-      !message.text().startsWith("overly long loop turn took ")
+      !text.startsWith("overly long loop turn took ")
     ) {
-      browserErrors.push(message.text());
+      browserErrors.push(text);
     }
   });
   page.on("requestfailed", (request) => {
     browserErrors.push(
-      `request failed: ${request.url()} (${request.failure()?.errorText ?? "unknown"})`,
+      `request failed: ${request.url()} (${
+        request.failure()?.errorText ?? "unknown"
+      })`,
     );
   });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   try {
     await page.waitForFunction(
-      () => window.__rubrcLspTest?.ready && window.__rubrcLspTest.monaco,
-      { timeout: 120_000 },
+      () =>
+        window.__rubrcLspTest?.ready &&
+        window.__rubrcLspTest.monaco &&
+        window.__rubrcLspTest.mainDidOpenComplete === true &&
+        window.__rubrcLspTest.mainDiagnosticsPublicationCount > 0 &&
+        window.__rubrcLspTest.vfsWrites.some(
+          (write) => write.path === "/src/main.rs",
+        ),
+      { timeout: STARTUP_TIMEOUT_MS },
     );
   } catch (error) {
-    const state = await page.evaluate(() => ({
-      hook:
-        window.__rubrcLspTest === undefined
-          ? "missing"
-          : {
-              ready: window.__rubrcLspTest.ready,
-              hasMonaco: window.__rubrcLspTest.monaco !== undefined,
-              vfsWriteCount: window.__rubrcLspTest.vfsWrites.length,
-            },
-      terminal: document.body.innerText.slice(-4_000),
-    }));
+    const state = await safeFailureState(
+      () =>
+        page.evaluate(() => ({
+          hook: window.__rubrcLspTest,
+        })),
+      () => traceCollector.snapshot(),
+    );
     throw new Error(
-      `browser readiness failed: ${error.message}\nstate: ${JSON.stringify(state)}\nbrowser errors:\n${browserErrors.join("\n")}`,
+      `browser readiness failed: ${error.message}\nstate: ${
+        JSON.stringify(state)
+      }\nbrowser errors:\n${browserErrors.join("\n")}`,
     );
   }
 
-  await page.waitForFunction(
-    () => window.__rubrcLspTest?.mainDidOpenComplete === true,
-    { timeout: 15_000 },
+  try {
+    await waitForDiagnosticsQuiescence({
+      stage: "initial diagnostics",
+      waitForPublication: async () => {},
+      requestSyntaxTree: () =>
+        page.evaluate(() => {
+          const request = window.__rubrcLspTest?.requestSyntaxTree;
+          if (!request) {
+            throw new Error("syntax-tree test request is unavailable");
+          }
+          return request("file:///src/main.rs");
+        }),
+    });
+  } catch (error) {
+    const state = await safeFailureState(
+      () =>
+        page.evaluate(() => ({
+          mainDiagnosticsPublicationCount: window.__rubrcLspTest
+            ?.mainDiagnosticsPublicationCount,
+          mainDidOpenComplete: window.__rubrcLspTest?.mainDidOpenComplete,
+        })),
+      () => traceCollector.snapshot(),
+    );
+    throw new Error(
+      `initial diagnostics quiescence failed: ${error.message}\nstate: ${
+        JSON.stringify(state)
+      }\nbrowser errors:\n${browserErrors.join("\n")}`,
+    );
+  }
+
+  const readinessPublicationCount = await page.evaluate(
+    () => window.__rubrcLspTest.mainDiagnosticsPublicationCount,
   );
 
+  const analysisDeadline = Date.now() + ANALYSIS_TIMEOUT_MS;
+  const remainingAnalysisBudget = () =>
+    Math.max(1, analysisDeadline - Date.now());
   await page.evaluate((text) => {
     const { monaco } = window.__rubrcLspTest;
-    const uri = monaco.Uri.parse("file:///src/main.rs");
-    const model = monaco.editor.getModel(uri);
-    if (!model) throw new Error("main.rs Monaco model is missing");
-    model.setValue(text);
+    monaco.editor
+      .getModel(monaco.Uri.parse("file:///src/main.rs"))
+      .setValue(text);
   }, invalidMain);
   try {
-    await page.waitForFunction(
-      () => {
-        const { monaco } = window.__rubrcLspTest;
-        const uri = monaco.Uri.parse("file:///src/main.rs");
-        return monaco.editor
-          .getModelMarkers({ resource: uri })
-          .some(
-            (marker) =>
-              marker.severity === monaco.MarkerSeverity.Error &&
-              marker.startLineNumber === 1,
-          );
-      },
-      { timeout: 15_000 },
-    );
-  } catch (error) {
-    const state = await page.evaluate(() => {
-      const { mainDidOpenComplete, monaco, vfsWrites } = window.__rubrcLspTest;
-      const uri = monaco.Uri.parse("file:///src/main.rs");
-      const model = monaco.editor.getModel(uri);
-      return {
-        modelText: model?.getValue(),
-        languageId: model?.getLanguageId(),
-        mainDidOpenComplete,
-        modelUris: monaco.editor.getModels().map((item) => item.uri.toString()),
-        markers: monaco.editor.getModelMarkers({ resource: uri }),
-        vfsWrites,
-      };
+    await waitForDiagnosticsQuiescence({
+      stage: "invalid diagnostics",
+      waitForPublication: () =>
+        page.waitForFunction(
+          ({ previousPublicationCount }) => {
+            return window.__rubrcLspTest.mainDiagnosticsPublicationCount >
+              previousPublicationCount;
+          },
+          { timeout: remainingAnalysisBudget() },
+          { previousPublicationCount: readinessPublicationCount },
+        ),
+      waitForMarkers: () =>
+        page.waitForFunction(
+          () => {
+            const { monaco } = window.__rubrcLspTest;
+            const uri = monaco.Uri.parse("file:///src/main.rs");
+            return monaco.editor.getModelMarkers({ resource: uri }).some(
+              (marker) =>
+                marker.severity === monaco.MarkerSeverity.Error &&
+                marker.source === "rust-analyzer" &&
+                marker.message.includes("i32") &&
+                marker.message.includes("str") &&
+                marker.startLineNumber === 1,
+            );
+          },
+          { timeout: remainingAnalysisBudget() },
+        ),
+      requestSyntaxTree: () =>
+        page.evaluate(() => {
+          const request = window.__rubrcLspTest?.requestSyntaxTree;
+          if (!request) {
+            throw new Error("syntax-tree test request is unavailable");
+          }
+          return request("file:///src/main.rs");
+        }),
+      timeoutMs: remainingAnalysisBudget(),
     });
+  } catch (error) {
+    const state = await safeFailureState(
+      () =>
+        page.evaluate(() => {
+          const {
+            mainDiagnosticsPublicationCount,
+            mainDidOpenComplete,
+            lspEvents,
+            monaco,
+            vfsWrites,
+          } = window.__rubrcLspTest;
+          const uri = monaco.Uri.parse("file:///src/main.rs");
+          const model = monaco.editor.getModel(uri);
+          return {
+            modelText: model?.getValue(),
+            languageId: model?.getLanguageId(),
+            mainDiagnosticsPublicationCount,
+            mainDidOpenComplete,
+            lspEvents,
+            modelUris: monaco.editor.getModels().map((item) =>
+              item.uri.toString()
+            ),
+            markers: monaco.editor.getModelMarkers({ resource: uri }),
+            vfsWrites,
+          };
+        }),
+      () => traceCollector.snapshot(),
+    );
     throw new Error(
-      `initial diagnostics failed: ${error.message}\nstate: ${JSON.stringify(state)}\nbrowser errors:\n${browserErrors.join("\n")}`,
+      `invalid diagnostics failed: ${error.message}\nstate: ${
+        JSON.stringify(state)
+      }\nbrowser errors:\n${browserErrors.join("\n")}`,
     );
   }
+
+  const invalidPublicationCount = await page.evaluate(
+    () => window.__rubrcLspTest.mainDiagnosticsPublicationCount,
+  );
 
   await page.evaluate((text) => {
     const { monaco } = window.__rubrcLspTest;
@@ -126,16 +227,62 @@ try {
       .getModel(monaco.Uri.parse("file:///src/main.rs"))
       .setValue(text);
   }, validMain);
-  await page.waitForFunction(
-    () => {
-      const { monaco } = window.__rubrcLspTest;
-      const uri = monaco.Uri.parse("file:///src/main.rs");
-      return !monaco.editor
-        .getModelMarkers({ resource: uri })
-        .some((marker) => marker.severity === monaco.MarkerSeverity.Error);
-    },
-    { timeout: 15_000 },
-  );
+  try {
+    await waitForDiagnosticsQuiescence({
+      stage: "clearing diagnostics",
+      waitForPublication: () =>
+        page.waitForFunction(
+          ({ previousPublicationCount }) => {
+            return window.__rubrcLspTest.mainDiagnosticsPublicationCount >
+              previousPublicationCount;
+          },
+          { timeout: DIAGNOSTICS_TIMEOUT_MS },
+          { previousPublicationCount: invalidPublicationCount },
+        ),
+      waitForMarkers: () =>
+        page.waitForFunction(
+          () => {
+            const { monaco } = window.__rubrcLspTest;
+            const uri = monaco.Uri.parse("file:///src/main.rs");
+            return !monaco.editor
+              .getModelMarkers({ resource: uri })
+              .some((marker) =>
+                marker.severity === monaco.MarkerSeverity.Error
+              );
+          },
+          { timeout: DIAGNOSTICS_TIMEOUT_MS },
+        ),
+      requestSyntaxTree: () =>
+        page.evaluate(() => {
+          const request = window.__rubrcLspTest?.requestSyntaxTree;
+          if (!request) {
+            throw new Error("syntax-tree test request is unavailable");
+          }
+          return request("file:///src/main.rs");
+        }),
+    });
+  } catch (error) {
+    const state = await safeFailureState(
+      () =>
+        page.evaluate(() => {
+          const { mainDiagnosticsPublicationCount, monaco, vfsWrites } =
+            window.__rubrcLspTest;
+          const uri = monaco.Uri.parse("file:///src/main.rs");
+          return {
+            mainDiagnosticsPublicationCount,
+            markers: monaco.editor.getModelMarkers({ resource: uri }),
+            modelText: monaco.editor.getModel(uri)?.getValue(),
+            vfsWrites,
+          };
+        }),
+      () => traceCollector.snapshot(),
+    );
+    throw new Error(
+      `diagnostics clearing failed: ${error.message}\nstate: ${
+        JSON.stringify(state)
+      }\nbrowser errors:\n${browserErrors.join("\n")}`,
+    );
+  }
 
   await page.evaluate((text) => {
     const { monaco } = window.__rubrcLspTest;
@@ -156,7 +303,7 @@ try {
       );
       return marked && mirrored;
     },
-    { timeout: 15_000 },
+    { timeout: DIAGNOSTICS_TIMEOUT_MS },
     { expectedText: invalidSecondary },
   );
 
@@ -166,6 +313,15 @@ try {
     terminalText.includes("Content-Length:")
   ) {
     throw new Error("LSP JSON-RPC was routed to the terminal");
+  }
+  const fileServiceErrors = browserErrors.filter((error) =>
+    error.includes("FileOperationError") ||
+    error.includes("Unable to resolve nonexistent file")
+  );
+  if (fileServiceErrors.length > 0) {
+    throw new Error(
+      `workspace file service errors:\n${fileServiceErrors.join("\n")}`,
+    );
   }
   if (browserErrors.length > 0) {
     throw new Error(`browser errors:\n${browserErrors.join("\n")}`);
