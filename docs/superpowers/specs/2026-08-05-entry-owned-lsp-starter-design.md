@@ -9,9 +9,9 @@ pre-population, diagnostics, and Monaco markers.
 ## Root Cause
 
 `page/src/index.tsx` starts `MonacoVscodeApiWrapper` before dynamically
-importing `App`. The lazy App chunk currently imports `rust_lsp_client`, which
-causes Vite to emit a second `vscode` extension API module. Service
-initialization assigns `defaultApi` in the entry-owned copy, while
+importing `App`. In the failing build, the lazy App chunk imports
+`rust_lsp_client` and Vite emits a second `vscode` extension API module.
+Service initialization assigns `defaultApi` in the entry-owned copy, while
 `MonacoLanguageClient` construction reads the uninitialized lazy-copy proxy and
 throws `Default api is not ready yet`.
 
@@ -24,6 +24,12 @@ wrapper service lifecycle has already completed.
 `page/src/index.tsx` statically imports `startRustLspClient` before it lazily
 imports `App`. Once `ctx` exists, it passes an `startLsp(monaco)` callback that
 closes over `ctx` into `App`.
+
+The static import is safe before `MonacoVscodeApiWrapper.start()`: the language
+client module and its local dependency closure define classes, functions, and
+safe in-memory helpers at module evaluation time. They do not construct a
+language client or access guarded `vscode` APIs until the injected starter is
+called by `LspStartGate` after wrapper startup.
 
 `App` removes its direct `rust_lsp_client` import. Its props accept the typed
 starter callback and construct `LspStartGate` with that callback. The gate,
@@ -53,10 +59,10 @@ The change is test-first:
 
 1. Extend `page/src/lsp_start_gate_test.ts` to require an injected App starter
    and reject an App-local `rust_lsp_client` import.
-2. Extend `scripts/lsp_browser_diagnostics_test.mjs` to inspect built assets
-   before browser launch and require exactly one copy of the default-API error
-   literal. The current broken bundle contains two copies, so this test first
-   fails against the current production code.
+2. Extend `scripts/lsp_browser_diagnostics_test.mjs` to inspect built JavaScript
+   assets before browser launch and require the default-API error literal in
+   exactly one asset file. The current broken bundle has two such assets, so
+   this test first fails against the current production code.
 3. After the minimal source change, rerun the focused source test, full-VFS
    semantic publish/clear control, and exact browser semantic marker/clear
    acceptance.

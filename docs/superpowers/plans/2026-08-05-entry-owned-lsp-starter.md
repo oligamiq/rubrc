@@ -9,8 +9,10 @@ Monaco diagnostics.
 **Architecture:** `index.tsx` owns the runtime import of `startRustLspClient`
 and injects a typed starter callback into lazy `App`. `App` retains the existing
 Monaco/VFS `LspStartGate`, but no longer imports the language client itself.
-The browser acceptance harness asserts that the built asset graph contains one
-VS Code default-API singleton literal before launching Chromium.
+Static evaluation is safe because constructing `MonacoLanguageClient` and
+accessing guarded `vscode` APIs occur only when the starter is called. The
+browser acceptance harness asserts that the built asset graph contains one
+VS Code default-API singleton asset before launching Chromium.
 
 **Tech Stack:** TypeScript, Solid, Vite, `monaco-languageclient`, Deno tests,
 Puppeteer.
@@ -53,33 +55,38 @@ Puppeteer.
 - [ ] **Step 1: Add the failing source-contract regression test**
 
   In the existing `App mounts the editor before LSP startup but defers the main
-  model` test, read `page/src/index.tsx` in addition to `App.tsx` and assert:
+  model` test, retain its existing `source` read for `App.tsx`, then read
+  `page/src/index.tsx` and assert:
 
   ```ts
   const indexSource = await Deno.readTextFile("page/src/index.tsx");
+  const rustLspImport =
+    /import\s*\{\s*startRustLspClient\s*\}\s*from\s*["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']/;
 
   assert(
-    indexSource.includes(
-      'import { startRustLspClient } from "./rust_lsp_client"',
-    ),
+    rustLspImport.test(indexSource),
     "index.tsx must statically import startRustLspClient",
   );
   assert(
-    indexSource.includes("startLspClient={(monaco) =>") &&
-      indexSource.includes("startRustLspClient(ctx, monaco)"),
+    /startLspClient=\{\s*\(\s*monaco\s*\)\s*=>\s*startRustLspClient\(\s*ctx\s*,\s*monaco\s*\)\s*\}/s.test(
+      indexSource,
+    ),
     "index.tsx must inject the entry-owned LSP starter",
   );
   assert(
-    !source.includes('from "./rust_lsp_client"'),
+    !rustLspImport.test(source),
     "App must not own a runtime rust_lsp_client import",
   );
   assert(
-    source.includes("startLspClient: (") &&
-      source.includes("Promise<DisposableLspSession>"),
+    /startLspClient:\s*\(\s*monaco:\s*typeof import\(["']monaco-editor["']\),?\s*\)\s*=>\s*Promise<DisposableLspSession>/s.test(
+      source,
+    ),
     "App must accept the typed injected LSP starter",
   );
   assert(
-    source.indexOf("props.startLspClient") > source.indexOf("new LspStartGate"),
+    /new LspStartGate<typeof import\(["']monaco-editor["']\)>\(\s*props\.startLspClient,?\s*\)/s.test(
+      source,
+    ),
     "App must give the injected starter to LspStartGate",
   );
   ```
@@ -112,17 +119,17 @@ Puppeteer.
   async function assertSingleDefaultApiBundle() {
     const assets = new URL("../page/dist/assets/", import.meta.url);
     const entries = await readdir(assets, { withFileTypes: true });
-    let count = 0;
+    const matchingAssets = [];
 
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
       const asset = await readFile(new URL(entry.name, assets), "utf8");
-      count += asset.split(DEFAULT_API_NOT_READY).length - 1;
+      if (asset.includes(DEFAULT_API_NOT_READY)) matchingAssets.push(entry.name);
     }
 
-    if (count !== 1) {
+    if (matchingAssets.length !== 1) {
       throw new Error(
-        `expected one VS Code default API singleton in built assets, found ${count}`,
+        `expected one VS Code default API asset, found ${matchingAssets.length}: ${matchingAssets.join(", ")}`,
       );
     }
   }
@@ -140,7 +147,7 @@ Puppeteer.
   ```
 
   Expected: FAIL before Chromium launch with
-  `expected one VS Code default API singleton in built assets, found 2`.
+  `expected one VS Code default API asset, found 2`.
 
 - [ ] **Step 5: Implement the minimum entry-owned dependency boundary**
 
@@ -157,8 +164,8 @@ Puppeteer.
   ```
 
   In `page/src/App.tsx`, remove the runtime `startRustLspClient` import. Import
-  `DisposableLspSession` as a type alongside `LspStartGate`, declare the prop,
-  and pass it unchanged into the gate:
+  `DisposableLspSession` as a type alongside `LspStartGate`, then declare the
+  complete component prop shape and pass the prop unchanged into the gate:
 
   ```ts
   import {
@@ -166,13 +173,18 @@ Puppeteer.
     LspStartGate,
   } from "./lsp_start_gate";
 
-  startLspClient: (
-    monaco: typeof import("monaco-editor"),
-  ) => Promise<DisposableLspSession>;
-
-  const lspGate = new LspStartGate<typeof import("monaco-editor")>(
-    props.startLspClient,
-  );
+  const App = (props: {
+    ctx: Ctx;
+    callback: (wasi_ref: WASIFarmRef) => void;
+    startLspClient: (
+      monaco: typeof import("monaco-editor"),
+    ) => Promise<DisposableLspSession>;
+  }) => {
+    const lspGate = new LspStartGate<typeof import("monaco-editor")>(
+      props.startLspClient,
+    );
+    // Existing App body remains unchanged.
+  };
   ```
 
   Do not change `handleMount`, `observeLspStart`, the anonymous editor model,
@@ -200,7 +212,7 @@ Puppeteer.
   Run:
 
   ```bash
-  deno fmt --check page/src/index.tsx page/src/App.tsx page/src/lsp_start_gate_test.ts scripts/lsp_browser_diagnostics_test.mjs
+  bun x biome format --check page/src/index.tsx page/src/App.tsx page/src/lsp_start_gate_test.ts scripts/lsp_browser_diagnostics_test.mjs
   bun run --cwd page build
   git diff --check
   git status --short
