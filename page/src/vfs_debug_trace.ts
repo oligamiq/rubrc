@@ -8,6 +8,8 @@ export interface VfsDebugTraceRoot {
 }
 
 export const VFS_DEBUG_TRACE_LIMIT_BYTES = 64 * 1024;
+const FINAL_DRAIN_RETRY_ATTEMPTS = 3;
+const FINAL_DRAIN_RETRY_DELAY_MS = 10;
 
 interface RetainedTraceChunk {
   text: string;
@@ -244,6 +246,24 @@ export function startVfsDebugTracePump({
     }
   };
   const timer = setInterval(drain, intervalMs);
+  const scheduleFinalDrainRetry = (attemptsRemaining: number): void => {
+    if (attemptsRemaining === 0) return;
+    setTimeout(() => {
+      try {
+        const chunk = drainVfsDebugTrace(root, memory);
+        if (chunk === "") {
+          scheduleFinalDrainRetry(attemptsRemaining - 1);
+          return;
+        }
+        const emitted = safeEmit(emit, chunk);
+        if (emitted.ok === false) {
+          safeEmit(emit, traceError("stop", "emit", emitted.error));
+        }
+      } catch (error) {
+        safeEmit(emit, traceError("stop", "drain", error));
+      }
+    }, FINAL_DRAIN_RETRY_DELAY_MS);
+  };
 
   return {
     captureSnapshot,
@@ -263,7 +283,9 @@ export function startVfsDebugTracePump({
       }
       try {
         const chunk = drainVfsDebugTrace(root, memory);
-        if (chunk !== "") {
+        if (chunk === "") {
+          scheduleFinalDrainRetry(FINAL_DRAIN_RETRY_ATTEMPTS);
+        } else {
           const emitted = safeEmit(emit, chunk);
           if (emitted.ok === false) {
             errors.push({ operation: "emit", error: emitted.error });

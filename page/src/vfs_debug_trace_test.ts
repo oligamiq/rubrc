@@ -283,6 +283,57 @@ Deno.test("pump drains on schedule and snapshots at the requested cadence", () =
   }
 });
 
+Deno.test("stop retries a transient zero before abandoning the final drain", () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const timeoutCallbacks: Array<() => void> = [];
+  const timeoutDelays: number[] = [];
+  globalThis.setTimeout = ((callback: () => void, delay?: number) => {
+    timeoutCallbacks.push(callback);
+    timeoutDelays.push(delay ?? 0);
+    return 100 + timeoutCallbacks.length;
+  }) as typeof setTimeout;
+
+  try {
+    withFakeInterval((tick, cleared) => {
+      const memory = new WebAssembly.Memory({
+        initial: 1,
+        maximum: 1,
+        shared: true,
+      });
+      const root = new FakeRoot(memory);
+      root.chunks.push("final-after-contention");
+      root.zeroReads = 1;
+      const emitted: string[] = [];
+      const pump = startVfsDebugTracePump({
+        root,
+        memory,
+        emit: (chunk) => emitted.push(chunk),
+      });
+
+      pump.stop();
+      pump.stop();
+
+      assertEquals(emitted, []);
+      assertEquals(root.readCalls, 1);
+      assertEquals(timeoutCallbacks.length, 1);
+      assert(
+        Number.isFinite(timeoutDelays[0]),
+        "the final drain retry was not bounded by a finite delay",
+      );
+
+      timeoutCallbacks.shift()?.();
+      tick();
+
+      assertEquals(emitted, ["final-after-contention"]);
+      assertEquals(root.readCalls, 2);
+      assertEquals(timeoutCallbacks.length, 0);
+      assertEquals(cleared, [99]);
+    });
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
 Deno.test("captureSnapshot snapshots and drains without emitting", () => {
   const originalSetInterval = globalThis.setInterval;
   const originalClearInterval = globalThis.clearInterval;
