@@ -6,8 +6,15 @@ export async function disposeRustLspResources(
   connection: { dispose(): void } | undefined,
   vfsSharedRef: unknown | undefined,
   progressDisposable?: { dispose(): void },
+  testApiDisposable?: { dispose(): void },
 ): Promise<void> {
   const errors: unknown[] = [];
+
+  try {
+    testApiDisposable?.dispose();
+  } catch (e) {
+    errors.push(e);
+  }
 
   try {
     progressDisposable?.dispose();
@@ -50,15 +57,27 @@ export class RustLspResourceOwner {
   private connection: { dispose(): void } | undefined;
   private vfsSharedRef: unknown | undefined;
   private progressDisposable: { dispose(): void } | undefined;
+  private testApiDisposable: { dispose(): void } | undefined;
 
   private disposePromise: Promise<void> | undefined;
 
-  setSync(s: { dispose(): Promise<void> }) { this.sync = s; }
-  setClient(c: { needsStop(): boolean; stop(): Promise<void> }) { this.client = c; }
-  setConnection(c: { dispose(): void }) { this.connection = c; }
-  setVfsSharedRef(r: unknown) { this.vfsSharedRef = r; }
+  setSync(s: { dispose(): Promise<void> }) {
+    this.sync = s;
+  }
+  setClient(c: { needsStop(): boolean; stop(): Promise<void> }) {
+    this.client = c;
+  }
+  setConnection(c: { dispose(): void }) {
+    this.connection = c;
+  }
+  setVfsSharedRef(r: unknown) {
+    this.vfsSharedRef = r;
+  }
   setProgressDisposable(disposable: { dispose(): void }) {
     this.progressDisposable = disposable;
+  }
+  setTestApiDisposable(disposable: { dispose(): void }) {
+    this.testApiDisposable = disposable;
   }
 
   dispose(): Promise<void> {
@@ -69,6 +88,7 @@ export class RustLspResourceOwner {
       this.connection,
       this.vfsSharedRef,
       this.progressDisposable,
+      this.testApiDisposable,
     );
     return this.disposePromise;
   }

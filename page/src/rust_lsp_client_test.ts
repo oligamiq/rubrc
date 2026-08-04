@@ -2,9 +2,86 @@ import {
   disposeRustLspResources,
   RustLspResourceOwner,
 } from "./rust_lsp_client_dispose.ts";
+import { installSyntaxTreeRequest } from "./lsp_test_api.ts";
+import ts from "typescript";
 
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
+};
+
+const syntaxTreeExposureIsGuarded = (source: string) => {
+  const sourceFile = ts.createSourceFile(
+    "rust_lsp_client.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const exposureGuards: boolean[] = [];
+  const visit = (node: ts.Node, guarded: boolean) => {
+    if (
+      ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+      node.expression.text === "exposeSyntaxTreeRequest"
+    ) {
+      exposureGuards.push(guarded);
+    }
+
+    if (
+      ts.isIfStatement(node) &&
+      node.expression.getText(sourceFile) ===
+        'import.meta.env.VITE_RUBRC_LSP_TEST === "1"'
+    ) {
+      visit(node.thenStatement, true);
+      if (node.elseStatement) visit(node.elseStatement, guarded);
+      return;
+    }
+
+    ts.forEachChild(node, (child) => visit(child, guarded));
+  };
+  visit(sourceFile, false);
+  return exposureGuards.length === 1 && exposureGuards[0];
+};
+
+const syntaxTreeExposureFollowsStartup = (source: string) => {
+  const sourceFile = ts.createSourceFile(
+    "rust_lsp_client.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  let startup: ts.AwaitExpression | undefined;
+  let exposure: ts.CallExpression | undefined;
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isAwaitExpression(node) && ts.isCallExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === "runRustLspStartup"
+    ) {
+      startup = node;
+    }
+    if (
+      ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+      node.expression.text === "exposeSyntaxTreeRequest"
+    ) {
+      exposure = node;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return startup !== undefined && exposure !== undefined &&
+    startup.getEnd() < exposure.getStart(sourceFile);
+};
+
+const ownTestApiDisposable = (
+  owner: RustLspResourceOwner,
+  disposable: { dispose(): void },
+) => {
+  const setDisposable = (owner as unknown as {
+    setTestApiDisposable?: (value: { dispose(): void }) => void;
+  }).setTestApiDisposable;
+  assert(setDisposable, "test API disposable is not resource-owned");
+  setDisposable.call(owner, disposable);
 };
 
 Deno.test("browser startup uses the non-progress sequencer", async () => {
@@ -36,28 +113,94 @@ Deno.test("Fetching progress remains attached to resource ownership", async () =
 
 Deno.test("syntax-tree requests are exposed only in LSP test builds", async () => {
   const clientSource = await Deno.readTextFile("page/src/rust_lsp_client.ts");
-  const apiSource = await Deno.readTextFile("page/src/lsp_test_api.ts");
-  const guardIndex = clientSource.indexOf(
-    'if (import.meta.env.VITE_RUBRC_LSP_TEST === "1")',
-  );
   const exposureIndex = clientSource.indexOf(
     "exposeSyntaxTreeRequest(client)",
-    guardIndex,
+  );
+  const ownershipIndex = clientSource.indexOf(
+    "owner.setTestApiDisposable(",
   );
 
-  assert(guardIndex >= 0, "syntax-tree test request build guard is missing");
   assert(
-    exposureIndex > guardIndex,
+    syntaxTreeExposureIsGuarded(clientSource),
     "syntax-tree test request is exposed outside its build guard",
   );
   assert(
-    apiSource.includes('client.sendRequest("rust-analyzer/viewSyntaxTree"'),
-    "test API does not send the syntax-tree request through the active client",
+    !syntaxTreeExposureIsGuarded(
+      'if (import.meta.env.VITE_RUBRC_LSP_TEST === "1") {}\n' +
+        "exposeSyntaxTreeRequest(client);",
+    ),
+    "guard contract accepts an exposure call outside the guarded block",
+  );
+  assert(
+    syntaxTreeExposureFollowsStartup(clientSource),
+    "syntax-tree test request is exposed before startup completes",
+  );
+  assert(
+    !syntaxTreeExposureFollowsStartup(
+      "await runRustLspStartup({ start: () => " +
+        "exposeSyntaxTreeRequest(client) });",
+    ),
+    "startup contract accepts exposure from inside startup",
+  );
+  assert(
+    ownershipIndex >= 0 && ownershipIndex < exposureIndex,
+    "syntax-tree test request is not resource-owned",
+  );
+});
+
+Deno.test("syntax-tree callback disposal preserves a newer client", async () => {
+  const state: {
+    requestSyntaxTree?: (uri: string) => Promise<string>;
+  } = {};
+  const requests: Array<{ method: string; params: unknown }> = [];
+  const client = (name: string) => ({
+    sendRequest: async <TResult>(method: string, params: unknown) => {
+      requests.push({ method, params });
+      return name as TResult;
+    },
+  });
+
+  const firstDisposable = installSyntaxTreeRequest(state, client("first"));
+  const secondDisposable = installSyntaxTreeRequest(state, client("second"));
+  const secondRequest = state.requestSyntaxTree;
+  const result = await secondRequest?.("file:///src/main.rs");
+  assert(result === "second", "syntax-tree request used the wrong client");
+  assert(
+    requests[0]?.method === "rust-analyzer/viewSyntaxTree",
+    "syntax-tree request used the wrong method",
+  );
+  assert(
+    JSON.stringify(requests[0]?.params) ===
+      JSON.stringify({ textDocument: { uri: "file:///src/main.rs" } }),
+    "syntax-tree request used the wrong parameters",
+  );
+
+  firstDisposable.dispose();
+  assert(
+    state.requestSyntaxTree === secondRequest,
+    "disposing an older client cleared the newer callback",
+  );
+
+  const owner = new RustLspResourceOwner();
+  ownTestApiDisposable(owner, secondDisposable);
+  await owner.dispose();
+  assert(
+    state.requestSyntaxTree === undefined,
+    "normal owner disposal retained the syntax-tree callback",
   );
 });
 
 Deno.test("RustLspResourceOwner disposes all resources even if one throws", async () => {
   const owner = new RustLspResourceOwner();
+
+  const testApiError = new Error("test API dispose failed");
+  let testApiDisposed = false;
+  ownTestApiDisposable(owner, {
+    dispose: () => {
+      testApiDisposed = true;
+      throw testApiError;
+    },
+  });
 
   let syncDisposed = false;
   owner.setSync({
@@ -99,9 +242,14 @@ Deno.test("RustLspResourceOwner disposes all resources even if one throws", asyn
   } catch (e) {
     errorThrown = true;
     assert(e instanceof AggregateError, "Should throw AggregateError");
+    assert(
+      e.errors.includes(testApiError),
+      "test API error was not aggregated",
+    );
   }
 
   assert(errorThrown, "Should throw");
+  assert(testApiDisposed, "test API callback not disposed");
   assert(syncDisposed, "sync not disposed");
   assert(clientStopped, "client not stopped");
   assert(connectionDisposed, "connection not disposed");

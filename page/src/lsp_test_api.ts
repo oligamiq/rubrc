@@ -17,6 +17,8 @@ type SyntaxTreeRequestClient = {
   sendRequest<TResult>(method: string, params: unknown): Promise<TResult>;
 };
 
+type SyntaxTreeRequestState = Pick<TestApi, "requestSyntaxTree">;
+
 export function recordDidOpenComplete(uri: string): void {
   if (!enabled || uri !== "file:///src/main.rs") return;
   window.__rubrcLspTest ??= { ready: false, vfsWrites: [] };
@@ -29,7 +31,7 @@ declare global {
   }
 }
 
-const enabled = import.meta.env.VITE_RUBRC_LSP_TEST === "1";
+const enabled = import.meta.env?.VITE_RUBRC_LSP_TEST === "1";
 
 export function handlePublishedDiagnostics<
   TUri extends { toString(): string },
@@ -94,13 +96,30 @@ export function exposeMonaco(monaco: typeof Monaco): void {
   window.__rubrcLspTest.monaco = monaco;
 }
 
-export function exposeSyntaxTreeRequest(client: SyntaxTreeRequestClient): void {
-  if (!enabled) return;
-  window.__rubrcLspTest ??= { ready: false, vfsWrites: [] };
-  window.__rubrcLspTest.requestSyntaxTree = (uri) =>
-    client.sendRequest("rust-analyzer/viewSyntaxTree", {
+export function installSyntaxTreeRequest(
+  state: SyntaxTreeRequestState,
+  client: SyntaxTreeRequestClient,
+): { dispose(): void } {
+  const requestSyntaxTree = (uri: string) =>
+    client.sendRequest<string>("rust-analyzer/viewSyntaxTree", {
       textDocument: { uri },
     });
+  state.requestSyntaxTree = requestSyntaxTree;
+  return {
+    dispose: () => {
+      if (state.requestSyntaxTree === requestSyntaxTree) {
+        delete state.requestSyntaxTree;
+      }
+    },
+  };
+}
+
+export function exposeSyntaxTreeRequest(
+  client: SyntaxTreeRequestClient,
+): { dispose(): void } {
+  if (!enabled) return { dispose() {} };
+  window.__rubrcLspTest ??= { ready: false, vfsWrites: [] };
+  return installSyntaxTreeRequest(window.__rubrcLspTest, client);
 }
 
 export function markLspReady(): void {

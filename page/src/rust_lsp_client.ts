@@ -77,9 +77,6 @@ export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
       messageTransports: connection,
     });
     owner.setClient(client);
-    if (import.meta.env.VITE_RUBRC_LSP_TEST === "1") {
-      exposeSyntaxTreeRequest(client);
-    }
 
     const progressDisposable = client.onProgress(
       new ProgressType<{ kind: string }>(),
@@ -99,6 +96,10 @@ export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
         }
       },
     }, 300_000);
+
+    if (import.meta.env.VITE_RUBRC_LSP_TEST === "1") {
+      owner.setTestApiDisposable(exposeSyntaxTreeRequest(client));
+    }
   } catch (error) {
     try {
       await owner.dispose();
