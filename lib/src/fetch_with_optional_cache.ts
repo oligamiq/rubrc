@@ -23,9 +23,15 @@ export async function fetchWithOptionalCache(
   const { cacheStorage, fetch, reportCacheError } = dependencies;
   if (!cacheStorage) return await fetch(input, init);
 
-  const cache = await cacheStorage.open("rubrc-assets-v1");
-  const cachedResponse = await cache.match(input);
-  if (cachedResponse) return cachedResponse;
+  let cache: CacheBoundary;
+  try {
+    cache = await cacheStorage.open("rubrc-assets-v1");
+    const cachedResponse = await cache.match(input);
+    if (cachedResponse) return cachedResponse;
+  } catch (error) {
+    reportCacheError(error);
+    return await fetch(input, init);
+  }
 
   const response = await fetch(input, init);
   if (response.ok) {

@@ -13,6 +13,77 @@ function assertBytesEqual(actual: Uint8Array, expected: Uint8Array): void {
   }
 }
 
+Deno.test("cache open rejection falls back to the network response", async () => {
+  const expected = new Uint8Array([10, 20, 30, 40]);
+  const cacheError = new Error("cache open failed");
+  const reportedErrors: unknown[] = [];
+  let fetchCalls = 0;
+
+  const response = await fetchWithOptionalCache(
+    "https://example.test/asset.br",
+    undefined,
+    {
+      cacheStorage: {
+        open() {
+          return Promise.reject(cacheError);
+        },
+      },
+      async fetch() {
+        fetchCalls += 1;
+        return new Response(expected);
+      },
+      reportCacheError(error: unknown) {
+        reportedErrors.push(error);
+      },
+    },
+  );
+
+  assert(fetchCalls === 1, "network fetch did not run exactly once");
+  assertBytesEqual(new Uint8Array(await response.arrayBuffer()), expected);
+  assert(reportedErrors.length === 1, "cache error was not reported once");
+  assert(reportedErrors[0] === cacheError, "reported the wrong cache error");
+});
+
+Deno.test("cache match rejection falls back to the network response", async () => {
+  const expected = new Uint8Array([50, 60, 70, 80]);
+  const cacheError = new Error("cache match failed");
+  const reportedErrors: unknown[] = [];
+  let fetchCalls = 0;
+  let putCalls = 0;
+
+  const response = await fetchWithOptionalCache(
+    "https://example.test/asset.br",
+    undefined,
+    {
+      cacheStorage: {
+        async open() {
+          return {
+            match() {
+              return Promise.reject(cacheError);
+            },
+            async put() {
+              putCalls += 1;
+            },
+          };
+        },
+      },
+      async fetch() {
+        fetchCalls += 1;
+        return new Response(expected);
+      },
+      reportCacheError(error: unknown) {
+        reportedErrors.push(error);
+      },
+    },
+  );
+
+  assert(fetchCalls === 1, "network fetch did not run exactly once");
+  assertBytesEqual(new Uint8Array(await response.arrayBuffer()), expected);
+  assert(reportedErrors.length === 1, "cache error was not reported once");
+  assert(reportedErrors[0] === cacheError, "reported the wrong cache error");
+  assert(putCalls === 0, "cache put ran after a failed lookup");
+});
+
 Deno.test("cache put rejection preserves the fetched response body", async () => {
   const expected = new Uint8Array([0, 1, 2, 127, 255]);
   const cacheError = new Error("cache failed");
