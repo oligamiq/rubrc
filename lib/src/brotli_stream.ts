@@ -2,6 +2,7 @@ import init, {
   BrotliDecStream,
   BrotliStreamResultCode,
 } from "brotli-dec-wasm/web"; // Import the default export
+import { fetchWithOptionalCache } from "./fetch_with_optional_cache.ts";
 // @ts-ignore
 import brotli_dec_wasm_bg from "brotli-dec-wasm/web/bg.wasm?wasm&url"; // Import the wasm file
 
@@ -49,23 +50,13 @@ export const fetch_compressed_stream = async (
   url: string | URL | globalThis.Request,
   signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> => {
-  let response: Response | undefined;
-
-  if ("caches" in globalThis) {
-    const cache = await caches.open("rubrc-assets-v1");
-    response = await cache.match(url);
-
-    if (!response) {
-      response = await fetch(url, { signal });
-      if (response.ok) {
-        void cache.put(url, response.clone()).catch((error) => {
-          console.warn("Failed to cache compressed asset", error);
-        });
-      }
-    }
-  } else {
-    response = await fetch(url, { signal });
-  }
+  const response = await fetchWithOptionalCache(url, { signal }, {
+    cacheStorage: "caches" in globalThis ? caches : undefined,
+    fetch,
+    reportCacheError(error) {
+      console.warn("Failed to cache compressed asset", error);
+    },
+  });
 
   if (!response.ok) {
     throw new Error("Failed to fetch wasm");
