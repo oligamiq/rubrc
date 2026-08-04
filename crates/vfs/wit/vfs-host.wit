@@ -53,6 +53,7 @@ world vfs-host {
   export debug-set-terminal-capture: func(enabled: bool);
   export debug-terminal-output-len: func() -> u32;
   export debug-read-terminal-output: func(ptr: u32, len: u32) -> u32;
+  export debug-capture-wait-snapshot: func();
   export init: func();
   export main: func();
 }

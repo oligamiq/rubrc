@@ -6,11 +6,16 @@ import { get_data } from "../cat";
 import { write_data } from "../write_data";
 import { custom_instantiate } from "./vfs_bindings/inst";
 import { set_fake_worker } from "./vfs_bindings/common";
+import { prebindWasiMemory } from "./prebind_wasi_memory.ts";
 import { get_brotli_decompress_stream } from "../../../lib/src/brotli_stream";
 import {
   type VfsReadyResult,
   waitForRustSrcBootstrap,
 } from "../vfs_readiness.ts";
+import {
+  startVfsDebugTracePump,
+  traceVfsHostCall,
+} from "../vfs_debug_trace.ts";
 
 import thread_spawn_path from "./vfs_bindings/thread_spawn.ts?worker&url";
 import worker_background_worker_url from "./vfs_bindings/worker_background_worker.ts?worker&url";
@@ -388,7 +393,7 @@ globalThis.addEventListener("message", async (event) => {
   const animal = new WASIFarmAnimal(
     wasi_refs,
     [], // args
-    [`VFS_THREADS=${vfs_threads}`], // env
+    [`VFS_THREADS=${vfs_threads}`, "VFS_DEBUG_TRACE=1"], // env
     {
       can_thread_spawn: true,
       thread_spawn_worker_url: new URL(thread_spawn_path, import.meta.url).href,
@@ -409,14 +414,21 @@ globalThis.addEventListener("message", async (event) => {
 
   await animal.wait_worker_background_worker();
 
+  const debugTraceEnabled = import.meta.env.VITE_RUBRC_LSP_TEST === "1";
+  const emitDebugTrace = (chunk: string) => {
+    console.debug("[vfs-stall-trace]", chunk);
+  };
+  const sharedMemory = animal.get_share_memory();
+  let hostCallId = 0;
+  prebindWasiMemory(animal, sharedMemory.memory);
   const vfs_root = await custom_instantiate(
     vfs_wasm,
     animal.wasiImport as any,
     animal.wasiThreadImport as any,
-    animal.get_share_memory(),
+    sharedMemory,
     (idx, unknown: any) => {
       if (unknown.name === "terminalWrite") {
-        routeTerminalWrite(
+        return routeTerminalWrite(
           unknown.args.session_id,
           unknown.args.data,
           (data) => {
@@ -426,11 +438,24 @@ globalThis.addEventListener("message", async (event) => {
             void terminal({ sessionId, data: data as any });
           },
         );
-      } else {
-        return animal.call_unknown_fn(idx, unknown);
+      } else if (debugTraceEnabled && unknown.name === "hostRunCargo") {
+        return traceVfsHostCall(
+          ++hostCallId,
+          "hostRunCargo",
+          emitDebugTrace,
+          () => animal.call_unknown_fn(idx, unknown),
+        );
       }
+      return animal.call_unknown_fn(idx, unknown);
     },
   );
+  if (debugTraceEnabled) {
+    startVfsDebugTracePump({
+      root: vfs_root,
+      memory: sharedMemory.memory,
+      emit: emitDebugTrace,
+    });
+  }
 
   console.log("vfs component instantiated", vfs_root);
 

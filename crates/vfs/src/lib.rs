@@ -5,7 +5,7 @@ use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use wasi_virt_layer::__private::wasip1::{self, Ciovec, Dircookie, Fd, Size};
 use wasi_virt_layer::memory::{
     WasmAccessName, WasmPathAccess, WasmPathComponent, WasmPathComponentCommon,
@@ -13,8 +13,12 @@ use wasi_virt_layer::memory::{
 use wasi_virt_layer::wasi::file::Wasip1LFSBase;
 use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
 
+mod debug_state;
 mod filesystem_sync;
 pub mod memory_manager;
+#[cfg(feature = "debugging")]
+use debug_state::ThreadPoolState;
+use debug_state::{DebugState, PipeKind, is_lifecycle_event};
 use memory_manager::*;
 
 wit_bindgen::generate!({
@@ -41,8 +45,14 @@ static LSP_STDIN: std::sync::LazyLock<(parking_lot::Mutex<Vec<u8>>, parking_lot:
     });
 
 static DEBUG_TERMINAL_CAPTURE: AtomicBool = AtomicBool::new(false);
-static DEBUG_TERMINAL_OUTPUT: std::sync::LazyLock<parking_lot::Mutex<Vec<u8>>> =
-    std::sync::LazyLock::new(|| parking_lot::Mutex::new(Vec::new()));
+static DEBUG_INVOCATION_ID: AtomicUsize = AtomicUsize::new(1);
+static DEBUG_RA_BOUNDARY_DROPPED: AtomicUsize = AtomicUsize::new(0);
+static DEBUG_TERMINAL_OUTPUT: std::sync::LazyLock<parking_lot::Mutex<DebugState>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(DebugState::new(64 * 1024)));
+#[cfg(test)]
+static DEBUG_RA_BOUNDARY_AFTER_FIRST_GATE: std::sync::LazyLock<
+    parking_lot::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
 
 #[derive(Default)]
 struct CargoOutput {
@@ -83,10 +93,15 @@ impl VirtualPipe {
     fn drain(&mut self) -> Vec<u8> {
         self.buffer.drain(..).collect()
     }
+
+    fn buffered_len(&self) -> usize {
+        self.buffer.len()
+    }
 }
 
 struct ChildProcessStdio {
     owner: std::thread::ThreadId,
+    debug_invocation_id: Option<usize>,
     cwd: Vec<u8>,
     stdin: VirtualPipe,
     stdout: VirtualPipe,
@@ -94,9 +109,10 @@ struct ChildProcessStdio {
 }
 
 impl ChildProcessStdio {
-    fn new(cwd: Vec<u8>, stdin: Vec<u8>) -> Self {
+    fn new(cwd: Vec<u8>, stdin: Vec<u8>, debug_invocation_id: Option<usize>) -> Self {
         Self {
             owner: std::thread::current().id(),
+            debug_invocation_id,
             cwd,
             stdin: VirtualPipe::closed_with(stdin),
             stdout: VirtualPipe::default(),
@@ -114,50 +130,63 @@ static CHILD_PROCESS_STDIO: std::sync::LazyLock<parking_lot::Mutex<Option<ChildP
 
 struct ChildProcessStdioGuard {
     previous: Option<ChildProcessStdio>,
+    debug_invocation_id: Option<usize>,
     active: bool,
 }
 
 impl ChildProcessStdioGuard {
-    fn new(cwd: Vec<u8>, stdin: Vec<u8>) -> Self {
+    fn new(cwd: Vec<u8>, stdin: Vec<u8>, debug_invocation_id: Option<usize>) -> Self {
         let previous = {
             let mut process = CHILD_PROCESS_STDIO.lock();
-            process.replace(ChildProcessStdio::new(cwd, stdin))
+            process.replace(ChildProcessStdio::new(cwd, stdin, debug_invocation_id))
         };
         Self {
             previous,
+            debug_invocation_id,
             active: true,
         }
     }
 
     fn finish(mut self) -> CargoOutput {
-        let mut current = self.restore();
-        if !current.cwd.is_empty() {
+        let (output, cwd) = self.drain_and_restore();
+        if !cwd.is_empty() {
             debug_trace(&format!(
                 "child-process:cwd {}",
-                String::from_utf8_lossy(&current.cwd)
+                String::from_utf8_lossy(&cwd)
             ));
         }
-        CargoOutput {
-            stdout: current.stdout.drain(),
-            stderr: current.stderr.drain(),
-        }
+        output
     }
 
-    fn restore(&mut self) -> ChildProcessStdio {
+    fn drain_and_restore(&mut self) -> (CargoOutput, Vec<u8>) {
         let mut process = CHILD_PROCESS_STDIO.lock();
-        let current = process
-            .take()
-            .unwrap_or_else(|| ChildProcessStdio::new(Vec::new(), Vec::new()));
+        let current =
+            process.get_or_insert_with(|| ChildProcessStdio::new(Vec::new(), Vec::new(), None));
+        let cwd = std::mem::take(&mut current.cwd);
+        let stdout = current.stdout.drain();
+        let stderr = current.stderr.drain();
+        if let Some(invocation_id) = self.debug_invocation_id {
+            with_debug_state(|state| {
+                state.set_pipe_state(invocation_id, PipeKind::Stdout, stdout.len(), true);
+                state.set_pipe_state(invocation_id, PipeKind::Stderr, stderr.len(), true);
+                state.push_event(&format!("stdio:drained id={invocation_id}"));
+            });
+        }
         *process = self.previous.take();
         self.active = false;
-        current
+        (CargoOutput { stdout, stderr }, cwd)
     }
 }
 
 impl Drop for ChildProcessStdioGuard {
     fn drop(&mut self) {
         if self.active {
-            *CHILD_PROCESS_STDIO.lock() = self.previous.take();
+            let _ = self.drain_and_restore();
+        }
+        if let Some(invocation_id) = self.debug_invocation_id {
+            with_debug_state(|state| {
+                state.push_event(&format!("stdio:restored id={invocation_id}"));
+            });
         }
     }
 }
@@ -165,9 +194,17 @@ impl Drop for ChildProcessStdioGuard {
 fn with_child_process_stdio<T>(
     cwd: Vec<u8>,
     stdin: Vec<u8>,
+    debug_invocation_id: Option<usize>,
     f: impl FnOnce() -> T,
 ) -> (T, CargoOutput) {
-    let guard = ChildProcessStdioGuard::new(cwd, stdin);
+    let guard = ChildProcessStdioGuard::new(cwd, stdin, debug_invocation_id);
+    if let Some(invocation_id) = debug_invocation_id {
+        with_debug_state(|state| {
+            state.set_pipe_state(invocation_id, PipeKind::Stdout, 0, false);
+            state.set_pipe_state(invocation_id, PipeKind::Stderr, 0, false);
+            state.push_event(&format!("stdio:installed id={invocation_id}"));
+        });
+    }
     let result = f();
     (result, guard.finish())
 }
@@ -221,16 +258,24 @@ fn run_rustc_invocation(
     stdin: Vec<u8>,
     run: impl FnOnce(),
 ) -> (CargoOutput, i32) {
+    let debug_invocation_id = next_debug_invocation_id();
+    if let Some(invocation_id) = debug_invocation_id {
+        with_debug_state(|state| {
+            state.rustc_enter(invocation_id);
+            state.push_event(&format!("rustc:enter id={invocation_id}"));
+        });
+    }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _invocation_state = RustcInvocationState::new(env, args);
+        let _invocation_state = RustcInvocationState::new(env.clone(), args.clone());
+        crate::debug_trace(&format!("wasi-ext-spawn:run-rustc:enter args={:?}", args));
         debug_trace("wasi-ext-spawn:run-rustc:enter");
-        let ((), child_output) = with_child_process_stdio(cwd, stdin, run);
+        let ((), child_output) = with_child_process_stdio(cwd, stdin, debug_invocation_id, run);
         let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
         debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
         (child_output, status)
     }));
 
-    match result {
+    let result = match result {
         Ok(result) => result,
         Err(payload) => {
             let message = if let Some(message) = payload.downcast_ref::<&str>() {
@@ -249,7 +294,17 @@ fn run_rustc_invocation(
                 RUSTC_PANIC_STATUS,
             )
         }
+    };
+    if let Some(invocation_id) = debug_invocation_id {
+        with_debug_state(|state| {
+            state.push_event(&format!(
+                "rustc:return id={invocation_id} status={}",
+                result.1
+            ));
+            state.rustc_return(invocation_id);
+        });
     }
+    result
 }
 
 struct RustcActiveGuard;
@@ -261,6 +316,14 @@ impl Drop for RustcActiveGuard {
 }
 
 pub(crate) fn run_cargo() {
+    let debug_invocation_id = next_debug_invocation_id();
+    if let Some(invocation_id) = debug_invocation_id {
+        with_debug_state(|state| {
+            state.cargo_enter(invocation_id);
+            state.push_event(&format!("cargo:enter id={invocation_id}"));
+        });
+    }
+    let _debug_invocation_guard = CargoDebugInvocationGuard(debug_invocation_id);
     CARGO_EXIT_STATUS.store(0, Ordering::SeqCst);
     MEMORY_MANAGER.ensure_once::<cargo_opt>(&CARGO_RESERVE_ONCE, CARGO_CONFIG);
     debug_trace(&format!(
@@ -275,6 +338,12 @@ pub(crate) fn run_cargo() {
     ));
     debug_trace("cargo:_reset:return");
     debug_trace("cargo:_main:enter");
+    if let Some(invocation_id) = debug_invocation_id {
+        with_debug_state(|state| {
+            state.set_wait("cargo-main");
+            state.push_event(&format!("wait=cargo-main id={invocation_id}"));
+        });
+    }
     cargo_opt::_main();
     debug_trace(&format!(
         "cargo:memory:after-main pages={}",
@@ -331,12 +400,165 @@ fn capture_cargo_output(stderr: bool, buf: &[u8]) -> bool {
     })
 }
 
-pub(crate) fn debug_trace(message: &str) {
+fn next_debug_invocation_id() -> Option<usize> {
+    DEBUG_TERMINAL_CAPTURE
+        .load(Ordering::Relaxed)
+        .then(|| DEBUG_INVOCATION_ID.fetch_add(1, Ordering::Relaxed))
+}
+
+struct CargoDebugInvocationGuard(Option<usize>);
+
+impl Drop for CargoDebugInvocationGuard {
+    fn drop(&mut self) {
+        if let Some(invocation_id) = self.0 {
+            with_debug_state(|state| {
+                state.push_event(&format!("cargo:return id={invocation_id}"));
+                state.cargo_return(invocation_id);
+            });
+        }
+    }
+}
+
+fn with_debug_state(f: impl FnOnce(&mut DebugState)) {
     if DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
-        let mut output = DEBUG_TERMINAL_OUTPUT.lock();
-        output.extend_from_slice(b"\r\n[vfs-debug] ");
-        output.extend_from_slice(message.as_bytes());
-        output.extend_from_slice(b"\r\n");
+        let mut state = DEBUG_TERMINAL_OUTPUT.lock();
+        if DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
+            f(&mut state);
+        }
+    }
+}
+
+pub(crate) fn debug_trace(message: &str) {
+    if is_lifecycle_event(message) {
+        with_debug_state(|state| state.push_event(message));
+    }
+}
+
+#[repr(u32)]
+enum RaBoundaryStage {
+    FfiEnter = 1,
+    FfiReturn = 2,
+    BuffersBorrowed = 3,
+    BuffersCopyEnter = 4,
+    BuffersCopied = 5,
+    BuffersFreeEnter = 6,
+    BuffersFreed = 7,
+    InvokeReturn = 8,
+    MetadataInvokeEnter = 9,
+    MetadataInvokeReturn = 10,
+    MetadataUtf8Enter = 11,
+    MetadataUtf8Return = 12,
+    MetadataParseEnter = 13,
+    MetadataParseReturn = 14,
+    MetadataFinished = 15,
+    WorkspaceCargoSpawnEnter = 16,
+    WorkspaceCargoSpawnReturn = 17,
+    WorkspaceCargoJoinEnter = 18,
+    WorkspaceCargoJoinReturn = 19,
+    WorkspaceCargoJoinError = 20,
+    WorkspaceCargoMapReturn = 21,
+    WorkspaceLoadReturn = 22,
+    ScopeUnwind = 23,
+    WorkspaceInlineTaskEnter = 24,
+    WorkspaceInlineTaskReturn = 25,
+    WorkspaceInlineJoinEnter = 26,
+    WorkspaceInlineJoinReturn = 27,
+    WorkspaceInlineJoinError = 28,
+    WorkspaceInlineLoadReturn = 29,
+}
+
+fn format_ra_boundary(trace_id: u32, stage: u32, value_1: u32, value_2: u32) -> String {
+    let stage = match stage {
+        value if value == RaBoundaryStage::FfiEnter as u32 => "ffi:enter",
+        value if value == RaBoundaryStage::FfiReturn as u32 => "ffi:return",
+        value if value == RaBoundaryStage::BuffersBorrowed as u32 => "buffers:borrowed",
+        value if value == RaBoundaryStage::BuffersCopyEnter as u32 => "buffers:copy-enter",
+        value if value == RaBoundaryStage::BuffersCopied as u32 => "buffers:copied",
+        value if value == RaBoundaryStage::BuffersFreeEnter as u32 => "buffers:free-enter",
+        value if value == RaBoundaryStage::BuffersFreed as u32 => "buffers:freed",
+        value if value == RaBoundaryStage::InvokeReturn as u32 => "invoke:return",
+        value if value == RaBoundaryStage::MetadataInvokeEnter as u32 => "metadata:invoke-enter",
+        value if value == RaBoundaryStage::MetadataInvokeReturn as u32 => "metadata:invoke-return",
+        value if value == RaBoundaryStage::MetadataUtf8Enter as u32 => "metadata:utf8-enter",
+        value if value == RaBoundaryStage::MetadataUtf8Return as u32 => "metadata:utf8-return",
+        value if value == RaBoundaryStage::MetadataParseEnter as u32 => "metadata:parse-enter",
+        value if value == RaBoundaryStage::MetadataParseReturn as u32 => "metadata:parse-return",
+        value if value == RaBoundaryStage::MetadataFinished as u32 => "metadata:finished",
+        value if value == RaBoundaryStage::WorkspaceCargoSpawnEnter as u32 => {
+            "workspace:cargo-spawn-enter"
+        }
+        value if value == RaBoundaryStage::WorkspaceCargoSpawnReturn as u32 => {
+            "workspace:cargo-spawn-return"
+        }
+        value if value == RaBoundaryStage::WorkspaceCargoJoinEnter as u32 => {
+            "workspace:cargo-join-enter"
+        }
+        value if value == RaBoundaryStage::WorkspaceCargoJoinReturn as u32 => {
+            "workspace:cargo-join-return"
+        }
+        value if value == RaBoundaryStage::WorkspaceCargoJoinError as u32 => {
+            "workspace:cargo-join-error"
+        }
+        value if value == RaBoundaryStage::WorkspaceCargoMapReturn as u32 => {
+            "workspace:cargo-map-return"
+        }
+        value if value == RaBoundaryStage::WorkspaceLoadReturn as u32 => "workspace:load-return",
+        value if value == RaBoundaryStage::ScopeUnwind as u32 => "scope:unwind",
+        value if value == RaBoundaryStage::WorkspaceInlineTaskEnter as u32 => {
+            "workspace:inline-task-enter"
+        }
+        value if value == RaBoundaryStage::WorkspaceInlineTaskReturn as u32 => {
+            "workspace:inline-task-return"
+        }
+        value if value == RaBoundaryStage::WorkspaceInlineJoinEnter as u32 => {
+            "workspace:inline-join-enter"
+        }
+        value if value == RaBoundaryStage::WorkspaceInlineJoinReturn as u32 => {
+            "workspace:inline-join-return"
+        }
+        value if value == RaBoundaryStage::WorkspaceInlineJoinError as u32 => {
+            "workspace:inline-join-error"
+        }
+        value if value == RaBoundaryStage::WorkspaceInlineLoadReturn as u32 => {
+            "workspace:inline-load-return"
+        }
+        _ => "unknown",
+    };
+    format!("[ra-wasi-boundary] id={trace_id} stage={stage} value_1={value_1} value_2={value_2}")
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn host_trace_boundary(
+    trace_id: u32,
+    stage: u32,
+    value_1: u32,
+    value_2: u32,
+) -> u32 {
+    if !DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
+        return 0;
+    }
+    #[cfg(test)]
+    if let Some(after_first_gate) = DEBUG_RA_BOUNDARY_AFTER_FIRST_GATE.lock().take() {
+        after_first_gate();
+    }
+    let Some(mut output) = DEBUG_TERMINAL_OUTPUT.try_lock() else {
+        DEBUG_RA_BOUNDARY_DROPPED.fetch_add(1, Ordering::Relaxed);
+        return 0;
+    };
+    if !DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
+        return 0;
+    }
+    output.push_event(&format_ra_boundary(trace_id, stage, value_1, value_2));
+    0
+}
+
+fn set_debug_terminal_capture(enabled: bool, trace_value: Option<&str>) {
+    let enabled = enabled && trace_value == Some("1");
+    DEBUG_TERMINAL_CAPTURE.store(false, Ordering::SeqCst);
+    *DEBUG_TERMINAL_OUTPUT.lock() = DebugState::new(64 * 1024);
+    DEBUG_RA_BOUNDARY_DROPPED.store(0, Ordering::Relaxed);
+    if enabled {
+        DEBUG_TERMINAL_CAPTURE.store(true, Ordering::SeqCst);
     }
 }
 
@@ -351,6 +573,7 @@ impl Guest for Wit {
             .unwrap_or(8);
 
         unsafe { THREAD_POOL.init() };
+        debug_trace("pool:init");
 
         for i in 1..=threads {
             println!("$$1");
@@ -371,10 +594,12 @@ impl Guest for Wit {
             println!("$$4");
 
             THREAD_POOL.set_capacity(i);
+            debug_trace(&format!("pool:capacity capacity={i}"));
 
             println!("$$5");
 
             THREAD_POOL.flush_capacity().wait();
+            debug_trace(&format!("pool:flush-return capacity={i}"));
 
             println!("$$6");
         }
@@ -627,29 +852,71 @@ impl Guest for Wit {
     }
 
     fn debug_set_terminal_capture(enabled: bool) {
-        if enabled {
-            DEBUG_TERMINAL_OUTPUT.lock().clear();
-        }
-        DEBUG_TERMINAL_CAPTURE.store(enabled, Ordering::SeqCst);
+        let trace_value = std::env::var("VFS_DEBUG_TRACE").ok();
+        set_debug_terminal_capture(enabled, trace_value.as_deref());
     }
 
     fn debug_terminal_output_len() -> u32 {
         DEBUG_TERMINAL_OUTPUT
             .try_lock()
-            .map_or(0, |output| output.len() as u32)
+            .map_or(0, |output| output.buffered_len() as u32)
     }
 
     fn debug_read_terminal_output(ptr: u32, len: u32) -> u32 {
         let Some(mut output) = DEBUG_TERMINAL_OUTPUT.try_lock() else {
             return 0;
         };
-        let read_len = usize::min(output.len(), len as usize);
+        let drained = output.drain(len as usize);
+        let read_len = drained.len();
         if read_len != 0 {
             let destination = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u8, read_len) };
-            destination.copy_from_slice(&output[..read_len]);
-            output.drain(..read_len);
+            destination.copy_from_slice(&drained);
         }
         read_len as u32
+    }
+
+    fn debug_capture_wait_snapshot() {
+        if !DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
+            return;
+        }
+
+        #[cfg(feature = "debugging")]
+        {
+            if !THREAD_POOL.is_initialized() {
+                let mut state = DEBUG_TERMINAL_OUTPUT.lock();
+                state.set_ra_boundary_dropped(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed));
+                let snapshot = state.snapshot_line_thread_pool_uninitialized();
+                state.push_snapshot(&snapshot);
+                return;
+            }
+            let trace = THREAD_POOL.trace_snapshot();
+            let mut state = DEBUG_TERMINAL_OUTPUT.lock();
+            state.set_ra_boundary_dropped(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed));
+            let snapshot = state.snapshot_line(ThreadPoolState {
+                capacity: trace.capacity,
+                worker_count: trace.worker_count,
+                queued_task_count: trace.queued_task_count,
+                in_flight_runs: trace.in_flight_runs,
+                run_enqueued: trace.run_enqueued,
+                run_started: trace.run_started,
+                run_completed: trace.run_completed,
+                add_thread_requested: trace.add_thread_requested,
+                add_thread_completed: trace.add_thread_completed,
+                add_thread_disconnected: trace.add_thread_disconnected,
+                terminate_requested: trace.terminate_requested,
+                terminate_completed: trace.terminate_completed,
+                terminate_disconnected: trace.terminate_disconnected,
+            });
+            state.push_snapshot(&snapshot);
+        }
+
+        #[cfg(not(feature = "debugging"))]
+        {
+            let mut state = DEBUG_TERMINAL_OUTPUT.lock();
+            state.set_ra_boundary_dropped(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed));
+            let snapshot = state.snapshot_line_trace_disabled();
+            state.push_snapshot(&snapshot);
+        }
     }
 }
 
@@ -693,7 +960,19 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
             let mut process = CHILD_PROCESS_STDIO.lock();
             if let Some(process) = process.as_mut() {
                 if process.is_owner() {
-                    return Ok(process.stdout.write(buf));
+                    let written = process.stdout.write(buf);
+                    if let Some(invocation_id) = process.debug_invocation_id {
+                        // Keep writes ordered before EOF updates in the guard's drop path.
+                        with_debug_state(|state| {
+                            state.set_pipe_state(
+                                invocation_id,
+                                PipeKind::Stdout,
+                                process.stdout.buffered_len(),
+                                false,
+                            );
+                        });
+                    }
+                    return Ok(written);
                 }
             }
         }
@@ -757,7 +1036,18 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
             let mut process = CHILD_PROCESS_STDIO.lock();
             if let Some(process) = process.as_mut() {
                 if process.is_owner() {
-                    return Ok(process.stderr.write(buf));
+                    let written = process.stderr.write(buf);
+                    if let Some(invocation_id) = process.debug_invocation_id {
+                        with_debug_state(|state| {
+                            state.set_pipe_state(
+                                invocation_id,
+                                PipeKind::Stderr,
+                                process.stderr.buffered_len(),
+                                false,
+                            );
+                        });
+                    }
+                    return Ok(written);
                 }
             }
         }
@@ -2499,10 +2789,6 @@ pub extern "C" fn sysroot_read_file_chunk(vfs_shell_data_ptr: i32, chunk_len: i3
 #[unsafe(no_mangle)]
 pub extern "C" fn terminal_write(session_id: u32, vfs_shell_data_ptr: i32, data_len: i32) {
     let data = vfs_shell::get_array(vfs_shell_data_ptr as *const u8, data_len as usize);
-    if DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
-        DEBUG_TERMINAL_OUTPUT.lock().extend_from_slice(&data);
-        return;
-    }
     crate::vfs::host::bridge::Terminal::terminal_write(session_id, data.as_ptr() as i32, data_len);
 }
 
@@ -2721,6 +3007,48 @@ fn lsp_host_program(args: &[String]) -> Option<LspHostProgram> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HostCargoTracePhase {
+    Request,
+    Response(i32),
+    Reject(i32),
+}
+
+fn format_host_cargo_trace(id: usize, phase: HostCargoTracePhase) -> String {
+    match phase {
+        HostCargoTracePhase::Request => format!("host-cargo:request id={id}"),
+        HostCargoTracePhase::Response(status) => {
+            format!("host-cargo:response id={id} status={status}")
+        }
+        HostCargoTracePhase::Reject(status) => {
+            format!("host-cargo:reject id={id} status={status}")
+        }
+    }
+}
+
+fn format_host_cargo_map(id: usize, ra_trace_id: Option<u32>) -> Option<String> {
+    ra_trace_id.map(|ra_trace_id| format!("host-cargo:map id={id} ra_id={ra_trace_id}"))
+}
+
+fn request_ra_trace_id(request: &serde_json::Value) -> Option<u32> {
+    request
+        .get("trace_id")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+}
+
+fn trace_host_cargo(id: Option<usize>, phase: HostCargoTracePhase) {
+    if let Some(id) = id {
+        debug_trace(&format_host_cargo_trace(id, phase));
+    }
+}
+
+fn trace_host_run_cargo(id: Option<usize>, phase: &str) {
+    if let Some(id) = id {
+        debug_trace(&format!("host-run-cargo:{phase} id={id}"));
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn host_run_cargo(
     req_ptr: i32,
@@ -2731,12 +3059,15 @@ pub extern "C" fn host_run_cargo(
     out_stderr_len: i32,
     out_status: i32,
 ) -> i32 {
+    let debug_invocation_id = next_debug_invocation_id();
+    trace_host_cargo(debug_invocation_id, HostCargoTracePhase::Request);
     let req_data = lsp_opt::get_array(req_ptr as *const u8, req_len as usize);
     let request: serde_json::Value = match serde_json::from_slice(&req_data) {
         Ok(request) => request,
         Err(error) => {
             let stderr = format!("invalid cargo request: {error}");
             return write_cargo_result(
+                debug_invocation_id,
                 Vec::new(),
                 stderr.into_bytes(),
                 1,
@@ -2748,9 +3079,16 @@ pub extern "C" fn host_run_cargo(
             );
         }
     };
+    let ra_trace_id = request_ra_trace_id(&request);
+    if let Some(debug_invocation_id) = debug_invocation_id
+        && let Some(mapping) = format_host_cargo_map(debug_invocation_id, ra_trace_id)
+    {
+        debug_trace(&mapping);
+    }
 
     let Some(args) = request.get("args").and_then(serde_json::Value::as_array) else {
         return write_cargo_result(
+            debug_invocation_id,
             Vec::new(),
             b"cargo request is missing args".to_vec(),
             1,
@@ -2768,6 +3106,7 @@ pub extern "C" fn host_run_cargo(
         .collect::<Vec<_>>();
     let Some(program) = lsp_host_program(&args) else {
         return write_cargo_result(
+            debug_invocation_id,
             Vec::new(),
             format!(
                 "unsupported LSP host program: {}",
@@ -2806,6 +3145,7 @@ pub extern "C" fn host_run_cargo(
             {
                 VIRTUAL_SHELL_ENV.lock().env = old_env;
                 return write_cargo_result(
+                    debug_invocation_id,
                     Vec::new(),
                     format!("failed to set cwd `{cwd}`: {error}").into_bytes(),
                     1,
@@ -2819,7 +3159,9 @@ pub extern "C" fn host_run_cargo(
 
             command::set_cargo_opt_args(&args);
             CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
+            trace_host_run_cargo(debug_invocation_id, "cargo:run_cargo");
             run_cargo();
+            trace_host_run_cargo(debug_invocation_id, "cargo:run_cargo completed");
             let output = CARGO_OUTPUT
                 .with(|output| output.borrow_mut().take())
                 .unwrap_or_default();
@@ -2830,7 +3172,9 @@ pub extern "C" fn host_run_cargo(
             (output, status)
         }
         LspHostProgram::Rustc => {
+            trace_host_run_cargo(debug_invocation_id, "rustc:waiting for RUSTC_RUN_LOCK");
             let _rustc_guard = RUSTC_RUN_LOCK.lock();
+            trace_host_run_cargo(debug_invocation_id, "rustc:acquired RUSTC_RUN_LOCK");
             let mut args = args;
             if !args
                 .iter()
@@ -2853,6 +3197,7 @@ pub extern "C" fn host_run_cargo(
     VIRTUAL_SHELL_ENV.lock().env = old_env;
 
     write_cargo_result(
+        debug_invocation_id,
         output.stdout,
         output.stderr,
         status,
@@ -2876,6 +3221,7 @@ pub extern "C" fn host_free_memory(ptr: i32, len: i32) {
 
 #[allow(clippy::too_many_arguments)]
 fn write_cargo_result(
+    debug_invocation_id: Option<usize>,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
     status: i32,
@@ -2885,9 +3231,19 @@ fn write_cargo_result(
     out_stderr_len: i32,
     out_status: i32,
 ) -> i32 {
+    crate::debug_trace(&format!(
+        "write_cargo_result: stdout={} bytes, stderr={} bytes, status={}",
+        stdout.len(),
+        stderr.len(),
+        status
+    ));
     let (stdout_ptr, stdout_len) = match allocate_lsp_result(&stdout) {
         Ok(result) => result,
-        Err(_) => return 1,
+        Err(_) => {
+            trace_host_cargo(debug_invocation_id, HostCargoTracePhase::Reject(1));
+            crate::debug_trace("write_cargo_result: allocate stdout failed");
+            return 1;
+        }
     };
     let (stderr_ptr, stderr_len) = match allocate_lsp_result(&stderr) {
         Ok(result) => result,
@@ -2895,6 +3251,7 @@ fn write_cargo_result(
             LSP_RESULT_ALLOCATOR
                 .lock()
                 .free(decode_lsp_result_pointer(stdout_ptr), stdout_len as usize);
+            trace_host_cargo(debug_invocation_id, HostCargoTracePhase::Reject(1));
             return 1;
         }
     };
@@ -2903,6 +3260,7 @@ fn write_cargo_result(
     lsp_opt::memcpy(out_stderr_ptr as *mut u8, &stderr_ptr.to_ne_bytes());
     lsp_opt::memcpy(out_stderr_len as *mut u8, &stderr_len.to_ne_bytes());
     lsp_opt::memcpy(out_status as *mut u8, &status.to_ne_bytes());
+    trace_host_cargo(debug_invocation_id, HostCargoTracePhase::Response(status));
     0
 }
 
@@ -4006,6 +4364,28 @@ mod cwd_aware_fs_tests {
 mod invocation_state_tests {
     use super::*;
 
+    #[cfg(not(target_family = "wasm"))]
+    #[unsafe(export_name = "vfs_shell_alloc_buf")]
+    extern "C" fn native_test_vfs_shell_alloc_buf(_len: u32) -> u32 {
+        0
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[unsafe(export_name = "vfs_shell_free_buf")]
+    extern "C" fn native_test_vfs_shell_free_buf(_ptr: u32, _len: u32) {}
+
+    #[cfg(not(target_family = "wasm"))]
+    #[unsafe(export_name = "vfs_shell_write_stdout")]
+    extern "C" fn native_test_vfs_shell_write_stdout(_id: u32, _ptr: u32, len: u32) -> u32 {
+        len
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[unsafe(export_name = "vfs_shell_write_stderr")]
+    extern "C" fn native_test_vfs_shell_write_stderr(_id: u32, _ptr: u32, len: u32) -> u32 {
+        len
+    }
+
     struct ChildProcessStdioReset {
         previous: Option<ChildProcessStdio>,
     }
@@ -4020,6 +4400,23 @@ mod invocation_state_tests {
     impl Drop for ChildProcessStdioReset {
         fn drop(&mut self) {
             *CHILD_PROCESS_STDIO.lock() = self.previous.take();
+        }
+    }
+
+    struct DebugCaptureReset;
+
+    impl DebugCaptureReset {
+        fn install() -> Self {
+            set_debug_terminal_capture(false, Some("1"));
+            *DEBUG_TERMINAL_OUTPUT.lock() = DebugState::new(64 * 1024);
+            Self
+        }
+    }
+
+    impl Drop for DebugCaptureReset {
+        fn drop(&mut self) {
+            set_debug_terminal_capture(false, Some("1"));
+            *DEBUG_TERMINAL_OUTPUT.lock() = DebugState::new(64 * 1024);
         }
     }
 
@@ -4097,6 +4494,7 @@ mod invocation_state_tests {
         let _outer_child = ChildProcessStdioReset::install(Some(ChildProcessStdio::new(
             sentinel_cwd.clone(),
             Vec::new(),
+            None,
         )));
 
         let stderr = bounded_rustc_cwd_error(&sentinel_cwd, &"x".repeat(MAX_CHILD_ERROR_BYTES));
@@ -4166,7 +4564,7 @@ mod invocation_state_tests {
             sentinel_stdout.clone(),
         );
         let mut sentinel_child =
-            ChildProcessStdio::new(sentinel_cwd.clone(), b"outer-input".to_vec());
+            ChildProcessStdio::new(sentinel_cwd.clone(), b"outer-input".to_vec(), None);
         sentinel_child.stdout.write(&child_stdout);
         sentinel_child.stderr.write(b"child-error");
         let _outer_child = ChildProcessStdioReset::install(Some(sentinel_child));
@@ -4292,6 +4690,62 @@ mod invocation_state_tests {
             assert_eq!(output.borrow().as_ref().unwrap().stdout, sentinel_stdout);
         });
         assert!(CHILD_PROCESS_STDIO.lock().is_none());
+    }
+
+    #[test]
+    fn invocation_panic_emits_drained_once_before_stdio_is_restored() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        let _debug_capture_reset = DebugCaptureReset::install();
+        let _outer_child = ChildProcessStdioReset::install(None);
+        set_debug_terminal_capture(true, Some("1"));
+
+        let (_, status) =
+            run_rustc_invocation(Vec::new(), Vec::new(), Vec::new(), Vec::new(), || {
+                let mut process = CHILD_PROCESS_STDIO.lock();
+                let process = process.as_mut().expect("child stdio must be installed");
+                process.stdout.write(b"panic stdout");
+                process.stderr.write(b"panic stderr");
+                panic!("intentional stdio lifecycle panic");
+            });
+
+        assert_eq!(status, RUSTC_PANIC_STATUS);
+        let events = String::from_utf8(DEBUG_TERMINAL_OUTPUT.lock().drain(usize::MAX))
+            .expect("debug events must be valid UTF-8");
+
+        let drained = events.find("stdio:drained").expect("missing drained event");
+        let restored = events
+            .find("stdio:restored")
+            .expect("missing restored event");
+        assert!(drained < restored);
+        assert_eq!(events.matches("stdio:drained").count(), 1);
+    }
+
+    #[test]
+    fn debug_capture_requires_exact_guest_trace_value() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        let _debug_capture_reset = DebugCaptureReset::install();
+
+        set_debug_terminal_capture(true, None);
+        debug_trace("command:return");
+        assert!(!DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed));
+        assert_eq!(DEBUG_TERMINAL_OUTPUT.lock().buffered_len(), 0);
+
+        set_debug_terminal_capture(true, Some("true"));
+        debug_trace("command:return");
+        assert!(!DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed));
+        assert_eq!(DEBUG_TERMINAL_OUTPUT.lock().buffered_len(), 0);
+
+        set_debug_terminal_capture(true, Some("1"));
+        debug_trace("command:return");
+        with_debug_state(|state| state.cargo_enter(77));
+        assert!(DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed));
+
+        set_debug_terminal_capture(false, Some("1"));
+        debug_trace("command:return");
+        assert!(!DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed));
+        let state = DEBUG_TERMINAL_OUTPUT.lock();
+        assert_eq!(state.buffered_len(), 0);
+        assert!(state.snapshot_line_trace_disabled().contains("cargo=none"));
     }
 }
 
@@ -4530,14 +4984,26 @@ mod http_tests {
 #[cfg(test)]
 mod lsp_cargo_result_tests {
     use super::{
-        LspHostProgram, LspResultAllocator, LspResultRegion, claim_lsp_result_pages,
-        decode_lsp_result_pointer, encode_lsp_result_abi, lsp_host_program, write_lsp_result_bytes,
+        DEBUG_RA_BOUNDARY_AFTER_FIRST_GATE, DEBUG_RA_BOUNDARY_DROPPED, DEBUG_TERMINAL_CAPTURE,
+        DEBUG_TERMINAL_OUTPUT, HostCargoTracePhase, LspHostProgram, LspResultAllocator,
+        LspResultRegion, RUSTC_RUN_LOCK, RaBoundaryStage, claim_lsp_result_pages,
+        decode_lsp_result_pointer, encode_lsp_result_abi, format_host_cargo_map,
+        format_host_cargo_trace, format_ra_boundary, host_trace_boundary, lsp_host_program,
+        request_ra_trace_id, set_debug_terminal_capture, write_lsp_result_bytes,
     };
     use std::cell::{Cell, RefCell};
     use std::sync::{
         Arc, Barrier,
         atomic::{AtomicI32, AtomicUsize, Ordering},
     };
+
+    struct RaBoundaryGateReset;
+
+    impl Drop for RaBoundaryGateReset {
+        fn drop(&mut self) {
+            *DEBUG_RA_BOUNDARY_AFTER_FIRST_GATE.lock() = None;
+        }
+    }
 
     #[test]
     fn lsp_result_reservation_reserves_once_across_logical_contention() {
@@ -4692,6 +5158,235 @@ mod lsp_cargo_result_tests {
         assert_eq!(
             lsp_host_program(&["cargo".to_string(), "metadata".to_string()]),
             Some(LspHostProgram::Cargo)
+        );
+    }
+
+    #[test]
+    fn four_host_cargo_calls_have_distinct_paired_trace_ids() {
+        let ids = [31, 32, 33, 34];
+        let pairs = ids.map(|id| {
+            (
+                format_host_cargo_trace(id, HostCargoTracePhase::Request),
+                format_host_cargo_trace(id, HostCargoTracePhase::Response(0)),
+            )
+        });
+
+        for ((request, response), id) in pairs.iter().zip(ids) {
+            assert_eq!(request, &format!("host-cargo:request id={id}"));
+            assert_eq!(response, &format!("host-cargo:response id={id} status=0"));
+        }
+        assert_eq!(
+            format_host_cargo_trace(35, HostCargoTracePhase::Reject(1)),
+            "host-cargo:reject id=35 status=1"
+        );
+        assert_eq!(
+            ids.into_iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            4
+        );
+    }
+
+    #[test]
+    fn ra_boundary_formats_fixed_stages_and_optional_host_mapping() {
+        assert_eq!(
+            format_ra_boundary(9, RaBoundaryStage::FfiReturn as u32, 0, 2106),
+            "[ra-wasi-boundary] id=9 stage=ffi:return value_1=0 value_2=2106",
+        );
+        assert_eq!(
+            format_ra_boundary(9, u32::MAX, 1, 2),
+            "[ra-wasi-boundary] id=9 stage=unknown value_1=1 value_2=2",
+        );
+        assert_eq!(
+            format_host_cargo_map(7, Some(9)),
+            Some("host-cargo:map id=7 ra_id=9".into())
+        );
+        assert_eq!(format_host_cargo_map(7, None), None);
+    }
+
+    #[test]
+    fn ra_boundary_formats_all_fixed_stage_labels() {
+        let stages = [
+            (RaBoundaryStage::FfiEnter, "ffi:enter"),
+            (RaBoundaryStage::FfiReturn, "ffi:return"),
+            (RaBoundaryStage::BuffersBorrowed, "buffers:borrowed"),
+            (RaBoundaryStage::BuffersCopyEnter, "buffers:copy-enter"),
+            (RaBoundaryStage::BuffersCopied, "buffers:copied"),
+            (RaBoundaryStage::BuffersFreeEnter, "buffers:free-enter"),
+            (RaBoundaryStage::BuffersFreed, "buffers:freed"),
+            (RaBoundaryStage::InvokeReturn, "invoke:return"),
+            (
+                RaBoundaryStage::MetadataInvokeEnter,
+                "metadata:invoke-enter",
+            ),
+            (
+                RaBoundaryStage::MetadataInvokeReturn,
+                "metadata:invoke-return",
+            ),
+            (RaBoundaryStage::MetadataUtf8Enter, "metadata:utf8-enter"),
+            (RaBoundaryStage::MetadataUtf8Return, "metadata:utf8-return"),
+            (RaBoundaryStage::MetadataParseEnter, "metadata:parse-enter"),
+            (
+                RaBoundaryStage::MetadataParseReturn,
+                "metadata:parse-return",
+            ),
+            (RaBoundaryStage::MetadataFinished, "metadata:finished"),
+            (
+                RaBoundaryStage::WorkspaceCargoSpawnEnter,
+                "workspace:cargo-spawn-enter",
+            ),
+            (
+                RaBoundaryStage::WorkspaceCargoSpawnReturn,
+                "workspace:cargo-spawn-return",
+            ),
+            (
+                RaBoundaryStage::WorkspaceCargoJoinEnter,
+                "workspace:cargo-join-enter",
+            ),
+            (
+                RaBoundaryStage::WorkspaceCargoJoinReturn,
+                "workspace:cargo-join-return",
+            ),
+            (
+                RaBoundaryStage::WorkspaceCargoJoinError,
+                "workspace:cargo-join-error",
+            ),
+            (
+                RaBoundaryStage::WorkspaceCargoMapReturn,
+                "workspace:cargo-map-return",
+            ),
+            (
+                RaBoundaryStage::WorkspaceLoadReturn,
+                "workspace:load-return",
+            ),
+            (RaBoundaryStage::ScopeUnwind, "scope:unwind"),
+            (
+                RaBoundaryStage::WorkspaceInlineTaskEnter,
+                "workspace:inline-task-enter",
+            ),
+            (
+                RaBoundaryStage::WorkspaceInlineTaskReturn,
+                "workspace:inline-task-return",
+            ),
+            (
+                RaBoundaryStage::WorkspaceInlineJoinEnter,
+                "workspace:inline-join-enter",
+            ),
+            (
+                RaBoundaryStage::WorkspaceInlineJoinReturn,
+                "workspace:inline-join-return",
+            ),
+            (
+                RaBoundaryStage::WorkspaceInlineJoinError,
+                "workspace:inline-join-error",
+            ),
+            (
+                RaBoundaryStage::WorkspaceInlineLoadReturn,
+                "workspace:inline-load-return",
+            ),
+        ];
+        assert_eq!(stages.len(), 29);
+
+        for (stage, label) in stages {
+            assert_eq!(
+                format_ra_boundary(9, stage as u32, 1, 2),
+                format!("[ra-wasi-boundary] id=9 stage={label} value_1=1 value_2=2")
+            );
+        }
+    }
+
+    #[test]
+    fn ra_boundary_sink_is_gated_nonblocking_and_accepts_unknown_stages() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        set_debug_terminal_capture(false, Some("1"));
+
+        {
+            let _output = DEBUG_TERMINAL_OUTPUT.lock();
+            assert_eq!(host_trace_boundary(9, u32::MAX, 1, 2), 0);
+            assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 0);
+        }
+
+        set_debug_terminal_capture(true, Some("1"));
+        {
+            let _output = DEBUG_TERMINAL_OUTPUT.lock();
+            assert_eq!(host_trace_boundary(9, u32::MAX, 1, 2), 0);
+            assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 1);
+        }
+
+        assert_eq!(host_trace_boundary(9, u32::MAX, 1, 2), 0);
+        let captured = String::from_utf8(DEBUG_TERMINAL_OUTPUT.lock().drain(usize::MAX)).unwrap();
+        assert!(captured.contains("id=9 stage=unknown value_1=1 value_2=2"));
+        set_debug_terminal_capture(false, Some("1"));
+    }
+
+    #[test]
+    fn ra_boundary_does_not_append_after_capture_is_reset() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        let _gate_reset = RaBoundaryGateReset;
+        set_debug_terminal_capture(true, Some("1"));
+
+        let after_first_gate = Arc::new(Barrier::new(2));
+        let resume = Arc::new(Barrier::new(2));
+        *DEBUG_RA_BOUNDARY_AFTER_FIRST_GATE.lock() = Some(Arc::new({
+            let after_first_gate = Arc::clone(&after_first_gate);
+            let resume = Arc::clone(&resume);
+            move || {
+                after_first_gate.wait();
+                resume.wait();
+            }
+        }));
+
+        let output = DEBUG_TERMINAL_OUTPUT.lock();
+        std::thread::scope(|scope| {
+            let caller =
+                scope.spawn(|| host_trace_boundary(91, RaBoundaryStage::FfiReturn as u32, 0, 2106));
+            after_first_gate.wait();
+            drop(output);
+            set_debug_terminal_capture(false, Some("1"));
+            resume.wait();
+            assert_eq!(caller.join().unwrap(), 0);
+        });
+
+        assert!(!DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed));
+        assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 0);
+        assert_eq!(DEBUG_TERMINAL_OUTPUT.lock().buffered_len(), 0);
+    }
+
+    #[test]
+    fn ra_boundary_drop_counter_resets_on_capture_transitions() {
+        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+        set_debug_terminal_capture(true, Some("1"));
+        {
+            let _output = DEBUG_TERMINAL_OUTPUT.lock();
+            assert_eq!(
+                host_trace_boundary(9, RaBoundaryStage::FfiEnter as u32, 0, 0),
+                0
+            );
+        }
+        assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 1);
+
+        set_debug_terminal_capture(false, Some("1"));
+        assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 0);
+        DEBUG_RA_BOUNDARY_DROPPED.store(7, Ordering::Relaxed);
+        set_debug_terminal_capture(true, Some("1"));
+        assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 0);
+        set_debug_terminal_capture(false, Some("1"));
+    }
+
+    #[test]
+    fn ra_boundary_trace_id_is_observation_only() {
+        assert_eq!(
+            request_ra_trace_id(&serde_json::json!({ "trace_id": 9 })),
+            Some(9)
+        );
+        assert_eq!(request_ra_trace_id(&serde_json::json!({})), None);
+        assert_eq!(
+            request_ra_trace_id(&serde_json::json!({ "trace_id": "9" })),
+            None
+        );
+        assert_eq!(
+            request_ra_trace_id(&serde_json::json!({ "trace_id": u64::from(u32::MAX) + 1 })),
+            None
         );
     }
 

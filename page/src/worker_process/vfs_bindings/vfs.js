@@ -6869,6 +6869,66 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return ret >>> 0;
       }
+      let exports0DebugCaptureWaitSnapshot;
+
+      function debugCaptureWaitSnapshot() {
+        _debugLog('[iface="debug-capture-wait-snapshot", function="debug-capture-wait-snapshot"][Instruction::CallWasm] enter', {
+          funcName: 'debug-capture-wait-snapshot',
+          paramCount: 0,
+          async: false,
+          postReturn: false,
+        });
+        const hostProvided = false;
+
+        const [task, _wasm_call_currentTaskID] = createNewCurrentTask({
+          componentIdx: 0,
+          isAsync: false,
+          isManualAsync: false,
+          entryFnName: 'exports0DebugCaptureWaitSnapshot',
+          getCallbackFn: () => null,
+          callbackFnName: null,
+          errHandling: 'none',
+          callingWasmExport: true,
+        });
+
+        const started = task.enterSync();
+
+        if (null!== null) {
+          task.setReturnMemoryIdx(null);
+          task.setReturnMemory(() => null());
+        }
+
+
+        let ret;
+
+        try {
+          _withGlobalCurrentTaskMeta({
+            taskID: task.id(),
+            componentIdx: task.componentIdx(),
+            fn: () => exports0DebugCaptureWaitSnapshot(),
+          });
+        } catch (err) {
+
+          _debugLog('[Instruction::CallWasm] error during sync call', {
+            taskID: task.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+
+        }
+
+        _debugLog('[iface="debug-capture-wait-snapshot", function="debug-capture-wait-snapshot"][Instruction::Return]', {
+          funcName: 'debug-capture-wait-snapshot',
+          paramCount: 0,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([ret]);
+        task.exit();
+      }
       let exports0Init;
 
       function init() {
@@ -8746,6 +8806,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       exports0DebugSetTerminalCapture = exports0['debug-set-terminal-capture'];
       exports0DebugTerminalOutputLen = exports0['debug-terminal-output-len'];
       exports0DebugReadTerminalOutput = exports0['debug-read-terminal-output'];
+      exports0DebugCaptureWaitSnapshot = exports0['debug-capture-wait-snapshot'];
       exports0Init = exports0.init;
       exports0Main = exports0.main;
       virtualFileSystemWasip1ThreadsExportWasiThreadStart = exports0['wasip1-vfs:host/virtual-file-system-wasip1-threads-export#wasi-thread-start'];
@@ -8754,7 +8815,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
 
       };
 
-      return { virtualFileSystemWasip1ThreadsExport, allocBuf, debugReadTerminalOutput, debugSetTerminalCapture, debugTerminalOutputLen, dispatch, flushFromVfs, flushToVfs, freeBuf, init, main, rustSrcLoadState, 'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': virtualFileSystemWasip1ThreadsExport,  };
+      return { virtualFileSystemWasip1ThreadsExport, allocBuf, debugCaptureWaitSnapshot, debugReadTerminalOutput, debugSetTerminalCapture, debugTerminalOutputLen, dispatch, flushFromVfs, flushToVfs, freeBuf, init, main, rustSrcLoadState, 'wasip1-vfs:host/virtual-file-system-wasip1-threads-export': virtualFileSystemWasip1ThreadsExport,  };
     })();
     let promise, resolve, reject;
     function runNext (value) {

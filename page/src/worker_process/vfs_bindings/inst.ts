@@ -71,7 +71,7 @@ export const custom_instantiate = async (
       'vfs:host/bridge': {
         Downloader: {
           downloadFileStart: (name_ptr: number, name_len: number) => {
-            const view = new Uint8Array(memory.memory.buffer, name_ptr, name_len);
+            const view = new Uint8Array(memory.memory.buffer, name_ptr >>> 0, name_len >>> 0);
             const bytes = new Uint8Array(view); // copy
             const name = new TextDecoder().decode(bytes);
             console.log("Download file start", { name });
@@ -81,7 +81,7 @@ export const custom_instantiate = async (
             });
           },
           downloadFileChunk: (data_ptr: number, data_len: number) => {
-            const view = new Uint8Array(memory.memory.buffer, data_ptr, data_len);
+            const view = new Uint8Array(memory.memory.buffer, data_ptr >>> 0, data_len >>> 0);
             const data = new Uint8Array(view); // copy
             console.log("Download file chunk", { data_len });
             call_unknown_fn(0, {
@@ -96,7 +96,7 @@ export const custom_instantiate = async (
             });
           },
           sysrootStartFetch: (triple_ptr: number, triple_len: number) => {
-            const view = new Uint8Array(memory.memory.buffer, triple_ptr, triple_len);
+            const view = new Uint8Array(memory.memory.buffer, triple_ptr >>> 0, triple_len >>> 0);
             const bytes = new Uint8Array(view); // copy
             const triple = new TextDecoder().decode(bytes);
             console.log("Sysroot fetch start", { triple });
@@ -115,8 +115,8 @@ export const custom_instantiate = async (
             const status = sysrootMetaStatus(res);
 
             if (status === 1) {
-              view32[name_len_ptr / 4] = res.name_len!;
-              view32[data_len_ptr / 4] = res.data_len!;
+              view32[(name_len_ptr >>> 0) / 4] = res.name_len!;
+              view32[(data_len_ptr >>> 0) / 4] = res.data_len!;
             }
             return status;
           },
@@ -128,7 +128,7 @@ export const custom_instantiate = async (
             if (!res) return;
             const name_bytes = _toUint8Array(res.name);
             const view8 = new Uint8Array(memory.memory.buffer);
-            view8.set(name_bytes, name_ptr);
+            view8.set(name_bytes, name_ptr >>> 0);
           },
           sysrootReadFileChunk: (data_ptr: number, chunk_len: number): void => {
             const res = call_unknown_fn(0, {
@@ -138,14 +138,14 @@ export const custom_instantiate = async (
             if (!res) return;
             const chunk_bytes = _toUint8Array(res.chunk);
             const view8 = new Uint8Array(memory.memory.buffer);
-            view8.set(chunk_bytes, data_ptr);
+            view8.set(chunk_bytes, data_ptr >>> 0);
           },
         },
         ChildProcess: createChildProcessImports(memory, call_unknown_fn),
         Http: createHttpImports(memory, call_unknown_fn),
         Terminal: {
           terminalWrite: (session_id: number, data_ptr: number, data_len: number) => {
-            const view = new Uint8Array(memory.memory.buffer, data_ptr, data_len);
+            const view = new Uint8Array(memory.memory.buffer, data_ptr >>> 0, data_len >>> 0);
             const data = new Uint8Array(view); // copy
             call_unknown_fn(0, {
               name: "terminalWrite",
@@ -155,7 +155,7 @@ export const custom_instantiate = async (
         },
         Lsp: {
           hostRunCargo: (req_ptr: number, req_len: number, out_stdout_ptr: number, out_stdout_len: number, out_stderr_ptr: number, out_stderr_len: number, out_status: number): number => {
-            const view = new Uint8Array(memory.memory.buffer, req_ptr, req_len);
+            const view = new Uint8Array(memory.memory.buffer, req_ptr >>> 0, req_len >>> 0);
             const req = new TextDecoder().decode(view);
             const res = call_unknown_fn(0, {
               name: "hostRunCargo",
@@ -170,20 +170,20 @@ export const custom_instantiate = async (
             if (stdoutBytes.length > 0) {
               stdout_ptr = root.allocBuf(stdoutBytes.length);
               const view8 = new Uint8Array(memory.memory.buffer);
-              view8.set(stdoutBytes, stdout_ptr);
+              view8.set(stdoutBytes, stdout_ptr >>> 0);
             }
             if (stderrBytes.length > 0) {
               stderr_ptr = root.allocBuf(stderrBytes.length);
               const view8 = new Uint8Array(memory.memory.buffer);
-              view8.set(stderrBytes, stderr_ptr);
+              view8.set(stderrBytes, stderr_ptr >>> 0);
             }
 
             const view32 = new Int32Array(memory.memory.buffer);
-            view32[out_stdout_ptr / 4] = stdout_ptr;
-            view32[out_stdout_len / 4] = stdoutBytes.length;
-            view32[out_stderr_ptr / 4] = stderr_ptr;
-            view32[out_stderr_len / 4] = stderrBytes.length;
-            view32[out_status / 4] = res.status;
+            view32[(out_stdout_ptr >>> 0) / 4] = stdout_ptr;
+            view32[(out_stdout_len >>> 0) / 4] = stdoutBytes.length;
+            view32[(out_stderr_ptr >>> 0) / 4] = stderr_ptr;
+            view32[(out_stderr_len >>> 0) / 4] = stderrBytes.length;
+            view32[(out_status >>> 0) / 4] = res.status;
 
             return 0; // success
           },

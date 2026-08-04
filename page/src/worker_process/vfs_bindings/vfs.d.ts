@@ -20,6 +20,7 @@ export interface Root {
   debugSetTerminalCapture(enabled: boolean): void,
   debugTerminalOutputLen(): number,
   debugReadTerminalOutput(ptr: number, len: number): number,
+  debugCaptureWaitSnapshot(): void,
   init(): void,
   main(): void,
 }
