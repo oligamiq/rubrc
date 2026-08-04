@@ -40,8 +40,9 @@ component itself.
   rendered.
 - The editor mounts before LSP startup so Monaco readiness can satisfy
   `LspStartGate`.
-- `/src/main.rs` is only named and populated after `client.start()` resolves.
-- VFS pre-population happens before `client.start()`.
+- `/src/main.rs` VFS pre-population happens before `client.start()`.
+- The named `/src/main.rs` Monaco model is created only after `client.start()`
+  resolves.
 - `MonacoLanguageClient` remains the sole Monaco marker owner.
 - No direct marker setting, fallback language server, VFS topology change, or
   custom Atomics synchronization is introduced.
