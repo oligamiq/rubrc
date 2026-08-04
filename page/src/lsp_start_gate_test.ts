@@ -71,12 +71,17 @@ Deno.test("failed VFS readiness settles without starting LSP", () => {
   assert(starts === 0, "failed VFS bootstrap started LSP");
 });
 
-Deno.test("App mounts the editor before LSP startup can succeed", async () => {
+Deno.test("App mounts the editor before LSP startup but defers the main model", async () => {
   const source = await Deno.readTextFile("page/src/App.tsx");
   const mountIndex = source.indexOf("const handleMount");
   const mountedMonacoIndex = source.indexOf(
     "lspGate.setMonaco(mountedMonaco)",
     mountIndex,
+  );
+  const startedIndex = source.indexOf("const started = lspGate.started()");
+  const readyIndex = source.indexOf(
+    "started.then(() => setIsLspReady(true))",
+    startedIndex,
   );
 
   assert(mountIndex >= 0, "Monaco mount handler is missing");
@@ -91,5 +96,23 @@ Deno.test("App mounts the editor before LSP startup can succeed", async () => {
   assert(
     !source.includes("when={isLspReady()}"),
     "editor rendering is blocked on successful LSP startup",
+  );
+  assert(
+    readyIndex > startedIndex,
+    "LSP readiness is not set from the resolved startup promise",
+  );
+  assert(
+    source.includes(
+      'path={isLspReady() ? "file:///src/main.rs" : undefined}',
+    ),
+    "main Rust path is supplied before LSP startup completes",
+  );
+  assert(
+    source.includes("value={isLspReady() ? default_value : undefined}"),
+    "main Rust value is supplied before LSP startup completes",
+  );
+  assert(
+    !source.includes('path="file:///src/main.rs"'),
+    "main Rust path remains unconditional",
   );
 });

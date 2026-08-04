@@ -38,12 +38,13 @@ const App = (props: {
   const lspGate = new LspStartGate<typeof import("monaco-editor")>(
     async (monaco) => await startRustLspClient(props.ctx, monaco),
   );
+  const [isLspReady, setIsLspReady] = createSignal(false);
   let lspStartObserved = false;
   const observeLspStart = () => {
     const started = lspGate.started();
     if (!started || lspStartObserved) return;
     lspStartObserved = true;
-    void started.catch(console.error);
+    void started.then(() => setIsLspReady(true)).catch(console.error);
   };
 
   const handleMount = (mountedMonaco: typeof import("monaco-editor")) => {
@@ -217,8 +218,8 @@ const App = (props: {
       >
         <MonacoEditor
           language="rust"
-          path="file:///src/main.rs"
-          value={default_value}
+          path={isLspReady() ? "file:///src/main.rs" : undefined}
+          value={isLspReady() ? default_value : undefined}
           height="30vh"
           onMount={handleMount}
         />
