@@ -1,4 +1,11 @@
-import { createSignal, For, lazy, onCleanup, Suspense } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  For,
+  lazy,
+  onCleanup,
+  Suspense,
+} from "solid-js";
 import * as monaco from "monaco-editor";
 import { SetupMyTerminal } from "./xterm";
 import type { WASIFarmRef } from "@oligami/browser_wasi_shim-threads";
@@ -9,7 +16,7 @@ import { triples } from "./sysroot";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { type DisposableLspSession, LspStartGate } from "./lsp_start_gate";
 import type { VfsReadyResult } from "./vfs_readiness";
-import { exposeMonaco, markLspReady } from "./lsp_test_api";
+import { exposeEditor, markLspReady } from "./lsp_test_api";
 
 const Select = lazy(async () => {
   const selector = import("@thisbeyond/solid-select");
@@ -21,7 +28,7 @@ const Select = lazy(async () => {
 });
 
 const MonacoEditor = lazy(() =>
-  import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor }))
+  import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor })),
 );
 
 type Pane = {
@@ -41,6 +48,24 @@ const App = (props: {
     props.startLspClient,
   );
   const [isLspReady, setIsLspReady] = createSignal(false);
+  const [isEditorReady, setIsEditorReady] = createSignal(false);
+  let temporaryModel: monaco.editor.ITextModel | null | undefined;
+  let modelSwitchDisposable: { dispose(): void } | undefined;
+  let mountedMonacoRef: typeof import("monaco-editor") | undefined;
+  let mountedEditorRef: monaco.editor.IStandaloneCodeEditor | undefined;
+  createEffect(() => {
+    if (!isLspReady()) return;
+    const mainModel = mountedMonacoRef?.editor.getModel(
+      mountedMonacoRef.Uri.parse("file:///src/main.rs"),
+    );
+    if (mainModel && mountedEditorRef?.getModel() !== mainModel) {
+      mountedEditorRef?.setModel(mainModel);
+    }
+  });
+  createEffect(() => {
+    const readOnly = !isEditorReady();
+    mountedEditorRef?.updateOptions({ readOnly });
+  });
   let lspStartObserved = false;
   const observeLspStart = () => {
     const started = lspGate.started();
@@ -49,8 +74,25 @@ const App = (props: {
     void started.then(() => setIsLspReady(true)).catch(console.error);
   };
 
-  const handleMount = (mountedMonaco: typeof import("monaco-editor")) => {
-    exposeMonaco(mountedMonaco);
+  const handleMount = (
+    mountedMonaco: typeof import("monaco-editor"),
+    mountedEditor: monaco.editor.IStandaloneCodeEditor,
+  ) => {
+    mountedMonacoRef = mountedMonaco;
+    mountedEditorRef = mountedEditor;
+    temporaryModel = mountedEditor.getModel();
+    modelSwitchDisposable = mountedEditor.onDidChangeModel(() => {
+      const currentModel = mountedEditor.getModel();
+      if (currentModel?.uri.toString() !== "file:///src/main.rs") return;
+      if (temporaryModel && temporaryModel !== currentModel) {
+        temporaryModel.dispose();
+        temporaryModel = undefined;
+      }
+      setIsEditorReady(true);
+      modelSwitchDisposable?.dispose();
+      modelSwitchDisposable = undefined;
+    });
+    exposeEditor(mountedMonaco, mountedEditor);
     lspGate.setMonaco(mountedMonaco);
     observeLspStart();
     markLspReady();
@@ -67,12 +109,10 @@ const App = (props: {
   ]);
   const [nextPaneId, setNextPaneId] = createSignal(2);
   const [nextSessionId, setNextSessionId] = createSignal(1);
-  const [draggedTab, setDraggedTab] = createSignal<
-    {
-      paneId: number;
-      sessionId: number;
-    } | null
-  >(null);
+  const [draggedTab, setDraggedTab] = createSignal<{
+    paneId: number;
+    sessionId: number;
+  } | null>(null);
   const [isReady, setIsReady] = createSignal(false);
   const sharedReady = new SharedObject((result: VfsReadyResult) => {
     setIsReady(true);
@@ -82,6 +122,12 @@ const App = (props: {
   }, props.ctx.vfs_ready_id);
 
   onCleanup(() => {
+    modelSwitchDisposable?.dispose();
+    modelSwitchDisposable = undefined;
+    temporaryModel?.dispose();
+    temporaryModel = undefined;
+    mountedMonacoRef = undefined;
+    mountedEditorRef = undefined;
     sharedReady.bc.close();
     void lspGate.dispose();
   });
@@ -137,9 +183,12 @@ const App = (props: {
         .map((p) => {
           if (p.id === paneId) {
             const newTabs = p.tabs.filter((t) => t !== sessionId);
-            const newActive = p.activeTab === sessionId
-              ? newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1
-              : p.activeTab;
+            const newActive =
+              p.activeTab === sessionId
+                ? newTabs.length > 0
+                  ? newTabs[newTabs.length - 1]
+                  : -1
+                : p.activeTab;
             return { ...p, tabs: newTabs, activeTab: newActive };
           }
           return p;
@@ -150,7 +199,9 @@ const App = (props: {
 
   const setActiveTab = (paneId: number, sessionId: number) => {
     setPanes(
-      panes().map((p) => p.id === paneId ? { ...p, activeTab: sessionId } : p),
+      panes().map((p) =>
+        p.id === paneId ? { ...p, activeTab: sessionId } : p,
+      ),
     );
   };
 
@@ -172,9 +223,12 @@ const App = (props: {
         .map((p) => {
           if (p.id === dragged.paneId) {
             const newTabs = p.tabs.filter((t) => t !== dragged.sessionId);
-            const newActive = p.activeTab === dragged.sessionId
-              ? newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1
-              : p.activeTab;
+            const newActive =
+              p.activeTab === dragged.sessionId
+                ? newTabs.length > 0
+                  ? newTabs[newTabs.length - 1]
+                  : -1
+                : p.activeTab;
             return { ...p, tabs: newTabs, activeTab: newActive };
           }
           if (p.id === targetPaneId) {
@@ -222,6 +276,7 @@ const App = (props: {
           language="rust"
           path={isLspReady() ? "file:///src/main.rs" : undefined}
           value={isLspReady() ? default_value : undefined}
+          options={{ readOnly: !isEditorReady() }}
           height="30vh"
           onMount={handleMount}
         />
@@ -304,8 +359,7 @@ const App = (props: {
         <div
           class="flex-1 min-h-0 min-w-0 grid overflow-hidden"
           style={{
-            "grid-template-columns":
-              `repeat(${panes().length}, minmax(0, 1fr))`,
+            "grid-template-columns": `repeat(${panes().length}, minmax(0, 1fr))`,
           }}
         >
           <For each={allSessionIds()}>

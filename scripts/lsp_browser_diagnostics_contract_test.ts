@@ -7,14 +7,14 @@ Deno.test("browser acceptance separates startup and interaction budgets", async 
     "scripts/lsp_browser_diagnostics_test.mjs",
   );
   const readinessIndex = source.indexOf(
-    "window.__rubrcLspTest?.ready &&",
+    "const testApi = window.__rubrcLspTest;",
   );
   const didOpenIndex = source.indexOf(
-    "window.__rubrcLspTest.mainDidOpenComplete === true",
+    "testApi.mainDidOpenComplete === true",
     readinessIndex,
   );
   const initialPublicationIndex = source.indexOf(
-    "window.__rubrcLspTest.mainDiagnosticsPublicationCount > 0",
+    "testApi.mainDiagnosticsPublicationCount > 0",
     didOpenIndex,
   );
   const startupTimeoutIndex = source.indexOf(
@@ -53,9 +53,7 @@ Deno.test("browser acceptance requires semantic rust-analyzer markers", async ()
   const source = await Deno.readTextFile(
     "scripts/lsp_browser_diagnostics_test.mjs",
   );
-  const budgets = await Deno.readTextFile(
-    "scripts/lsp_browser_quiescence.mjs",
-  );
+  const budgets = await Deno.readTextFile("scripts/lsp_browser_quiescence.mjs");
 
   assert(
     source.includes('let value: i32 = "wrong"'),
@@ -129,10 +127,9 @@ Deno.test("semantic diagnostics worker disables cargo build scripts", async () =
   );
 
   assert(
-    /cargo:\s*\{\s*sysroot:\s*"\/sysroot",\s*buildScripts:\s*\{\s*enable:\s*false\s*\}\s*\}/
-      .test(
-        initializationOptions,
-      ),
+    /cargo:\s*\{\s*sysroot:\s*"\/sysroot",\s*buildScripts:\s*\{\s*enable:\s*false\s*\}\s*\}/.test(
+      initializationOptions,
+    ),
     "semantic diagnostics worker does not disable cargo build scripts",
   );
 });
@@ -153,12 +150,27 @@ Deno.test("compressed stream delegates the optional cache boundary", async () =>
 });
 
 Deno.test("browser startup budget covers cold sysroot and LSP readiness", async () => {
-  const budgets = await Deno.readTextFile(
-    "scripts/lsp_browser_quiescence.mjs",
-  );
+  const budgets = await Deno.readTextFile("scripts/lsp_browser_quiescence.mjs");
 
   assert(
     budgets.includes("export const STARTUP_TIMEOUT_MS = 300_000"),
     "cold browser startup lacks the 300-second budget",
+  );
+});
+
+Deno.test("browser readiness requires one named Rust model and an editable editor", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+  assert(
+    source.includes("rustModels.length === 1") &&
+      source.includes('rustModels[0].uri.toString() === "file:///src/main.rs"'),
+    "browser readiness does not require exactly one named Rust model",
+  );
+  assert(
+    source.includes("testApi.editor.getOption(") &&
+      source.includes("testApi.monaco.editor.EditorOption.readOnly") &&
+      source.includes("=== false"),
+    "browser readiness does not require an editable mounted editor",
   );
 });

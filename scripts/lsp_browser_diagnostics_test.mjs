@@ -68,9 +68,8 @@ try {
   const page = await browser.newPage();
   const browserErrors = [];
   const traceCollector = new VfsDebugTraceCollector();
-  page.on(
-    "pageerror",
-    (error) => browserErrors.push(error.stack ?? error.message),
+  page.on("pageerror", (error) =>
+    browserErrors.push(error.stack ?? error.message),
   );
   page.on("console", (message) => {
     const text = message.text();
@@ -97,14 +96,23 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   try {
     await page.waitForFunction(
-      () =>
-        window.__rubrcLspTest?.ready &&
-        window.__rubrcLspTest.monaco &&
-        window.__rubrcLspTest.mainDidOpenComplete === true &&
-        window.__rubrcLspTest.mainDiagnosticsPublicationCount > 0 &&
-        window.__rubrcLspTest.vfsWrites.some(
-          (write) => write.path === "/src/main.rs",
-        ),
+      () => {
+        const testApi = window.__rubrcLspTest;
+        if (!testApi?.ready || !testApi.monaco || !testApi.editor) return false;
+        const rustModels = testApi.monaco.editor
+          .getModels()
+          .filter((model) => model.getLanguageId() === "rust");
+        return (
+          rustModels.length === 1 &&
+          rustModels[0].uri.toString() === "file:///src/main.rs" &&
+          testApi.editor.getOption(
+            testApi.monaco.editor.EditorOption.readOnly,
+          ) === false &&
+          testApi.mainDidOpenComplete === true &&
+          testApi.mainDiagnosticsPublicationCount > 0 &&
+          testApi.vfsWrites.some((write) => write.path === "/src/main.rs")
+        );
+      },
       { timeout: STARTUP_TIMEOUT_MS },
     );
   } catch (error) {
@@ -116,9 +124,9 @@ try {
       () => traceCollector.snapshot(),
     );
     throw new Error(
-      `browser readiness failed: ${error.message}\nstate: ${
-        JSON.stringify(state)
-      }\nbrowser errors:\n${browserErrors.join("\n")}`,
+      `browser readiness failed: ${error.message}\nstate: ${JSON.stringify(
+        state,
+      )}\nbrowser errors:\n${browserErrors.join("\n")}`,
     );
   }
 
@@ -139,16 +147,16 @@ try {
     const state = await safeFailureState(
       () =>
         page.evaluate(() => ({
-          mainDiagnosticsPublicationCount: window.__rubrcLspTest
-            ?.mainDiagnosticsPublicationCount,
+          mainDiagnosticsPublicationCount:
+            window.__rubrcLspTest?.mainDiagnosticsPublicationCount,
           mainDidOpenComplete: window.__rubrcLspTest?.mainDidOpenComplete,
         })),
       () => traceCollector.snapshot(),
     );
     throw new Error(
-      `initial diagnostics quiescence failed: ${error.message}\nstate: ${
-        JSON.stringify(state)
-      }\nbrowser errors:\n${browserErrors.join("\n")}`,
+      `initial diagnostics quiescence failed: ${error.message}\nstate: ${JSON.stringify(
+        state,
+      )}\nbrowser errors:\n${browserErrors.join("\n")}`,
     );
   }
 
@@ -171,8 +179,10 @@ try {
       waitForPublication: () =>
         page.waitForFunction(
           ({ previousPublicationCount }) => {
-            return window.__rubrcLspTest.mainDiagnosticsPublicationCount >
-              previousPublicationCount;
+            return (
+              window.__rubrcLspTest.mainDiagnosticsPublicationCount >
+              previousPublicationCount
+            );
           },
           { timeout: remainingAnalysisBudget() },
           { previousPublicationCount: readinessPublicationCount },
@@ -182,14 +192,16 @@ try {
           () => {
             const { monaco } = window.__rubrcLspTest;
             const uri = monaco.Uri.parse("file:///src/main.rs");
-            return monaco.editor.getModelMarkers({ resource: uri }).some(
-              (marker) =>
-                marker.severity === monaco.MarkerSeverity.Error &&
-                marker.source === "rust-analyzer" &&
-                marker.message.includes("i32") &&
-                marker.message.includes("str") &&
-                marker.startLineNumber === 1,
-            );
+            return monaco.editor
+              .getModelMarkers({ resource: uri })
+              .some(
+                (marker) =>
+                  marker.severity === monaco.MarkerSeverity.Error &&
+                  marker.source === "rust-analyzer" &&
+                  marker.message.includes("i32") &&
+                  marker.message.includes("str") &&
+                  marker.startLineNumber === 1,
+              );
           },
           { timeout: remainingAnalysisBudget() },
         ),
@@ -222,9 +234,9 @@ try {
             mainDiagnosticsPublicationCount,
             mainDidOpenComplete,
             lspEvents,
-            modelUris: monaco.editor.getModels().map((item) =>
-              item.uri.toString()
-            ),
+            modelUris: monaco.editor
+              .getModels()
+              .map((item) => item.uri.toString()),
             markers: monaco.editor.getModelMarkers({ resource: uri }),
             vfsWrites,
           };
@@ -232,9 +244,9 @@ try {
       () => traceCollector.snapshot(),
     );
     throw new Error(
-      `invalid diagnostics failed: ${error.message}\nstate: ${
-        JSON.stringify(state)
-      }\nbrowser errors:\n${browserErrors.join("\n")}`,
+      `invalid diagnostics failed: ${error.message}\nstate: ${JSON.stringify(
+        state,
+      )}\nbrowser errors:\n${browserErrors.join("\n")}`,
     );
   }
 
@@ -254,8 +266,10 @@ try {
       waitForPublication: () =>
         page.waitForFunction(
           ({ previousPublicationCount }) => {
-            return window.__rubrcLspTest.mainDiagnosticsPublicationCount >
-              previousPublicationCount;
+            return (
+              window.__rubrcLspTest.mainDiagnosticsPublicationCount >
+              previousPublicationCount
+            );
           },
           { timeout: DIAGNOSTICS_TIMEOUT_MS },
           { previousPublicationCount: invalidPublicationCount },
@@ -267,8 +281,8 @@ try {
             const uri = monaco.Uri.parse("file:///src/main.rs");
             return !monaco.editor
               .getModelMarkers({ resource: uri })
-              .some((marker) =>
-                marker.severity === monaco.MarkerSeverity.Error
+              .some(
+                (marker) => marker.severity === monaco.MarkerSeverity.Error,
               );
           },
           { timeout: DIAGNOSTICS_TIMEOUT_MS },
@@ -299,9 +313,9 @@ try {
       () => traceCollector.snapshot(),
     );
     throw new Error(
-      `diagnostics clearing failed: ${error.message}\nstate: ${
-        JSON.stringify(state)
-      }\nbrowser errors:\n${browserErrors.join("\n")}`,
+      `diagnostics clearing failed: ${error.message}\nstate: ${JSON.stringify(
+        state,
+      )}\nbrowser errors:\n${browserErrors.join("\n")}`,
     );
   }
 
@@ -335,9 +349,10 @@ try {
   ) {
     throw new Error("LSP JSON-RPC was routed to the terminal");
   }
-  const fileServiceErrors = browserErrors.filter((error) =>
-    error.includes("FileOperationError") ||
-    error.includes("Unable to resolve nonexistent file")
+  const fileServiceErrors = browserErrors.filter(
+    (error) =>
+      error.includes("FileOperationError") ||
+      error.includes("Unable to resolve nonexistent file"),
   );
   if (fileServiceErrors.length > 0) {
     throw new Error(

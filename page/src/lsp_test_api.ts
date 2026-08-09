@@ -10,6 +10,7 @@ type TestApi = DiagnosticsPublicationTestState & {
   requestSyntaxTree?: (uri: string) => Promise<string>;
   ready: boolean;
   monaco?: typeof Monaco;
+  editor?: Monaco.editor.IStandaloneCodeEditor;
   vfsWrites: Array<{ path: string; content: string }>;
 };
 
@@ -90,10 +91,14 @@ export function recordLspConnectionEvent(
   });
 }
 
-export function exposeMonaco(monaco: typeof Monaco): void {
+export function exposeEditor(
+  monaco: typeof Monaco,
+  editor: Monaco.editor.IStandaloneCodeEditor,
+): void {
   if (!enabled) return;
   window.__rubrcLspTest ??= { ready: false, vfsWrites: [] };
   window.__rubrcLspTest.monaco = monaco;
+  window.__rubrcLspTest.editor = editor;
 }
 
 export function installSyntaxTreeRequest(
@@ -114,9 +119,9 @@ export function installSyntaxTreeRequest(
   };
 }
 
-export function exposeSyntaxTreeRequest(
-  client: SyntaxTreeRequestClient,
-): { dispose(): void } {
+export function exposeSyntaxTreeRequest(client: SyntaxTreeRequestClient): {
+  dispose(): void;
+} {
   if (!enabled) return { dispose() {} };
   window.__rubrcLspTest ??= { ready: false, vfsWrites: [] };
   return installSyntaxTreeRequest(window.__rubrcLspTest, client);
