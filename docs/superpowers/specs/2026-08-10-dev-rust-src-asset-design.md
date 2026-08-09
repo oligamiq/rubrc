@@ -82,9 +82,9 @@ callers are added later, CacheStorage deletion and replacement for the same URL
 remain idempotent, while request coalescing can be designed at that new owner
 boundary.
 
-`fetch_compressed_stream` supplies a strict predicate accepting an absent
-content type or the known binary Brotli types `application/octet-stream`,
-`application/brotli`, and `application/x-brotli`. It checks the network result
+`fetch_compressed_stream` supplies a strict predicate accepting only the known
+binary Brotli types `application/octet-stream`, `application/brotli`, and
+`application/x-brotli`. A missing content type is rejected. It checks the network result
 before reading the body and throws a descriptive compressed-asset response
 error containing the URL and content type. HTML, JSON, image, and other invalid
 payloads never enter CacheStorage or reach `BrotliDecStream`.

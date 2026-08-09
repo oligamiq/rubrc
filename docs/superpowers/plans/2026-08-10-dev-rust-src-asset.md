@@ -23,7 +23,7 @@
 - A valid cache hit is returned unchanged; an invalid hit is deleted before a network retry; an invalid successful network response is returned but not cached.
 - Cache open, match, delete, and put errors remain best-effort and must never replace the network response.
 - Non-GET Request objects bypass CacheStorage, and a response clone is canceled when `cache.put` rejects.
-- `fetch_compressed_stream` accepts only an absent Content-Type or `application/octet-stream`, `application/brotli`, and `application/x-brotli`, allowing normal media-type parameters and case normalization; every other type is rejected before body access or decompression.
+- `fetch_compressed_stream` accepts only `application/octet-stream`, `application/brotli`, and `application/x-brotli`, allowing normal media-type parameters and case normalization; a missing header and every other type are rejected before body access or decompression.
 - Preserve the existing non-OK HTTP error path and allow corrupt binary-looking bytes to reach the Brotli decoder so its detailed error remains observable.
 - Use Deno for all new TypeScript tests; the direct compressed-response tests must inject a transform and must not initialize or decode with the real Wasm module.
 - Make exactly one commit per task, stage only the task's listed files, and do not include unrelated working-tree changes.
@@ -340,10 +340,35 @@ Deno.test("invalid MIME types are rejected before body access or decompression",
   }
 });
 
-Deno.test("binary Brotli and absent Content-Type responses reach decompression", async () => {
+Deno.test("missing Content-Type is rejected before decompression", async () => {
+  let decompressCalls = 0;
+  let rejection: unknown;
+  try {
+    await fetchCompressedStream(
+      "https://example.test/rust-src.tar.vfsbr?v=missing-type",
+      undefined,
+      {
+        async fetch() {
+          return new Response(new Uint8Array([1, 2, 3]));
+        },
+        reportCacheError() {},
+        async getDecompressStream() {
+          decompressCalls += 1;
+          return new TransformStream<Uint8Array, Uint8Array>();
+        },
+      },
+    );
+  } catch (error) {
+    rejection = error;
+  }
+  assert(rejection instanceof Error, "missing Content-Type did not reject");
+  assert(rejection.message.includes("missing"), "missing header error is unclear");
+  assert(decompressCalls === 0, "missing Content-Type reached decompression");
+});
+
+Deno.test("binary Brotli Content-Type responses reach decompression", async () => {
   const expected = new Uint8Array([11, 12, 13]);
   for (const contentType of [
-    undefined,
     "application/octet-stream",
     "application/brotli",
     "application/x-brotli; profile=archive",
@@ -351,7 +376,7 @@ Deno.test("binary Brotli and absent Content-Type responses reach decompression",
   ]) {
     let decompressCalls = 0;
     const headers = new Headers();
-    if (contentType !== undefined) headers.set("content-type", contentType);
+    headers.set("content-type", contentType);
 
     const stream = await fetchCompressedStream(
       "https://example.test/rust-src.tar.vfsbr?v=accepted",
@@ -645,7 +670,7 @@ deno test --no-lock --allow-read \
   scripts/lsp_browser_diagnostics_contract_test.ts
 ```
 
-Expected: PASS. Cache open/match/delete/put failures remain reported and non-fatal, invalid hits retry, invalid network HTML/JSON are not cached, MIME errors include URL/type before body access, all four accepted header forms reach only the injected transform, and the HTTP failure assertion remains `Failed to fetch wasm`.
+Expected: PASS. Cache open/match/delete/put failures remain reported and non-fatal, invalid hits retry, invalid network HTML/JSON are not cached, MIME errors include URL/type before body access, all four accepted binary header forms reach only the injected transform, and the HTTP failure assertion remains `Failed to fetch wasm`.
 
 - [ ] **Step 9: Build the library and inspect the Task 1 diff**
 
@@ -1353,7 +1378,7 @@ Expected: the staged-name list contains exactly the five Task 2 files and the co
 ## Final Verification
 
 - [ ] Confirm Task 1 maps every cache state: accepted hit, rejected hit plus successful delete, rejected hit plus failed delete, open failure, match failure, valid network put, invalid network no-put, and put failure.
-- [ ] Confirm direct compressed-response tests cover absent Content-Type, the three accepted binary types, media-type parameters/case, HTML, JSON, non-OK status, body-access ordering, and decompressor-call ordering without importing Wasm.
+- [ ] Confirm direct compressed-response tests reject missing Content-Type and cover the three accepted binary types, media-type parameters/case, HTML, JSON, non-OK status, body cancellation, body-access ordering, and decompressor-call ordering without importing Wasm.
 - [ ] Confirm Task 2 maps validated generation failure, exact cache/sidecar paths, atomic sidecar publication, Bun `predev`/`prestart`, startup hash validation, exact `v` matching, 409 mismatch, `next(error)` file failures, binary MIME, and no preview/public/build leakage.
 - [ ] Confirm the real dev command proves preparation, Vite serving, content type, response/file byte identity, sidecar SHA identity, native Brotli decompression, and mismatch rejection while retaining the persistent validated cache.
 - [ ] Confirm production `SOURCE_SHA`, `BUILD_EPOCH`, browser diagnostics, rust-src cache pruning/dedupe in `page/src/sysroot_archive.ts`, and all existing Vite `resolve.dedupe` entries remain unchanged.
