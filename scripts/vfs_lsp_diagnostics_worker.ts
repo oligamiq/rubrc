@@ -10,7 +10,10 @@ import {
   LspFrameDecoder,
   toLspBytes,
 } from "../page/src/lsp_protocol.ts";
-import { waitForRustSrcBootstrap } from "../page/src/vfs_readiness.ts";
+import {
+  RUST_SRC_BOOTSTRAP_TIMEOUT_MS,
+  waitForRustSrcBootstrap,
+} from "../page/src/vfs_readiness.ts";
 import {
   startVfsDebugTracePump,
   traceVfsHostCall,
@@ -110,8 +113,11 @@ globalThis.onmessage = async (event) => {
 
     root.dispatch(0, 3, 0, 0);
     root.dispatch(0, 1, 100, 100);
-    const rustSrcResult = await waitForRustSrcBootstrap(root, async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    const rustSrcResult = await waitForRustSrcBootstrap(root, {
+      timeoutMs: RUST_SRC_BOOTSTRAP_TIMEOUT_MS,
+      sleep: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      },
     });
     if (!rustSrcResult.ok) throw new Error(rustSrcResult.error);
 
@@ -208,14 +214,16 @@ globalThis.onmessage = async (event) => {
       method: "textDocument/didChange",
       params: {
         textDocument: { uri, version: 2 },
-        contentChanges: [{
-          range: {
-            start: { line: 0, character: 0 },
-            end: { line: 1, character: 0 },
+        contentChanges: [
+          {
+            range: {
+              start: { line: 0, character: 0 },
+              end: { line: 1, character: 0 },
+            },
+            rangeLength: 13,
+            text: 'fn main() { let value: i32 = "wrong"; }\n',
           },
-          rangeLength: 13,
-          text: 'fn main() { let value: i32 = "wrong"; }\n',
-        }],
+        ],
       },
     });
     await waitForMessage(
@@ -239,14 +247,16 @@ globalThis.onmessage = async (event) => {
       method: "textDocument/didChange",
       params: {
         textDocument: { uri, version: 3 },
-        contentChanges: [{
-          range: {
-            start: { line: 0, character: 0 },
-            end: { line: 1, character: 0 },
+        contentChanges: [
+          {
+            range: {
+              start: { line: 0, character: 0 },
+              end: { line: 1, character: 0 },
+            },
+            rangeLength: 40,
+            text: "fn main() {}\n",
           },
-          rangeLength: 40,
-          text: "fn main() {}\n",
-        }],
+        ],
       },
     });
     await waitForMessage(
@@ -264,9 +274,8 @@ globalThis.onmessage = async (event) => {
   } catch (error) {
     result = {
       ok: false,
-      detail: error instanceof Error
-        ? (error.stack ?? error.message)
-        : String(error),
+      detail:
+        error instanceof Error ? (error.stack ?? error.message) : String(error),
     };
   } finally {
     try {

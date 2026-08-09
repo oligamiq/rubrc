@@ -10,13 +10,25 @@ type BootstrapRoot = {
   rustSrcLoadState(): number;
 };
 
+export type RustSrcBootstrapTiming = {
+  timeoutMs?: number;
+  now?: () => number;
+  sleep?: () => Promise<void>;
+};
+
 const BOOTSTRAP_EVENT = 8;
+export const RUST_SRC_BOOTSTRAP_TIMEOUT_MS = 75_000;
 
 export async function waitForRustSrcBootstrap(
   root: BootstrapRoot,
-  sleep: () => Promise<void> = () =>
-    new Promise((resolve) => setTimeout(resolve, 50)),
+  timing: RustSrcBootstrapTiming = {},
 ): Promise<VfsReadyResult> {
+  const timeoutMs = timing.timeoutMs ?? RUST_SRC_BOOTSTRAP_TIMEOUT_MS;
+  const now = timing.now ?? performance.now.bind(performance);
+  const sleep =
+    timing.sleep ??
+    (() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
+  const deadline = now() + timeoutMs;
   root.dispatch(0, BOOTSTRAP_EVENT, 0, 0);
   while (true) {
     const state = root.rustSrcLoadState();
@@ -32,6 +44,13 @@ export async function waitForRustSrcBootstrap(
       return {
         ok: false,
         error: `rust-src bootstrap returned invalid state ${state}`,
+      };
+    }
+    if (now() >= deadline) {
+      const stateName = state === 0 ? "NotStarted" : "Loading";
+      return {
+        ok: false,
+        error: `rust-src bootstrap timed out after ${timeoutMs}ms while guest state remained ${stateName}`,
       };
     }
     await sleep();

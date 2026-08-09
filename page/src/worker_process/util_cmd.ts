@@ -9,6 +9,7 @@ import { set_fake_worker } from "./vfs_bindings/common";
 import { prebindWasiMemory } from "./prebind_wasi_memory.ts";
 import { get_brotli_decompress_stream } from "../../../lib/src/brotli_stream";
 import {
+  RUST_SRC_BOOTSTRAP_TIMEOUT_MS,
   type VfsReadyResult,
   waitForRustSrcBootstrap,
 } from "../vfs_readiness.ts";
@@ -125,8 +126,10 @@ globalThis.addEventListener("message", async (event) => {
       const manifest = await manifestRes.json();
 
       if (
-        manifest.version !== 1 || manifest.encoding !== "br" ||
-        !manifest.parts || !Array.isArray(manifest.parts) ||
+        manifest.version !== 1 ||
+        manifest.encoding !== "br" ||
+        !manifest.parts ||
+        !Array.isArray(manifest.parts) ||
         manifest.parts.length === 0
       ) {
         throw new Error(`Invalid manifest at ${manifestUrl.href}`);
@@ -159,16 +162,17 @@ globalThis.addEventListener("message", async (event) => {
       let totalPartSize = 0;
       for (let i = 0; i < manifest.parts.length; i++) {
         const part = manifest.parts[i];
-        const expectedPartFile = `${manifest.originalFile}.br.part-${
-          i.toString().padStart(3, "0")
-        }`;
+        const expectedPartFile = `${manifest.originalFile}.br.part-${i
+          .toString()
+          .padStart(3, "0")}`;
         if (part.file !== expectedPartFile) {
           throw new Error(
             `Invalid part file in manifest: expected ${expectedPartFile}, got ${part.file}`,
           );
         }
         if (
-          !Number.isSafeInteger(part.size) || part.size <= 0 ||
+          !Number.isSafeInteger(part.size) ||
+          part.size <= 0 ||
           part.size > 25165824
         ) {
           throw new Error(`Invalid part size in manifest`);
@@ -218,15 +222,14 @@ globalThis.addEventListener("message", async (event) => {
 
                 partLoaded += value.byteLength;
                 loaded += value.byteLength;
-                let progressMsg =
-                  `\r\x1b[K[VFS] Fetching and streaming compilation: ${
-                    (loaded / 1024 / 1024).toFixed(2)
-                  } MB`;
+                let progressMsg = `\r\x1b[K[VFS] Fetching and streaming compilation: ${(
+                  loaded / 1024 / 1024
+                ).toFixed(2)} MB`;
                 if (total > 0) {
                   const percent = Math.round((loaded / total) * 100);
-                  progressMsg += ` / ${
-                    (total / 1024 / 1024).toFixed(2)
-                  } MB (${percent}%)`;
+                  progressMsg += ` / ${(total / 1024 / 1024).toFixed(
+                    2,
+                  )} MB (${percent}%)`;
                 }
                 await terminal({
                   sessionId: 0,
@@ -281,7 +284,8 @@ globalThis.addEventListener("message", async (event) => {
           },
         });
 
-        const decompressedReadable = readable.pipeThrough(decompressStream)
+        const decompressedReadable = readable
+          .pipeThrough(decompressStream)
           .pipeThrough(validationStream);
 
         vfs_wasm = await WebAssembly.compileStreaming(
@@ -303,7 +307,8 @@ globalThis.addEventListener("message", async (event) => {
           `Failed to fetch ${vfs_wasm_path}: ${response.status} ${response.statusText}`,
         );
       }
-      const etag = response.headers.get("etag") ||
+      const etag =
+        response.headers.get("etag") ||
         response.headers.get("last-modified") ||
         "unknown";
       const cacheKey = `${vfs_wasm_path}?etag=${etag}`;
@@ -335,15 +340,14 @@ globalThis.addEventListener("message", async (event) => {
               const { done, value } = await reader.read();
               if (done) break;
               loaded += value.byteLength;
-              let progressMsg =
-                `\r\x1b[K[VFS] Fetching and streaming compilation: ${
-                  (loaded / 1024 / 1024).toFixed(2)
-                } MB`;
+              let progressMsg = `\r\x1b[K[VFS] Fetching and streaming compilation: ${(
+                loaded / 1024 / 1024
+              ).toFixed(2)} MB`;
               if (total > 0) {
                 const percent = Math.round((loaded / total) * 100);
-                progressMsg += ` / ${
-                  (total / 1024 / 1024).toFixed(2)
-                } MB (${percent}%)`;
+                progressMsg += ` / ${(total / 1024 / 1024).toFixed(
+                  2,
+                )} MB (${percent}%)`;
               }
               await terminal({
                 sessionId: 0,
@@ -470,7 +474,9 @@ globalThis.addEventListener("message", async (event) => {
   >();
   const { cols, rows } = await get_terminal_size();
   vfs_root.dispatch(0, 1, cols, rows);
-  const rustSrcResult = await waitForRustSrcBootstrap(vfs_root);
+  const rustSrcResult = await waitForRustSrcBootstrap(vfs_root, {
+    timeoutMs: RUST_SRC_BOOTSTRAP_TIMEOUT_MS,
+  });
 
   shared.push(
     new SharedObject(({ sessionId }: { sessionId: number }) => {
@@ -498,17 +504,20 @@ globalThis.addEventListener("message", async (event) => {
 
   shared.push(
     new SharedObject(
-      ({ sessionId, data }: {
+      ({
+        sessionId,
+        data,
+      }: {
         sessionId: number;
         data: string | number[] | Uint8Array;
       }) => {
         if (
-          dispatchSpecialInput(
-            vfs_root,
-            animal.get_share_memory().memory,
-            { sessionId, data },
-          )
-        ) return;
+          dispatchSpecialInput(vfs_root, animal.get_share_memory().memory, {
+            sessionId,
+            data,
+          })
+        )
+          return;
 
         if (typeof data !== "string") {
           throw new Error("terminal input must be a string");
