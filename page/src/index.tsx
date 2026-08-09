@@ -75,6 +75,10 @@ render(
           wasi_ref,
         })
       }
+      startLspClient={async (monaco) => {
+        const { startRustLspClient } = await import("./rust_lsp_client");
+        return startRustLspClient(ctx, monaco);
+      }}
     />
   ),
   // biome-ignore lint/style/noNonNullAssertion: <explanation>

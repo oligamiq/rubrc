@@ -7,8 +7,7 @@ import { default_value } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
-import { LspStartGate } from "./lsp_start_gate";
-import { startRustLspClient } from "./rust_lsp_client";
+import { type DisposableLspSession, LspStartGate } from "./lsp_start_gate";
 import type { VfsReadyResult } from "./vfs_readiness";
 import { exposeMonaco, markLspReady } from "./lsp_test_api";
 
@@ -34,9 +33,12 @@ type Pane = {
 const App = (props: {
   ctx: Ctx;
   callback: (wasi_ref: WASIFarmRef) => void;
+  startLspClient: (
+    monaco: typeof import("monaco-editor"),
+  ) => Promise<DisposableLspSession>;
 }) => {
   const lspGate = new LspStartGate<typeof import("monaco-editor")>(
-    async (monaco) => await startRustLspClient(props.ctx, monaco),
+    props.startLspClient,
   );
   const [isLspReady, setIsLspReady] = createSignal(false);
   let lspStartObserved = false;

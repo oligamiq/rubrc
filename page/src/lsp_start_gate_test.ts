@@ -73,6 +73,50 @@ Deno.test("failed VFS readiness settles without starting LSP", () => {
 
 Deno.test("App mounts the editor before LSP startup but defers the main model", async () => {
   const source = await Deno.readTextFile("page/src/App.tsx");
+  const indexSource = await Deno.readTextFile("page/src/index.tsx");
+  const viteSource = await Deno.readTextFile("page/vite.config.ts");
+  const rustLspModuleImport =
+    /from\s*["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']/;
+
+  assert(
+    !rustLspModuleImport.test(indexSource),
+    "index.tsx must not statically import rust_lsp_client",
+  );
+  assert(
+    /startLspClient\s*=/.test(indexSource) &&
+      /await\s+import\s*\(\s*["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']\s*\)/.test(
+        indexSource,
+      ),
+    "index.tsx must inject an entry-owned dynamic LSP starter",
+  );
+  assert(
+    !rustLspModuleImport.test(source),
+    "App must not import rust_lsp_client",
+  );
+  assert(
+    /startLspClient\s*:/.test(source) &&
+      source.includes("Promise<DisposableLspSession>"),
+    "App must accept the typed injected LSP starter",
+  );
+  assert(
+    /new\s+LspStartGate[\s\S]*?\(\s*(?:props\.)?startLspClient\s*,?\s*\)/.test(
+      source,
+    ),
+    "App must give the injected starter to LspStartGate",
+  );
+  const dedupeBlock = viteSource.match(/dedupe\s*:\s*\[([\s\S]*?)\]/)?.[1] ?? "";
+  for (const dependency of [
+    "vscode",
+    "@codingame/monaco-vscode-api",
+    "@codingame/monaco-vscode-extension-api",
+    "@codingame/monaco-vscode-extensions-service-override",
+  ]) {
+    assert(
+      dedupeBlock.includes(`"${dependency}"`) ||
+        dedupeBlock.includes(`'${dependency}'`),
+      `Vite does not dedupe ${dependency}`,
+    );
+  }
   const mountIndex = source.indexOf("const handleMount");
   const mountedMonacoIndex = source.indexOf(
     "lspGate.setMonaco(mountedMonaco)",

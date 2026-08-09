@@ -14,6 +14,12 @@ export default defineConfig({
     alias: {
       "monaco-editor": "@codingame/monaco-vscode-editor-api",
     },
+    dedupe: [
+      "vscode",
+      "@codingame/monaco-vscode-api",
+      "@codingame/monaco-vscode-extension-api",
+      "@codingame/monaco-vscode-extensions-service-override",
+    ],
   },
   plugins: [
     /*

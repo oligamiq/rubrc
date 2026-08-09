@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readdir, readFile } from "node:fs/promises";
 import puppeteer from "puppeteer";
 import {
   ANALYSIS_TIMEOUT_MS,
@@ -13,8 +14,27 @@ const url = "http://127.0.0.1:4173";
 const invalidMain = 'fn main() { let value: i32 = "wrong"; }\n';
 const validMain = "fn main() {}\n";
 const invalidSecondary = "pub fn secondary() { let value = ; }\n";
+const DEFAULT_API_NOT_READY = "Default api is not ready yet";
 let browser;
 let preview;
+
+async function assertSingleDefaultApiBundle() {
+  const assets = new URL("../page/dist/assets/", import.meta.url);
+  const entries = await readdir(assets, { withFileTypes: true });
+  const matchingAssets = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
+    const asset = await readFile(new URL(entry.name, assets), "utf8");
+    if (asset.includes(DEFAULT_API_NOT_READY)) matchingAssets.push(entry.name);
+  }
+
+  if (matchingAssets.length !== 1) {
+    throw new Error(
+      `expected one VS Code default API asset, found ${matchingAssets.length}: ${matchingAssets.join(", ")}`,
+    );
+  }
+}
 
 async function waitForServer() {
   const deadline = Date.now() + 30_000;
@@ -31,6 +51,7 @@ async function waitForServer() {
 }
 
 try {
+  await assertSingleDefaultApiBundle();
   preview = spawn(
     "bun",
     ["run", "--cwd", "page", "serve", "--host", "127.0.0.1", "--port", "4173"],
