@@ -1730,3 +1730,115 @@ Stage only the four code/test files and these two documentation files. Do not
 stage generated Wasm, bindings, lockfiles, or unrelated untracked files. Commit
 with `fix: restore configurable sysroot chunks`, then append the results and
 commit hash to the existing worktree Task 5 report.
+
+## Review Fix: Bounded 300-Second Rust-Source Readiness (2026-08-10)
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development or superpowers:executing-plans to
+> implement this plan task-by-task.
+
+**Goal:** Raise only the production rust-src bootstrap readiness deadline from
+75 seconds to a bounded 300 seconds.
+
+**Architecture:** `page/src/vfs_readiness.ts` continues to own and export the
+single readiness constant. Existing worker and full-VFS callers consume that
+constant unchanged; the browser acceptance harness already has a matching
+300-second outer startup budget.
+
+**Tech Stack:** TypeScript, Deno tests, Bun/Vite browser acceptance, Rust/Wasm
+full-VFS integration.
+
+### Global Constraints
+
+- Keep `SYSROOT_FILE_CHUNK_SIZE: usize = 50 * 1024 * 1024` unchanged.
+- Do not introduce a TypeScript sysroot chunk cap.
+- Keep exact zero-copy `Uint8Array.subarray` host extraction.
+- Set only `RUST_SRC_BOOTSTRAP_TIMEOUT_MS` to `300_000`.
+- Do not stage generated Wasm, bindings, lockfiles, reports, or unrelated files.
+
+### Task 1: Raise the Bounded Readiness Deadline
+
+**Files:**
+
+- Modify: `page/src/vfs_readiness_test.ts`
+- Modify: `scripts/lsp_browser_diagnostics_contract_test.ts`
+- Modify: `page/src/vfs_readiness.ts`
+- Modify: `docs/superpowers/specs/2026-08-09-browser-diagnostics-final-hardening-design.md`
+- Modify: `docs/superpowers/plans/2026-08-09-browser-diagnostics-final-hardening.md`
+- Append after commit: worktree report `sdd/hardening-task-5-report.md`
+
+**Interfaces:**
+
+- Consumes: `RUST_SRC_BOOTSTRAP_TIMEOUT_MS` from `page/src/vfs_readiness.ts`.
+- Produces: the same exported number constant with value `300_000`.
+
+- [ ] **Step 1: Write failing readiness and source-contract tests**
+
+Import `RUST_SRC_BOOTSTRAP_TIMEOUT_MS` in `page/src/vfs_readiness_test.ts` and
+assert that it equals `300_000`. Extend the browser startup budget contract to
+read `page/src/vfs_readiness.ts` and require the exact exported declaration
+`RUST_SRC_BOOTSTRAP_TIMEOUT_MS = 300_000`.
+
+- [ ] **Step 2: Verify RED**
+
+Run:
+
+```bash
+deno test --no-lock -A page/src/vfs_readiness_test.ts scripts/lsp_browser_diagnostics_contract_test.ts
+```
+
+Expected: both new assertions fail against the committed `75_000` value.
+
+- [ ] **Step 3: Implement the minimal production change**
+
+Set:
+
+```typescript
+export const RUST_SRC_BOOTSTRAP_TIMEOUT_MS = 300_000;
+```
+
+Do not change any chunk-size or host-protocol code.
+
+- [ ] **Step 4: Verify GREEN and focused protocol constraints**
+
+Run:
+
+```bash
+deno test --no-lock -A page/src/vfs_readiness_test.ts scripts/lsp_browser_diagnostics_contract_test.ts page/src/sysroot_protocol_test.ts
+```
+
+Expected: all readiness, browser contract, and uncapped exact-protocol tests
+pass.
+
+- [ ] **Step 5: Format, verify scope, and commit**
+
+Run:
+
+```bash
+bunx @biomejs/biome@1.9.4 format page/src/vfs_readiness.ts page/src/vfs_readiness_test.ts scripts/lsp_browser_diagnostics_contract_test.ts
+git diff --check
+git diff -- crates/vfs-shell/src/main.rs page/src/sysroot_protocol.ts
+git status --short
+git add page/src/vfs_readiness.ts page/src/vfs_readiness_test.ts scripts/lsp_browser_diagnostics_contract_test.ts docs/superpowers/specs/2026-08-09-browser-diagnostics-final-hardening-design.md docs/superpowers/plans/2026-08-09-browser-diagnostics-final-hardening.md
+git commit -m "fix: extend rust-src readiness budget"
+```
+
+Expected: formatting and whitespace checks pass; the Rust chunk constant and
+TypeScript exact-read protocol have no diff; only the five approved paths enter
+the commit.
+
+- [ ] **Step 6: Run committed-code acceptance and append the report**
+
+Run from the new commit:
+
+```bash
+bun run test:lsp-browser
+deno run --no-lock -A scripts/vfs_lsp_diagnostics_test.ts
+git status --short
+```
+
+The browser command builds the page before launching acceptance. Expected: the
+browser and full-VFS paths publish then clear exact rust-analyzer diagnostics,
+and full-VFS retains the uncapped observed maximum. Append RED/GREEN evidence,
+acceptance results, commit hash, and remaining concerns to the existing
+worktree Task 5 report outside the commit.

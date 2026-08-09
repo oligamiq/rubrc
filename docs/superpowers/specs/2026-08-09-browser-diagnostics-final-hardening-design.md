@@ -191,3 +191,20 @@ The review-fix tests prove the uncapped host validation and short-read error,
 prove that returned views share the input buffer, and inspect the Rust source
 to require the one named 50 MiB constant and its sole loop use. Fresh acceptance
 uses the unchanged 75-second readiness timeout.
+
+## User Override: 300-Second Readiness Budget (2026-08-10)
+
+The user approved a bounded `300_000` ms rust-src bootstrap readiness timeout
+after the single guest-owned 50 MiB chunk default still exceeded 75 seconds in
+exact browser acceptance. This section supersedes only the earlier 75-second
+readiness requirement; the historical sections remain implementation history.
+
+`RUST_SRC_BOOTSTRAP_TIMEOUT_MS` in `page/src/vfs_readiness.ts` is the single
+production readiness bound and must equal `300_000`. Callers continue to consume
+that exported constant. The browser harness retains its existing separate
+300-second startup budget, so acceptance exercises the committed production
+readiness value without a temporary source edit.
+
+The guest remains the sole owner of sysroot batching through
+`SYSROOT_FILE_CHUNK_SIZE = 50 * 1024 * 1024`. TypeScript must not reintroduce a
+chunk maximum, and exact `Uint8Array.subarray` extraction remains unchanged.

@@ -17,7 +17,7 @@ export type RustSrcBootstrapTiming = {
 };
 
 const BOOTSTRAP_EVENT = 8;
-export const RUST_SRC_BOOTSTRAP_TIMEOUT_MS = 75_000;
+export const RUST_SRC_BOOTSTRAP_TIMEOUT_MS = 300_000;
 
 export async function waitForRustSrcBootstrap(
   root: BootstrapRoot,

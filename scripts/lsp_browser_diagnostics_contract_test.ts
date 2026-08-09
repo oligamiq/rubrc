@@ -151,10 +151,15 @@ Deno.test("compressed stream delegates the optional cache boundary", async () =>
 
 Deno.test("browser startup budget covers cold sysroot and LSP readiness", async () => {
   const budgets = await Deno.readTextFile("scripts/lsp_browser_quiescence.mjs");
+  const readiness = await Deno.readTextFile("page/src/vfs_readiness.ts");
 
   assert(
     budgets.includes("export const STARTUP_TIMEOUT_MS = 300_000"),
     "cold browser startup lacks the 300-second budget",
+  );
+  assert(
+    readiness.includes("export const RUST_SRC_BOOTSTRAP_TIMEOUT_MS = 300_000"),
+    "rust-src readiness lacks the 300-second budget",
   );
 });
 

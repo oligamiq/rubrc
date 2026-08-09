@@ -1,4 +1,7 @@
-import { waitForRustSrcBootstrap } from "./vfs_readiness.ts";
+import {
+  RUST_SRC_BOOTSTRAP_TIMEOUT_MS,
+  waitForRustSrcBootstrap,
+} from "./vfs_readiness.ts";
 
 const assert: (condition: unknown, message: string) => asserts condition = (
   condition,
@@ -6,6 +9,13 @@ const assert: (condition: unknown, message: string) => asserts condition = (
 ) => {
   if (!condition) throw new Error(message);
 };
+
+Deno.test("rust-src bootstrap default timeout is 300 seconds", () => {
+  assert(
+    Number(RUST_SRC_BOOTSTRAP_TIMEOUT_MS) === 300_000,
+    `wrong default timeout: ${RUST_SRC_BOOTSTRAP_TIMEOUT_MS}`,
+  );
+});
 
 Deno.test("rust-src bootstrap dispatches once and settles ready", async () => {
   const states = [0, 1, 2];
