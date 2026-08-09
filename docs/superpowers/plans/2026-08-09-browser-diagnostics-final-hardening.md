@@ -1642,3 +1642,91 @@ git log --oneline -5
 Expected: no whitespace errors; exactly five task commits are present; no generated Wasm/binding changes or unrelated files are staged.
 
 The external rust-analyzer source fixture mismatch in the boundary-trace contract remains a known baseline limitation, not a blocker for these changes. A clean layered experiment is absent from this worktree; use the already validated read-only reference worktree as the layered control when available, and record that external result separately rather than changing this implementation.
+
+## Review Fix: Guest-Owned Sysroot Chunk Size (2026-08-10)
+
+This addendum supersedes only Task 5's 512 KiB cap. The original steps remain
+above as implementation history.
+
+**Goal:** Restore browser startup within the existing 75-second readiness
+budget while preserving exact host reads and one configurable guest batching
+parameter.
+
+**Architecture:** Rust owns `SYSROOT_FILE_CHUNK_SIZE`, defaulting to
+`50 * 1024 * 1024`, and the whole-file loop refers only to that constant. The
+TypeScript host validates positive safe integers and available bytes without a
+second maximum. Full-VFS records the observed maximum without enforcing it.
+
+**Files:**
+
+- Modify: `page/src/sysroot_protocol_test.ts`
+- Modify: `page/src/sysroot_protocol.ts`
+- Modify: `scripts/vfs_lsp_diagnostics_test.ts`
+- Modify: `crates/vfs-shell/src/main.rs`
+- Modify: `docs/superpowers/specs/2026-08-09-browser-diagnostics-final-hardening-design.md`
+- Modify: `docs/superpowers/plans/2026-08-09-browser-diagnostics-final-hardening.md`
+- Append: worktree report `sdd/hardening-task-5-report.md` outside the commit
+
+- [ ] **Step 1: Write host and Rust source-contract tests**
+
+Remove `MAX_SYSROOT_CHUNK_LENGTH` from the protocol test import. Require
+`validateSysrootChunkLength(50 * 1024 * 1024)` and
+`validateSysrootChunkLength(Number.MAX_SAFE_INTEGER)` to succeed; reject zero,
+negative, fractional, non-number, non-finite, and unsafe-integer inputs. Keep
+the excess-available test and assert both returned subarrays share the source
+buffer. Read `crates/vfs-shell/src/main.rs` and require:
+
+```text
+const SYSROOT_FILE_CHUNK_SIZE: usize = 50 * 1024 * 1024;
+std::cmp::min(remaining, SYSROOT_FILE_CHUNK_SIZE)
+```
+
+Also require exactly two occurrences of `SYSROOT_FILE_CHUNK_SIZE`, no local
+`let chunk_size`, and no `512 * 1024` literal.
+
+- [ ] **Step 2: Verify RED**
+
+Run: `deno test --no-lock -A page/src/sysroot_protocol_test.ts`
+
+Expected: FAIL because the TypeScript validator rejects 50 MiB and the Rust
+constant still defaults to 512 KiB.
+
+- [ ] **Step 3: Implement the minimal review fix**
+
+Delete the TypeScript maximum export and maximum comparison. Keep only the
+positive-safe-integer validator and exact `subarray` extraction. Set:
+
+```rust
+const SYSROOT_FILE_CHUNK_SIZE: usize = 50 * 1024 * 1024;
+```
+
+Keep the loop expression as:
+
+```rust
+let to_read = std::cmp::min(remaining, SYSROOT_FILE_CHUNK_SIZE);
+```
+
+Remove the full-VFS maximum import and final cap assertion, retaining the
+existing maximum-request console output.
+
+- [ ] **Step 4: Verify GREEN and focused regressions**
+
+Run the protocol test, focused Deno/Bun suite, `cargo test -p vfs`, and
+`cargo test -p vfs-shell`. Record any failure that reproduces at the parent
+commit as a baseline rather than expanding this review fix.
+
+- [ ] **Step 5: Rebuild and run integration gates**
+
+Run `bun run vfs:build`, validate both Wasm artifacts, check the 14 required
+exports, run full-VFS diagnostics, build the page, and run
+`bun run test:lsp-browser` without changing the 75-second readiness timeout.
+
+Expected: full-VFS reports its observed maximum without a 524288 assertion,
+and the browser publishes then clears the exact rust-analyzer markers.
+
+- [ ] **Step 6: Review, commit, and report**
+
+Stage only the four code/test files and these two documentation files. Do not
+stage generated Wasm, bindings, lockfiles, or unrelated untracked files. Commit
+with `fix: restore configurable sysroot chunks`, then append the results and
+commit hash to the existing worktree Task 5 report.

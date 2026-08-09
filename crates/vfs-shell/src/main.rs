@@ -242,7 +242,7 @@ unsafe extern "C" {
     pub fn vfs_set_current_session_id(session_id: u32);
 }
 
-const SYSROOT_FILE_CHUNK_SIZE: usize = 512 * 1024;
+const SYSROOT_FILE_CHUNK_SIZE: usize = 50 * 1024 * 1024;
 
 // Import: vfs_execute_command (scalar-only, no pointer args)
 // ----------------------------------------------------------

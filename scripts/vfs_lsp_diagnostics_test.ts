@@ -5,10 +5,7 @@ import {
   type SysrootArchiveEntry,
   validateSysrootArchiveEntryName,
 } from "../page/src/sysroot_archive.ts";
-import {
-  MAX_SYSROOT_CHUNK_LENGTH,
-  validateSysrootChunkLength,
-} from "../page/src/sysroot_protocol.ts";
+import { takeExactSysrootChunk } from "../page/src/sysroot_protocol.ts";
 import { buildPreopenDirectory } from "./build_preopen.ts";
 import { prepareCachedSysroot } from "./sysroot_cache.ts";
 import { prepareInstalledRustSrcArchive } from "./rust_src_archive.ts";
@@ -29,9 +26,11 @@ function assertAtLeastFourPairedHostCargoCalls(trace: string): void {
     .map((event) => event.id);
   if (requestIds.length < 4 || uniqueRequestIds.size !== requestIds.length) {
     throw new Error(
-      `expected at least four distinct host-cargo requests, received ${requestIds.join(
-        ",",
-      )}`,
+      `expected at least four distinct host-cargo requests, received ${
+        requestIds.join(
+          ",",
+        )
+      }`,
     );
   }
   if (
@@ -171,19 +170,14 @@ const farm = new WASIFarm(
         if (typeof requested === "number") {
           maxSysrootChunkLength = Math.max(maxSysrootChunkLength, requested);
         }
-        const chunkLength = validateSysrootChunkLength(requested);
         if (!currentSysrootFile) {
           throw new Error("No current sysroot file to read data from");
         }
-        const start = currentSysrootFile.offset;
-        const end = start + chunkLength;
-        if (end > currentSysrootFile.entry.data.length) {
-          throw new Error(
-            `sysroot chunk requested ${chunkLength} bytes with only ${currentSysrootFile.entry.data.length - start} available`,
-          );
-        }
-        const chunk = currentSysrootFile.entry.data.slice(start, end);
-        currentSysrootFile.offset = end;
+        const available = currentSysrootFile.entry.data.subarray(
+          currentSysrootFile.offset,
+        );
+        const { chunk } = takeExactSysrootChunk(available, requested);
+        currentSysrootFile.offset += chunk.length;
         return { chunk: Array.from(chunk) };
       }
       throw new Error(`unexpected callback: ${name ?? "unknown"}`);
@@ -235,12 +229,4 @@ console.log(`trace dropped chunks: ${result.traceDroppedChunks}`);
 if (result.ok) assertAtLeastFourPairedHostCargoCalls(result.trace);
 console.log(`served ${rustSrcTemplates?.length ?? 0} rust-src archive entries`);
 console.log(`maximum sysroot chunk request: ${maxSysrootChunkLength}`);
-if (
-  maxSysrootChunkLength <= 0 ||
-  maxSysrootChunkLength > MAX_SYSROOT_CHUNK_LENGTH
-) {
-  throw new Error(
-    `maximum sysroot chunk request ${maxSysrootChunkLength} is outside 1..${MAX_SYSROOT_CHUNK_LENGTH}`,
-  );
-}
 if (!result.ok) Deno.exit(1);

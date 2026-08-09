@@ -13,17 +13,12 @@ export function sysrootMetaStatus(
   return response.has_file;
 }
 
-export const MAX_SYSROOT_CHUNK_LENGTH = 512 * 1024;
-
 export function validateSysrootChunkLength(value: unknown): number {
-  if (
-    typeof value !== "number" ||
-    !Number.isSafeInteger(value) ||
-    value <= 0 ||
-    value > MAX_SYSROOT_CHUNK_LENGTH
-  ) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
     throw new Error(
-      `invalid sysroot chunk length ${String(value)}; expected 1..${MAX_SYSROOT_CHUNK_LENGTH}`,
+      `invalid sysroot chunk length ${
+        String(value)
+      }; expected a positive safe integer`,
     );
   }
   return value;

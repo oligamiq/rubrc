@@ -167,3 +167,27 @@ trace contract remains a separately reported baseline limitation.
   are independent architectural changes.
 - Leaving the 50 MiB transport as a documented pre-existing risk would keep a
   confirmed high-memory failure mode in the branch's final integration gate.
+
+## User Override: Guest-Owned Chunk Size (2026-08-10)
+
+The user explicitly superseded the 512 KiB transport bound after browser
+verification showed that its additional synchronous host crossings exceed the
+existing 75-second rust-src readiness budget. The historical design above is
+retained as the rationale for the original Task 5 implementation; this section
+is authoritative for the review fix.
+
+`SYSROOT_FILE_CHUNK_SIZE` in `crates/vfs-shell/src/main.rs` is the single
+sysroot batching parameter and defaults to `50 * 1024 * 1024`. The guest read
+loop uses only that constant. TypeScript has no duplicate maximum and does not
+configure batching.
+
+The host protocol remains exact rather than POSIX-like. It accepts any positive
+safe-integer request that is no larger than the current file's available data,
+returns zero-copy `Uint8Array.subarray` views, and rejects invalid or
+excess-available requests instead of silently truncating. Full-VFS diagnostics
+reports the maximum request it observes but does not enforce a second cap.
+
+The review-fix tests prove the uncapped host validation and short-read error,
+prove that returned views share the input buffer, and inspect the Rust source
+to require the one named 50 MiB constant and its sole loop use. Fresh acceptance
+uses the unchanged 75-second readiness timeout.

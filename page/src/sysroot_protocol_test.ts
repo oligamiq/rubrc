@@ -1,13 +1,13 @@
 import {
-  MAX_SYSROOT_CHUNK_LENGTH,
   sysrootMetaStatus,
   takeExactSysrootChunk,
   validateSysrootChunkLength,
 } from "./sysroot_protocol.ts";
 
 const assertEquals = (actual: unknown, expected: unknown) => {
-  if (actual !== expected)
+  if (actual !== expected) {
     throw new Error(`expected ${expected}, got ${actual}`);
+  }
 };
 
 const assertThrows = (fn: () => unknown, expected: string) => {
@@ -29,13 +29,24 @@ Deno.test("sysroot meta protocol preserves host failure status", () => {
   assertEquals(sysrootMetaStatus({ has_file: -1 }), -1);
 });
 
-Deno.test("sysroot chunk protocol accepts only positive lengths through 512 KiB", () => {
+Deno.test("sysroot chunk protocol accepts positive safe integer lengths", () => {
   assertEquals(validateSysrootChunkLength(1), 1);
+  assertEquals(validateSysrootChunkLength(50 * 1024 * 1024), 50 * 1024 * 1024);
   assertEquals(
-    validateSysrootChunkLength(MAX_SYSROOT_CHUNK_LENGTH),
-    512 * 1024,
+    validateSysrootChunkLength(Number.MAX_SAFE_INTEGER),
+    Number.MAX_SAFE_INTEGER,
   );
-  for (const invalid of [0, -1, 1.5, Number.NaN, "1", 512 * 1024 + 1]) {
+  for (
+    const invalid of [
+      0,
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      "1",
+      Number.MAX_SAFE_INTEGER + 1,
+    ]
+  ) {
     assertThrows(
       () => validateSysrootChunkLength(invalid),
       "sysroot chunk length",
@@ -44,11 +55,53 @@ Deno.test("sysroot chunk protocol accepts only positive lengths through 512 KiB"
 });
 
 Deno.test("sysroot chunk protocol never silently truncates", () => {
-  const result = takeExactSysrootChunk(new Uint8Array([1, 2, 3]), 2);
+  const data = new Uint8Array([1, 2, 3]);
+  const result = takeExactSysrootChunk(data, 2);
   assertEquals(Array.from(result.chunk).join(","), "1,2");
   assertEquals(Array.from(result.remaining).join(","), "3");
+  assertEquals(result.chunk.buffer, data.buffer);
+  assertEquals(result.remaining.buffer, data.buffer);
   assertThrows(
     () => takeExactSysrootChunk(new Uint8Array([1]), 2),
     "requested 2 bytes with only 1 available",
+  );
+});
+
+Deno.test("sysroot chunk batching has one Rust source parameter", async () => {
+  const rustSource = await Deno.readTextFile(
+    new URL("../../crates/vfs-shell/src/main.rs", import.meta.url),
+  );
+  const protocolSource = await Deno.readTextFile(
+    new URL("./sysroot_protocol.ts", import.meta.url),
+  );
+  const fullVfsSource = await Deno.readTextFile(
+    new URL("../../scripts/vfs_lsp_diagnostics_test.ts", import.meta.url),
+  );
+
+  assertEquals(
+    rustSource.includes(
+      "const SYSROOT_FILE_CHUNK_SIZE: usize = 50 * 1024 * 1024;",
+    ),
+    true,
+  );
+  assertEquals(
+    rustSource.includes("std::cmp::min(remaining, SYSROOT_FILE_CHUNK_SIZE)"),
+    true,
+  );
+  assertEquals(rustSource.match(/\bSYSROOT_FILE_CHUNK_SIZE\b/g)?.length, 2);
+  assertEquals(/\blet\s+(?:mut\s+)?chunk_size\b/.test(rustSource), false);
+  assertEquals(rustSource.includes("512 * 1024"), false);
+  assertEquals(protocolSource.includes("MAX_SYSROOT_CHUNK_LENGTH"), false);
+  assertEquals(fullVfsSource.includes("MAX_SYSROOT_CHUNK_LENGTH"), false);
+  assertEquals(fullVfsSource.includes("takeExactSysrootChunk("), true);
+  assertEquals(
+    fullVfsSource.includes("currentSysrootFile.entry.data.slice("),
+    false,
+  );
+  assertEquals(
+    fullVfsSource.includes(
+      "console.log(`maximum sysroot chunk request: ${maxSysrootChunkLength}`)",
+    ),
+    true,
   );
 });
