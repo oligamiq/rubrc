@@ -59,6 +59,7 @@ const App = (props: {
       mountedMonacoRef.Uri.parse("file:///src/main.rs"),
     );
     if (mainModel && mountedEditorRef?.getModel() !== mainModel) {
+      mountedMonacoRef.editor.setModelLanguage(mainModel, "plaintext");
       mountedEditorRef?.setModel(mainModel);
     }
   });
@@ -88,6 +89,7 @@ const App = (props: {
         temporaryModel.dispose();
         temporaryModel = undefined;
       }
+      mountedMonaco.editor.setModelLanguage(currentModel, "rust");
       setIsEditorReady(true);
       modelSwitchDisposable?.dispose();
       modelSwitchDisposable = undefined;
@@ -273,7 +275,7 @@ const App = (props: {
         }
       >
         <MonacoEditor
-          language="rust"
+          language={isEditorReady() ? "rust" : "plaintext"}
           path={isLspReady() ? "file:///src/main.rs" : undefined}
           value={isLspReady() ? default_value : undefined}
           options={{ readOnly: !isEditorReady() }}

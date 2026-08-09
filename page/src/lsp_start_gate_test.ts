@@ -168,26 +168,50 @@ Deno.test("App mounts the editor before LSP startup but defers the main model", 
     "main Rust path remains unconditional",
   );
   assert(
-    source.includes(
-      "const [isEditorReady, setIsEditorReady] = createSignal(false)",
+    /(?:const|let)\s+\[isEditorReady,\s*setIsEditorReady\]\s*=\s*createSignal\(false\)/.test(
+      source,
     ),
     "App lacks editor-specific readiness",
   );
   assert(
-    source.includes("options={{ readOnly: !isEditorReady() }}"),
+    source.includes('language={isEditorReady() ? "rust" : "plaintext"}'),
+    "temporary Monaco model starts as Rust",
+  );
+  assert(
+    source.includes("readOnly: !isEditorReady()"),
     "temporary Monaco model is not reactively read-only",
   );
   assert(
-    source.includes("temporaryModel = mountedEditor.getModel()") &&
-      source.includes("mountedEditor.onDidChangeModel("),
+    /(?:(?:const|let)\s+)?temporaryModel\s*=\s*mountedEditor\.getModel\(\)/.test(
+      source,
+    ) && source.includes("mountedEditor.onDidChangeModel("),
     "App does not observe the temporary-to-named model switch",
+  );
+  const monacoRefIndex = source.indexOf("mountedMonacoRef = mountedMonaco");
+  const editorRefIndex = source.indexOf("mountedEditorRef = mountedEditor");
+  assert(
+    monacoRefIndex >= 0 &&
+      editorRefIndex > monacoRefIndex &&
+      mountedMonacoIndex > editorRefIndex,
+    "mounted refs must be assigned before Monaco can start the LSP gate",
   );
   const targetCheck = source.indexOf(
     'currentModel?.uri.toString() !== "file:///src/main.rs"',
   );
+  const namedPlaintext = source.indexOf(
+    'mountedMonacoRef.editor.setModelLanguage(mainModel, "plaintext")',
+  );
+  const namedModelSwitch = source.indexOf(
+    "mountedEditorRef?.setModel(mainModel)",
+    namedPlaintext,
+  );
   const temporaryDispose = source.indexOf(
     "temporaryModel.dispose()",
     targetCheck,
+  );
+  const namedRust = source.indexOf(
+    'mountedMonaco.editor.setModelLanguage(currentModel, "rust")',
+    temporaryDispose,
   );
   const editorReady = source.indexOf(
     "setIsEditorReady(true)",
@@ -202,13 +226,33 @@ Deno.test("App mounts the editor before LSP startup but defers the main model", 
     "model listener does not require the named Rust URI",
   );
   assert(
+    namedPlaintext >= 0 && namedModelSwitch > namedPlaintext,
+    "named model must remain plaintext while it is attached",
+  );
+  assert(
     temporaryDispose > targetCheck &&
-      editorReady > temporaryDispose &&
+      namedRust > temporaryDispose &&
+      editorReady > namedRust &&
       listenerDispose > editorReady,
-    "model handoff must dispose temporary model, mark ready, then self-dispose",
+    "model handoff must dispose temporary model, restore Rust, mark ready, then self-dispose",
   );
   assert(
     !source.includes("setIsEditorReady(isLspReady())"),
     "LSP readiness incorrectly controls editor mutability",
+  );
+  const cleanupIndex = source.indexOf("onCleanup(() => {");
+  const cleanupEnd = source.indexOf("sharedReady.bc.close()", cleanupIndex);
+  const cleanupBlock = source.slice(cleanupIndex, cleanupEnd);
+  assert(
+    cleanupIndex >= 0 && cleanupEnd > cleanupIndex,
+    "App cleanup is missing",
+  );
+  assert(
+    cleanupBlock.includes("modelSwitchDisposable?.dispose()"),
+    "App cleanup does not dispose the model switch listener",
+  );
+  assert(
+    cleanupBlock.includes("temporaryModel?.dispose()"),
+    "App cleanup does not dispose the temporary model",
   );
 });
