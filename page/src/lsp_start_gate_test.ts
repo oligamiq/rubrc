@@ -92,6 +92,34 @@ Deno.test("gate disposal aborts and settles an in-progress starter", async () =>
   assert(observedSignal?.aborted, "gate disposal did not abort startup");
 });
 
+Deno.test("gate disposal reports rejecting late-session cleanup", async () => {
+  let resolveStart!: (session: { dispose(): Promise<void> }) => void;
+  const cleanupError = new Error("late session cleanup failed");
+  const gate = new LspStartGate<object>(
+    () =>
+      new Promise((resolve) => {
+        resolveStart = resolve;
+      }),
+  );
+  gate.setMonaco({});
+  gate.setVfsResult({ ok: true });
+
+  const disposal = gate.dispose();
+  resolveStart({
+    dispose: async () => {
+      throw cleanupError;
+    },
+  });
+
+  let caught: unknown;
+  try {
+    await disposal;
+  } catch (error) {
+    caught = error;
+  }
+  assert(caught === cleanupError, "late cleanup rejection was swallowed");
+});
+
 Deno.test("App mounts the editor before LSP startup but defers the main model", async () => {
   const source = await Deno.readTextFile("page/src/App.tsx");
   const indexSource = await Deno.readTextFile("page/src/index.tsx");

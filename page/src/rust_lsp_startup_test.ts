@@ -118,6 +118,74 @@ Deno.test("client startup timeout does not create the model", async () => {
   assert(!modelCreated, "model was created after startup timeout");
 });
 
+Deno.test("startup timeout bounds stalled pre-population without cancelling client", async () => {
+  let starts = 0;
+  let cancellations = 0;
+  const result = await Promise.race([
+    runRustLspStartup(
+      {
+        prepopulateMain: () => new Promise<void>(() => {}),
+        startClient: async () => {
+          starts++;
+        },
+        cancelClientStart: () => cancellations++,
+        createMainModel: () => {},
+      },
+      1,
+      new AbortController().signal,
+      1,
+    ).then(
+      () => "resolved",
+      (error) => (error instanceof Error ? error.message : String(error)),
+    ),
+    new Promise<string>((resolve) =>
+      setTimeout(() => resolve("pre-population stalled"), 20),
+    ),
+  ]);
+
+  assert(
+    result === "rust-analyzer startup timed out",
+    `wrong stalled pre-population result: ${result}`,
+  );
+  assert(starts === 0, `startClient called ${starts} times`);
+  assert(cancellations === 0, `cancelled ${cancellations} times`);
+});
+
+Deno.test("abort bounds stalled pre-population without cancelling client", async () => {
+  const controller = new AbortController();
+  const reason = new Error("component unmounted during pre-population");
+  let starts = 0;
+  let cancellations = 0;
+  const startup = runRustLspStartup(
+    {
+      prepopulateMain: () => new Promise<void>(() => {}),
+      startClient: async () => {
+        starts++;
+      },
+      cancelClientStart: () => cancellations++,
+      createMainModel: () => {},
+    },
+    1_000,
+    controller.signal,
+    1,
+  );
+  await Promise.resolve();
+  controller.abort(reason);
+  const result = await Promise.race([
+    startup.then(
+      () => undefined,
+      (error) => error,
+    ),
+    new Promise<unknown>((resolve) =>
+      setTimeout(() => resolve("pre-population stalled"), 20),
+    ),
+  ]);
+
+  assert(result === reason, "abort reason identity was replaced");
+  assert(starts === 0, `startClient called ${starts} times`);
+  assert(cancellations === 0, `cancelled ${cancellations} times`);
+});
+
 Deno.test("client startup failure preserves the original error", async () => {
   const original = new Error("client failed");
   let modelCreated = false;
@@ -181,6 +249,7 @@ Deno.test("startup timeout remains active while didOpen is pending", async () =>
 
 Deno.test("didOpen failure preserves the original startup error", async () => {
   const original = new Error("didOpen failed");
+  let cancellations = 0;
   let received: unknown;
 
   try {
@@ -188,7 +257,7 @@ Deno.test("didOpen failure preserves the original startup error", async () => {
       {
         prepopulateMain: async () => {},
         startClient: async () => {},
-        cancelClientStart: () => {},
+        cancelClientStart: () => cancellations++,
         createMainModel: async () => {
           throw original;
         },
@@ -201,6 +270,7 @@ Deno.test("didOpen failure preserves the original startup error", async () => {
   }
 
   assert(received === original, "startup replaced the didOpen error");
+  assert(cancellations === 0, `cancelled ${cancellations} times`);
 });
 
 Deno.test("VFS pre-population failure prevents client startup", async () => {
@@ -233,6 +303,7 @@ Deno.test("VFS pre-population failure prevents client startup", async () => {
 Deno.test("abort cancels start, waits for settlement, and preserves its reason", async () => {
   const controller = new AbortController();
   const start = deferred();
+  const started = deferred();
   const reason = new Error("component unmounted");
   const order: string[] = [];
   let starts = 0;
@@ -245,6 +316,7 @@ Deno.test("abort cancels start, waits for settlement, and preserves its reason",
       startClient: () => {
         starts++;
         order.push("start");
+        started.resolve();
         return start.promise.finally(() => order.push("start-settled"));
       },
       cancelClientStart: () => {
@@ -259,7 +331,7 @@ Deno.test("abort cancels start, waits for settlement, and preserves its reason",
     controller.signal,
     20,
   );
-  await Promise.resolve();
+  await started.promise;
   controller.abort(reason);
   try {
     await startup;

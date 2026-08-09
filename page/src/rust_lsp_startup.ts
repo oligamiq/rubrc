@@ -11,9 +11,6 @@ export async function runRustLspStartup(
   signal: AbortSignal,
   cancellationSettleTimeoutMs = 1_000,
 ): Promise<void> {
-  await actions.prepopulateMain();
-  signal.throwIfAborted();
-
   let startupTimer: ReturnType<typeof setTimeout> | undefined;
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   let removeAbortListener = () => {};
@@ -31,11 +28,18 @@ export async function runRustLspStartup(
     removeAbortListener = () => signal.removeEventListener("abort", onAbort);
     if (signal.aborted) onAbort();
   });
+  let startPromise: Promise<void> | undefined;
   let startupPromise: Promise<void> | undefined;
 
   try {
     startupPromise = Promise.resolve().then(async () => {
-      await actions.startClient();
+      signal.throwIfAborted();
+      await actions.prepopulateMain();
+      if (timedOut) throw timeoutError;
+      signal.throwIfAborted();
+      startPromise = Promise.resolve().then(() => actions.startClient());
+      void startPromise.catch(() => undefined);
+      await startPromise;
       if (timedOut) throw timeoutError;
       signal.throwIfAborted();
       await actions.createMainModel();
@@ -45,7 +49,7 @@ export async function runRustLspStartup(
   } catch (error) {
     const activelyCancelled =
       error === timeoutError || (signal.aborted && error === signal.reason);
-    if (activelyCancelled && startupPromise) {
+    if (activelyCancelled && startPromise && startupPromise) {
       try {
         actions.cancelClientStart();
       } catch (cleanupError) {

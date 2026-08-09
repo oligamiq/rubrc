@@ -48,8 +48,8 @@ export class LspStartGate<TMonaco> {
       }
       if (this.session === session) {
         this.session = undefined;
-        await session?.dispose();
       }
+      await session?.dispose();
     })();
     return this.disposePromise;
   }
@@ -65,9 +65,8 @@ export class LspStartGate<TMonaco> {
     this.startPromise = this.start(
       this.monaco,
       this.abortController.signal,
-    ).then(async (session) => {
-      if (this.disposed) await session.dispose();
-      else this.session = session;
+    ).then((session) => {
+      if (!this.disposed) this.session = session;
       return session;
     });
   }

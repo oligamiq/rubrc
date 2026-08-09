@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { createLspConnection } from "./lsp_bridge.ts";
 import type { Ctx } from "./ctx.ts";
 import { encodeLspMessage } from "./lsp_protocol.ts";
@@ -84,6 +84,77 @@ test("lsp_bridge: reader disposal emits close exactly once", () => {
   connection.reader.dispose();
   connection.reader.dispose();
 
+  expect(closes).toBe(1);
+});
+
+test("lsp_bridge: reader disposal closes its channel when a close listener throws", () => {
+  const ctx = {
+    ls_id: "ls-throwing-close",
+    input_string_id: "in-throwing-close",
+  } as Ctx;
+  const connection = createLspConnection(ctx);
+  const listenerError = new Error("close listener failed");
+  let closes = 0;
+  connection.reader.onClose(() => {
+    closes++;
+    throw listenerError;
+  });
+  connection.reader.listen(() => {});
+  const readerChannel = FakeBroadcastChannel.created.find((channel) =>
+    channel.name.includes("ls-throwing-close"),
+  );
+  const consoleError = spyOn(console, "error").mockImplementation((...args) => {
+    const error = args.find((value) => value instanceof Error);
+    throw error ?? new Error(String(args[0]));
+  });
+
+  try {
+    expect(() => connection.reader.dispose()).toThrow(listenerError);
+    expect(readerChannel?.closed).toBe(true);
+  } finally {
+    consoleError.mockRestore();
+  }
+  expect(() => connection.reader.dispose()).not.toThrow();
+  expect(closes).toBe(1);
+});
+
+test("lsp_bridge: malformed input closes after a throwing error listener", () => {
+  const ctx = {
+    ls_id: "ls-throwing-error",
+    input_string_id: "in-throwing-error",
+  } as Ctx;
+  const connection = createLspConnection(ctx);
+  const listenerError = new Error("error listener failed");
+  let closes = 0;
+  connection.reader.onError(() => {
+    throw listenerError;
+  });
+  connection.reader.onClose(() => closes++);
+  connection.reader.listen(() => {});
+  const readerChannel = FakeBroadcastChannel.created.find((channel) =>
+    channel.name.includes("ls-throwing-error"),
+  );
+  expect(readerChannel).toBeDefined();
+  const consoleError = spyOn(console, "error").mockImplementation((...args) => {
+    const error = args.find((value) => value instanceof Error);
+    throw error ?? new Error(String(args[0]));
+  });
+
+  try {
+    readerChannel!.triggerMessage({
+      msg: "func_call::call",
+      to: "parent",
+      names: [".self"],
+      args: [
+        { data: new TextEncoder().encode("Content-Length: bad\r\n\r\n{}") },
+      ],
+    });
+    expect(readerChannel!.closed).toBe(true);
+    expect(closes).toBe(1);
+  } finally {
+    consoleError.mockRestore();
+  }
+  connection.reader.dispose();
   expect(closes).toBe(1);
 });
 

@@ -35,23 +35,35 @@ class MyMessageReader extends AbstractMessageReader {
         }
       } catch (error) {
         this.closed = true;
-        this.fireError(error);
-        this.fireClose();
-        closeUnderlyingChannel(this.shared);
-        this.shared = undefined;
+        try {
+          this.fireError(error);
+        } finally {
+          try {
+            this.fireClose();
+          } finally {
+            closeUnderlyingChannel(this.shared);
+            this.shared = undefined;
+          }
+        }
       }
     }, this.ctx.ls_id);
     return { dispose: () => this.dispose() };
   }
 
   override dispose(): void {
-    if (!this.closed) {
-      this.closed = true;
-      this.fireClose();
-      closeUnderlyingChannel(this.shared);
-      this.shared = undefined;
+    try {
+      if (!this.closed) {
+        this.closed = true;
+        try {
+          this.fireClose();
+        } finally {
+          closeUnderlyingChannel(this.shared);
+          this.shared = undefined;
+        }
+      }
+    } finally {
+      super.dispose();
     }
-    super.dispose();
   }
 }
 
