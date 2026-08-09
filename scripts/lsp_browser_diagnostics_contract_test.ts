@@ -134,18 +134,23 @@ Deno.test("semantic diagnostics worker disables cargo build scripts", async () =
   );
 });
 
-Deno.test("compressed stream delegates the optional cache boundary", async () => {
-  const source = await Deno.readTextFile("lib/src/brotli_stream.ts");
+Deno.test("compressed stream delegates the tested optional cache boundary", async () => {
+  const wrapper = await Deno.readTextFile("lib/src/brotli_stream.ts");
+  const fetchBoundary = await Deno.readTextFile(
+    "lib/src/fetch_compressed_stream.ts",
+  );
 
   assert(
-    source.includes(
-      'import { fetchWithOptionalCache } from "./fetch_with_optional_cache.ts";',
-    ),
-    "compressed stream does not import the tested cache boundary",
+    wrapper.includes(
+      'import { fetchCompressedStream } from "./fetch_compressed_stream.ts";',
+    ) && wrapper.includes("fetchCompressedStream(url, signal,"),
+    "public compressed stream does not delegate to the directly tested seam",
   );
   assert(
-    source.includes("await fetchWithOptionalCache("),
-    "compressed stream does not delegate to the tested cache boundary",
+    fetchBoundary.includes("fetchWithOptionalCache,") &&
+      fetchBoundary.includes('from "./fetch_with_optional_cache.ts";') &&
+      fetchBoundary.includes("await fetchWithOptionalCache("),
+    "compressed-response seam bypasses the optional cache boundary",
   );
 });
 

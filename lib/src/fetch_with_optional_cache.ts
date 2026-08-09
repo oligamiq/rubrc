@@ -1,18 +1,20 @@
-type FetchInput = string | URL | Request;
+export type FetchInput = string | URL | Request;
 
-interface CacheBoundary {
+export interface CacheBoundary {
   match(input: FetchInput): Promise<Response | undefined>;
+  delete(input: FetchInput): Promise<boolean>;
   put(input: FetchInput, response: Response): Promise<void>;
 }
 
-interface CacheStorageBoundary {
+export interface CacheStorageBoundary {
   open(name: string): Promise<CacheBoundary>;
 }
 
-interface FetchWithOptionalCacheDependencies {
+export interface FetchWithOptionalCacheDependencies {
   cacheStorage?: CacheStorageBoundary;
   fetch(input: FetchInput, init?: RequestInit): Promise<Response>;
   reportCacheError(error: unknown): void;
+  acceptResponse?: (response: Response) => boolean;
 }
 
 export async function fetchWithOptionalCache(
@@ -20,22 +22,49 @@ export async function fetchWithOptionalCache(
   init: RequestInit | undefined,
   dependencies: FetchWithOptionalCacheDependencies,
 ): Promise<Response> {
-  const { cacheStorage, fetch, reportCacheError } = dependencies;
+  const {
+    cacheStorage,
+    fetch,
+    reportCacheError,
+    acceptResponse = () => true,
+  } = dependencies;
+  if (input instanceof Request && input.method !== "GET") {
+    return await fetch(input, init);
+  }
   if (!cacheStorage) return await fetch(input, init);
 
   let cache: CacheBoundary;
   try {
     cache = await cacheStorage.open("rubrc-assets-v1");
-    const cachedResponse = await cache.match(input);
-    if (cachedResponse) return cachedResponse;
   } catch (error) {
     reportCacheError(error);
     return await fetch(input, init);
   }
 
+  let cachedResponse: Response | undefined;
+  try {
+    cachedResponse = await cache.match(input);
+  } catch (error) {
+    reportCacheError(error);
+    return await fetch(input, init);
+  }
+
+  if (cachedResponse) {
+    if (acceptResponse(cachedResponse)) return cachedResponse;
+    try {
+      await cache.delete(input);
+    } catch (error) {
+      reportCacheError(error);
+    }
+  }
+
   const response = await fetch(input, init);
-  if (response.ok) {
-    void cache.put(input, response.clone()).catch(reportCacheError);
+  if (response.ok && acceptResponse(response)) {
+    const cacheResponse = response.clone();
+    void cache.put(input, cacheResponse).catch(async (error) => {
+      await cacheResponse.body?.cancel().catch(() => undefined);
+      reportCacheError(error);
+    });
   }
   return response;
 }
