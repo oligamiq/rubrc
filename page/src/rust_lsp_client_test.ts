@@ -20,7 +20,8 @@ const syntaxTreeExposureIsGuarded = (source: string) => {
   const exposureGuards: boolean[] = [];
   const visit = (node: ts.Node, guarded: boolean) => {
     if (
-      ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
       node.expression.text === "exposeSyntaxTreeRequest"
     ) {
       exposureGuards.push(guarded);
@@ -54,14 +55,16 @@ const syntaxTreeExposureFollowsStartup = (source: string) => {
   let exposure: ts.CallExpression | undefined;
   const visit = (node: ts.Node) => {
     if (
-      ts.isAwaitExpression(node) && ts.isCallExpression(node.expression) &&
+      ts.isAwaitExpression(node) &&
+      ts.isCallExpression(node.expression) &&
       ts.isIdentifier(node.expression.expression) &&
       node.expression.expression.text === "runRustLspStartup"
     ) {
       startup = node;
     }
     if (
-      ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
       node.expression.text === "exposeSyntaxTreeRequest"
     ) {
       exposure = node;
@@ -69,17 +72,22 @@ const syntaxTreeExposureFollowsStartup = (source: string) => {
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
-  return startup !== undefined && exposure !== undefined &&
-    startup.getEnd() < exposure.getStart(sourceFile);
+  return (
+    startup !== undefined &&
+    exposure !== undefined &&
+    startup.getEnd() < exposure.getStart(sourceFile)
+  );
 };
 
 const ownTestApiDisposable = (
   owner: RustLspResourceOwner,
   disposable: { dispose(): void },
 ) => {
-  const setDisposable = (owner as unknown as {
-    setTestApiDisposable?: (value: { dispose(): void }) => void;
-  }).setTestApiDisposable;
+  const setDisposable = (
+    owner as unknown as {
+      setTestApiDisposable?: (value: { dispose(): void }) => void;
+    }
+  ).setTestApiDisposable;
   assert(setDisposable, "test API disposable is not resource-owned");
   setDisposable.call(owner, disposable);
 };
@@ -87,13 +95,42 @@ const ownTestApiDisposable = (
 Deno.test("browser startup uses the non-progress sequencer", async () => {
   const source = await Deno.readTextFile("page/src/rust_lsp_client.ts");
 
-  assert(
-    source.includes("runRustLspStartup"),
-    "startup sequencer is not used",
-  );
+  assert(source.includes("runRustLspStartup"), "startup sequencer is not used");
   assert(
     !source.includes("const projectReady"),
     "Fetching still gates startup",
+  );
+});
+
+Deno.test("browser startup waits for main didOpen before resolving", async () => {
+  const source = await Deno.readTextFile("page/src/rust_lsp_client.ts");
+  const waitIndex = source.indexOf(
+    'sync.waitForDidOpen("file:///src/main.rs")',
+  );
+  const startIndex = source.indexOf("startClient: () => client.start()");
+  const createIndex = source.indexOf("monaco.editor.createModel(", startIndex);
+  const awaitIndex = source.indexOf("await mainDidOpen", createIndex);
+  const cleanupIndex = source.indexOf(
+    "createdMainModel?.dispose()",
+    awaitIndex,
+  );
+
+  assert(waitIndex >= 0, "main didOpen completion is not observed");
+  assert(
+    waitIndex < startIndex,
+    "main didOpen observation starts after client startup",
+  );
+  assert(
+    createIndex > startIndex,
+    "named model is created before client startup",
+  );
+  assert(
+    awaitIndex > createIndex,
+    "named model creation does not await didOpen",
+  );
+  assert(
+    cleanupIndex > awaitIndex,
+    "startup-owned model is not disposed on failure",
   );
 });
 
@@ -113,12 +150,8 @@ Deno.test("Fetching progress remains attached to resource ownership", async () =
 
 Deno.test("syntax-tree requests are exposed only in LSP test builds", async () => {
   const clientSource = await Deno.readTextFile("page/src/rust_lsp_client.ts");
-  const exposureIndex = clientSource.indexOf(
-    "exposeSyntaxTreeRequest(client)",
-  );
-  const ownershipIndex = clientSource.indexOf(
-    "owner.setTestApiDisposable(",
-  );
+  const exposureIndex = clientSource.indexOf("exposeSyntaxTreeRequest(client)");
+  const ownershipIndex = clientSource.indexOf("owner.setTestApiDisposable(");
 
   assert(
     syntaxTreeExposureIsGuarded(clientSource),

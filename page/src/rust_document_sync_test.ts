@@ -47,6 +47,10 @@ const document = (
 
 Deno.test("didOpen completion follows the VFS write and LSP continuation", async () => {
   const order: string[] = [];
+  let continueDidOpen!: () => void;
+  const didOpenContinuation = new Promise<void>((resolve) => {
+    continueDidOpen = resolve;
+  });
   const sync = new RustDocumentSync(
     async () => {
       order.push("write");
@@ -57,13 +61,56 @@ Deno.test("didOpen completion follows the VFS write and LSP continuation", async
   );
 
   const opened = document("file:///src/main.rs", "fn main() {}", 1);
-  await sync.middleware.didOpen!(opened, async () => {
+  let completionSettled = false;
+  const completion = sync.waitForDidOpen("file:///src/main.rs").then(() => {
+    completionSettled = true;
+    order.push("waiter");
+  });
+  const didOpen = sync.middleware.didOpen!(opened, async () => {
     order.push("didOpen");
+    await didOpenContinuation;
   });
 
+  await Promise.resolve();
+  assert(!completionSettled, "didOpen completion resolved before continuation");
+  continueDidOpen();
+  await didOpen;
+  await completion;
+
   assert(
-    order.join(",") === "write,didOpen,complete:file:///src/main.rs",
+    order.join(",") === "write,didOpen,complete:file:///src/main.rs,waiter",
     `wrong didOpen completion order: ${order}`,
+  );
+});
+
+Deno.test("didOpen completion rejects with the original continuation error", async () => {
+  const sync = new RustDocumentSync(async () => {});
+  const opened = document("file:///src/main.rs", "fn main() {}", 1);
+  const original = new Error("didOpen failed");
+  const completion = sync.waitForDidOpen("file:///src/main.rs");
+  let middlewareError: unknown;
+  let completionError: unknown;
+
+  try {
+    await sync.middleware.didOpen!(opened, async () => {
+      throw original;
+    });
+  } catch (error) {
+    middlewareError = error;
+  }
+  try {
+    await completion;
+  } catch (error) {
+    completionError = error;
+  }
+
+  assert(
+    middlewareError === original,
+    "middleware replaced the original error",
+  );
+  assert(
+    completionError === original,
+    "completion replaced the original error",
   );
 });
 

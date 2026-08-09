@@ -51,21 +51,30 @@ const App = (props: {
   const [isEditorReady, setIsEditorReady] = createSignal(false);
   let temporaryModel: monaco.editor.ITextModel | null | undefined;
   let modelSwitchDisposable: { dispose(): void } | undefined;
-  let mountedMonacoRef: typeof import("monaco-editor") | undefined;
-  let mountedEditorRef: monaco.editor.IStandaloneCodeEditor | undefined;
+  const [mountedMonacoRef, setMountedMonacoRef] = createSignal<
+    typeof import("monaco-editor") | undefined
+  >();
+  const [mountedEditorRef, setMountedEditorRef] = createSignal<
+    monaco.editor.IStandaloneCodeEditor | undefined
+  >();
   createEffect(() => {
-    if (!isLspReady()) return;
-    const mainModel = mountedMonacoRef?.editor.getModel(
-      mountedMonacoRef.Uri.parse("file:///src/main.rs"),
+    const mountedMonaco = mountedMonacoRef();
+    const mountedEditor = mountedEditorRef();
+    if (!isLspReady() || !mountedMonaco || !mountedEditor) return;
+    const mainModel = mountedMonaco.editor.getModel(
+      mountedMonaco.Uri.parse("file:///src/main.rs"),
     );
-    if (mainModel && mountedEditorRef?.getModel() !== mainModel) {
-      mountedMonacoRef.editor.setModelLanguage(mainModel, "plaintext");
-      mountedEditorRef?.setModel(mainModel);
+    if (mainModel && mountedEditor.getModel() !== mainModel) {
+      mountedEditor.setModel(null);
+      temporaryModel?.dispose();
+      temporaryModel = undefined;
+      mountedEditor.setModel(mainModel);
     }
   });
   createEffect(() => {
+    const mountedEditor = mountedEditorRef();
     const readOnly = !isEditorReady();
-    mountedEditorRef?.updateOptions({ readOnly });
+    mountedEditor?.updateOptions({ readOnly });
   });
   let lspStartObserved = false;
   const observeLspStart = () => {
@@ -79,17 +88,12 @@ const App = (props: {
     mountedMonaco: typeof import("monaco-editor"),
     mountedEditor: monaco.editor.IStandaloneCodeEditor,
   ) => {
-    mountedMonacoRef = mountedMonaco;
-    mountedEditorRef = mountedEditor;
+    setMountedMonacoRef(mountedMonaco);
+    setMountedEditorRef(mountedEditor);
     temporaryModel = mountedEditor.getModel();
     modelSwitchDisposable = mountedEditor.onDidChangeModel(() => {
       const currentModel = mountedEditor.getModel();
       if (currentModel?.uri.toString() !== "file:///src/main.rs") return;
-      if (temporaryModel && temporaryModel !== currentModel) {
-        temporaryModel.dispose();
-        temporaryModel = undefined;
-      }
-      mountedMonaco.editor.setModelLanguage(currentModel, "rust");
       setIsEditorReady(true);
       modelSwitchDisposable?.dispose();
       modelSwitchDisposable = undefined;
@@ -128,8 +132,8 @@ const App = (props: {
     modelSwitchDisposable = undefined;
     temporaryModel?.dispose();
     temporaryModel = undefined;
-    mountedMonacoRef = undefined;
-    mountedEditorRef = undefined;
+    setMountedMonacoRef(undefined);
+    setMountedEditorRef(undefined);
     sharedReady.bc.close();
     void lspGate.dispose();
   });
@@ -275,9 +279,7 @@ const App = (props: {
         }
       >
         <MonacoEditor
-          language={isEditorReady() ? "rust" : "plaintext"}
-          path={isLspReady() ? "file:///src/main.rs" : undefined}
-          value={isLspReady() ? default_value : undefined}
+          language="plaintext"
           options={{ readOnly: !isEditorReady() }}
           height="30vh"
           onMount={handleMount}

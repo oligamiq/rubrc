@@ -1,7 +1,7 @@
 export type RustLspStartupActions = {
   prepopulateMain(): Promise<void>;
   startClient(): Promise<void>;
-  createMainModel(): void;
+  createMainModel(): Promise<void> | void;
 };
 
 export async function runRustLspStartup(
@@ -20,7 +20,7 @@ export async function runRustLspStartup(
 
   try {
     await Promise.race([actions.startClient(), startupTimeout]);
-    actions.createMainModel();
+    await Promise.race([actions.createMainModel(), startupTimeout]);
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }

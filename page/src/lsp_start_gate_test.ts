@@ -156,12 +156,12 @@ Deno.test("App mounts the editor before LSP startup but defers the main model", 
     "LSP readiness is not set from the resolved startup promise",
   );
   assert(
-    source.includes('path={isLspReady() ? "file:///src/main.rs" : undefined}'),
-    "main Rust path is supplied before LSP startup completes",
+    !source.includes('path={isLspReady() ? "file:///src/main.rs" : undefined}'),
+    "Monaco wrapper competes with the explicit model handoff",
   );
   assert(
-    source.includes("value={isLspReady() ? default_value : undefined}"),
-    "main Rust value is supplied before LSP startup completes",
+    !source.includes("value={isLspReady() ? default_value : undefined}"),
+    "Monaco wrapper overwrites the LSP-owned model value",
   );
   assert(
     !source.includes('path="file:///src/main.rs"'),
@@ -174,8 +174,8 @@ Deno.test("App mounts the editor before LSP startup but defers the main model", 
     "App lacks editor-specific readiness",
   );
   assert(
-    source.includes('language={isEditorReady() ? "rust" : "plaintext"}'),
-    "temporary Monaco model starts as Rust",
+    source.includes('language="plaintext"'),
+    "Monaco wrapper language changes after the Rust model is attached",
   );
   assert(
     source.includes("readOnly: !isEditorReady()"),
@@ -187,8 +187,17 @@ Deno.test("App mounts the editor before LSP startup but defers the main model", 
     ) && source.includes("mountedEditor.onDidChangeModel("),
     "App does not observe the temporary-to-named model switch",
   );
-  const monacoRefIndex = source.indexOf("mountedMonacoRef = mountedMonaco");
-  const editorRefIndex = source.indexOf("mountedEditorRef = mountedEditor");
+  assert(
+    /\[mountedMonacoRef,\s*setMountedMonacoRef\]\s*=\s*createSignal</.test(
+      source,
+    ) &&
+      /\[mountedEditorRef,\s*setMountedEditorRef\]\s*=\s*createSignal</.test(
+        source,
+      ),
+    "mounted Monaco and editor refs are not reactive signals",
+  );
+  const monacoRefIndex = source.indexOf("setMountedMonacoRef(mountedMonaco)");
+  const editorRefIndex = source.indexOf("setMountedEditorRef(mountedEditor)");
   assert(
     monacoRefIndex >= 0 &&
       editorRefIndex > monacoRefIndex &&
@@ -198,19 +207,13 @@ Deno.test("App mounts the editor before LSP startup but defers the main model", 
   const targetCheck = source.indexOf(
     'currentModel?.uri.toString() !== "file:///src/main.rs"',
   );
-  const namedPlaintext = source.indexOf(
-    'mountedMonacoRef.editor.setModelLanguage(mainModel, "plaintext")',
+  const detachTemporary = source.indexOf("mountedEditor.setModel(null)");
+  const temporaryDispose = source.indexOf(
+    "temporaryModel?.dispose()",
+    detachTemporary,
   );
   const namedModelSwitch = source.indexOf(
-    "mountedEditorRef?.setModel(mainModel)",
-    namedPlaintext,
-  );
-  const temporaryDispose = source.indexOf(
-    "temporaryModel.dispose()",
-    targetCheck,
-  );
-  const namedRust = source.indexOf(
-    'mountedMonaco.editor.setModelLanguage(currentModel, "rust")',
+    "mountedEditor.setModel(mainModel)",
     temporaryDispose,
   );
   const editorReady = source.indexOf(
@@ -226,15 +229,18 @@ Deno.test("App mounts the editor before LSP startup but defers the main model", 
     "model listener does not require the named Rust URI",
   );
   assert(
-    namedPlaintext >= 0 && namedModelSwitch > namedPlaintext,
-    "named model must remain plaintext while it is attached",
+    detachTemporary >= 0 &&
+      temporaryDispose > detachTemporary &&
+      namedModelSwitch > temporaryDispose,
+    "model handoff must detach, dispose the temporary model, then attach the named model",
   );
   assert(
-    temporaryDispose > targetCheck &&
-      namedRust > temporaryDispose &&
-      editorReady > namedRust &&
-      listenerDispose > editorReady,
-    "model handoff must dispose temporary model, restore Rust, mark ready, then self-dispose",
+    editorReady > targetCheck && listenerDispose > editorReady,
+    "named-model listener must mark ready, then self-dispose",
+  );
+  assert(
+    !source.includes("setModelLanguage("),
+    "model handoff mutates the named model language",
   );
   assert(
     !source.includes("setIsEditorReady(isLspReady())"),

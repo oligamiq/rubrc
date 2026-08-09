@@ -9,6 +9,11 @@ export type TimerScheduler = {
 
 type Snapshot = { uri: string; path: string; content: string };
 type PendingSnapshot = Snapshot & { handle: unknown };
+type DidOpenWaiter = {
+  promise: Promise<void>;
+  resolve(): void;
+  reject(error: unknown): void;
+};
 
 const defaultScheduler: TimerScheduler = {
   set: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
@@ -23,6 +28,7 @@ export class RustDocumentSync {
   private readonly onDidOpenComplete?: (uri: string) => void;
   private readonly pending = new Map<string, PendingSnapshot>();
   private readonly writes = new Map<string, Promise<void>>();
+  private readonly didOpenWaiters = new Map<string, DidOpenWaiter>();
   private disposed = false;
 
   constructor(
@@ -41,13 +47,20 @@ export class RustDocumentSync {
     this.onDidOpenComplete = options.onDidOpenComplete;
     this.middleware = {
       didOpen: async (document, next) => {
+        const uri = document.uri.toString();
         const snapshot = this.snapshot(document);
         try {
-          if (snapshot) await this.queueWrite(snapshot);
-        } finally {
-          await next(document);
-          this.onDidOpenComplete?.(document.uri.toString());
+          try {
+            if (snapshot) await this.queueWrite(snapshot);
+          } finally {
+            await next(document);
+            this.onDidOpenComplete?.(uri);
+          }
+        } catch (error) {
+          this.rejectDidOpen(uri, error);
+          throw error;
         }
+        this.resolveDidOpen(uri);
       },
       didChange: (event, next) => {
         const snapshot = this.snapshot(event.document);
@@ -64,6 +77,21 @@ export class RustDocumentSync {
     };
   }
 
+  waitForDidOpen(uri: string): Promise<void> {
+    const existing = this.didOpenWaiters.get(uri);
+    if (existing) return existing.promise;
+
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    void promise.catch(() => {});
+    this.didOpenWaiters.set(uri, { promise, resolve, reject });
+    return promise;
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
@@ -75,6 +103,20 @@ export class RustDocumentSync {
     const queued = snapshots.map((snapshot) => this.queueWrite(snapshot));
     await Promise.all(queued);
     await Promise.all([...this.writes.values()]);
+  }
+
+  private resolveDidOpen(uri: string): void {
+    const waiter = this.didOpenWaiters.get(uri);
+    if (!waiter) return;
+    this.didOpenWaiters.delete(uri);
+    waiter.resolve();
+  }
+
+  private rejectDidOpen(uri: string, error: unknown): void {
+    const waiter = this.didOpenWaiters.get(uri);
+    if (!waiter) return;
+    this.didOpenWaiters.delete(uri);
+    waiter.reject(error);
   }
 
   private snapshot(document: TextDocument): Snapshot | undefined {

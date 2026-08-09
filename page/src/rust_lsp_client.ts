@@ -36,14 +36,16 @@ class RustMonacoLanguageClient extends MonacoLanguageClient {
 
 export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
   const owner = new RustLspResourceOwner();
+  let createdMainModel: Monaco.editor.ITextModel | undefined;
 
   try {
     const vfsSharedRef = new SharedObjectRef(ctx.input_string_id);
     owner.setVfsSharedRef(vfsSharedRef);
 
-    const input = vfsSharedRef.proxy<
-      (args: { sessionId: number; data: string }) => Promise<void>
-    >();
+    const input =
+      vfsSharedRef.proxy<
+        (args: { sessionId: number; data: string }) => Promise<void>
+      >();
 
     const writeWorkspace = createWorkspaceVfsWriter(input);
     const writeAndRecordWorkspace = async (path: string, content: string) => {
@@ -53,6 +55,7 @@ export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
     const sync = new RustDocumentSync(writeAndRecordWorkspace, {
       onDidOpenComplete: recordDidOpenComplete,
     });
+    const mainDidOpen = sync.waitForDidOpen("file:///src/main.rs");
     owner.setSync(sync);
 
     const connection = createLspConnection(ctx);
@@ -85,22 +88,38 @@ export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
     );
     owner.setProgressDisposable(progressDisposable);
 
-    await runRustLspStartup({
-      prepopulateMain: () =>
-        writeAndRecordWorkspace("/src/main.rs", default_value),
-      startClient: () => client.start(),
-      createMainModel: () => {
-        const uri = monaco.Uri.parse("file:///src/main.rs");
-        if (!monaco.editor.getModel(uri)) {
-          monaco.editor.createModel(default_value, "rust", uri);
-        }
+    await runRustLspStartup(
+      {
+        prepopulateMain: () =>
+          writeAndRecordWorkspace("/src/main.rs", default_value),
+        startClient: () => client.start(),
+        createMainModel: async () => {
+          const uri = monaco.Uri.parse("file:///src/main.rs");
+          if (!monaco.editor.getModel(uri)) {
+            createdMainModel = monaco.editor.createModel(
+              default_value,
+              "rust",
+              uri,
+            );
+          }
+          await mainDidOpen;
+        },
       },
-    }, 300_000);
+      300_000,
+    );
 
     if (import.meta.env.VITE_RUBRC_LSP_TEST === "1") {
       owner.setTestApiDisposable(exposeSyntaxTreeRequest(client));
     }
   } catch (error) {
+    try {
+      createdMainModel?.dispose();
+    } catch (cleanupError) {
+      console.error(
+        "Main model cleanup failed after startup error:",
+        cleanupError,
+      );
+    }
     try {
       await owner.dispose();
     } catch (cleanupError) {
