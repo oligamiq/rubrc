@@ -12,3 +12,35 @@ export function sysrootMetaStatus(
   if (response.has_file === false) return 0;
   return response.has_file;
 }
+
+export const MAX_SYSROOT_CHUNK_LENGTH = 512 * 1024;
+
+export function validateSysrootChunkLength(value: unknown): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value <= 0 ||
+    value > MAX_SYSROOT_CHUNK_LENGTH
+  ) {
+    throw new Error(
+      `invalid sysroot chunk length ${String(value)}; expected 1..${MAX_SYSROOT_CHUNK_LENGTH}`,
+    );
+  }
+  return value;
+}
+
+export function takeExactSysrootChunk(
+  data: Uint8Array,
+  requestedLength: unknown,
+): { chunk: Uint8Array; remaining: Uint8Array } {
+  const length = validateSysrootChunkLength(requestedLength);
+  if (data.length < length) {
+    throw new Error(
+      `sysroot chunk requested ${length} bytes with only ${data.length} available`,
+    );
+  }
+  return {
+    chunk: data.subarray(0, length),
+    remaining: data.subarray(length),
+  };
+}

@@ -24,6 +24,7 @@ import {
   loadSysrootArchive,
   type SysrootArchiveEntry,
 } from "./sysroot_archive";
+import { takeExactSysrootChunk } from "./sysroot_protocol";
 import { routeWasiTerminalWrite } from "./worker_process/lsp_dispatch";
 import { populateWebRustSrc } from "./web_sysroot";
 import { workspaceFileSystem } from "./workspace_fs";
@@ -223,11 +224,9 @@ export const SetupMyTerminal = (props: {
 
   const onData = (data: string) => {
     console.log(
-      `[UI] onData received for session ${props.sessionId}, length: ${data.length}, first char code: ${
-        data.charCodeAt(
-          0,
-        )
-      }`,
+      `[UI] onData received for session ${props.sessionId}, length: ${data.length}, first char code: ${data.charCodeAt(
+        0,
+      )}`,
     );
 
     // Map ANSI escape sequences to custom wasi-shell key codes
@@ -423,9 +422,8 @@ const get_ref = (
             );
           }
         } catch (error) {
-          sysroot_error = error instanceof Error
-            ? error.message
-            : String(error);
+          sysroot_error =
+            error instanceof Error ? error.message : String(error);
           console.error(`Failed to fetch ${triple}`, error);
         }
         return {};
@@ -452,15 +450,15 @@ const get_ref = (
         }
         throw new Error("No current sysroot file to read name from");
       } else if (unknown.name === "sysrootReadFileChunk") {
-        if (current_sysroot_file) {
-          const chunk_len = unknown.args.chunk_len as number;
-          const chunk = current_sysroot_file.data.slice(0, chunk_len);
-          current_sysroot_file.data = current_sysroot_file.data.slice(
-            chunk_len,
-          );
-          return { chunk: Array.from(chunk) };
+        if (!current_sysroot_file) {
+          throw new Error("No current sysroot file to read data from");
         }
-        return { chunk: [] };
+        const { chunk, remaining } = takeExactSysrootChunk(
+          current_sysroot_file.data,
+          unknown.args.chunk_len,
+        );
+        current_sysroot_file.data = remaining;
+        return { chunk: Array.from(chunk) };
       } else if (unknown.name === "terminalWrite") {
         routeWasiTerminalWrite(
           unknown.args,

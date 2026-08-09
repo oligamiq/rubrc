@@ -5,6 +5,10 @@ import {
   type SysrootArchiveEntry,
   validateSysrootArchiveEntryName,
 } from "../page/src/sysroot_archive.ts";
+import {
+  MAX_SYSROOT_CHUNK_LENGTH,
+  validateSysrootChunkLength,
+} from "../page/src/sysroot_protocol.ts";
 import { buildPreopenDirectory } from "./build_preopen.ts";
 import { prepareCachedSysroot } from "./sysroot_cache.ts";
 import { prepareInstalledRustSrcArchive } from "./rust_src_archive.ts";
@@ -16,18 +20,18 @@ function assertAtLeastFourPairedHostCargoCalls(trace: string): void {
     ),
     (match) => ({ phase: match[1], id: Number(match[2]) }),
   );
-  const requestIds = events.filter((event) => event.phase === "request").map(
-    (event) => event.id,
-  );
+  const requestIds = events
+    .filter((event) => event.phase === "request")
+    .map((event) => event.id);
   const uniqueRequestIds = new Set(requestIds);
-  const outcomeIds = events.filter((event) => event.phase !== "request").map(
-    (event) => event.id,
-  );
+  const outcomeIds = events
+    .filter((event) => event.phase !== "request")
+    .map((event) => event.id);
   if (requestIds.length < 4 || uniqueRequestIds.size !== requestIds.length) {
     throw new Error(
-      `expected at least four distinct host-cargo requests, received ${
-        requestIds.join(",")
-      }`,
+      `expected at least four distinct host-cargo requests, received ${requestIds.join(
+        ",",
+      )}`,
     );
   }
   if (
@@ -37,13 +41,11 @@ function assertAtLeastFourPairedHostCargoCalls(trace: string): void {
     throw new Error("host-cargo trace contains an orphan outcome");
   }
   for (const id of uniqueRequestIds) {
-    const outcomes = events.filter((event) =>
-      event.id === id && event.phase !== "request"
+    const outcomes = events.filter(
+      (event) => event.id === id && event.phase !== "request",
     );
     if (outcomes.length !== 1 || outcomes[0].phase !== "response") {
-      throw new Error(
-        `host-cargo id=${id} did not have one paired response`,
-      );
+      throw new Error(`host-cargo id=${id} did not have one paired response`);
     }
   }
 }
@@ -90,6 +92,7 @@ type QueuedSysrootEntry = {
 };
 let sysrootQueue: QueuedSysrootEntry[] = [];
 let currentSysrootFile: QueuedSysrootEntry | null = null;
+let maxSysrootChunkLength = 0;
 const farm = new WASIFarm(
   new OpenFile(new File([])),
   ConsoleStdout.lineBuffered((message) => console.log(`[stdout] ${message}`)),
@@ -164,17 +167,24 @@ const farm = new WASIFarm(
         throw new Error("No current sysroot file to read name from");
       }
       if (name === "sysrootReadFileChunk") {
-        if (currentSysrootFile) {
-          const chunkLength = unknown.args?.chunk_len ?? 0;
-          const start = currentSysrootFile.offset;
-          const chunk = currentSysrootFile.entry.data.slice(
-            start,
-            start + chunkLength,
-          );
-          currentSysrootFile.offset += chunk.length;
-          return { chunk: Array.from(chunk) };
+        const requested = unknown.args?.chunk_len;
+        if (typeof requested === "number") {
+          maxSysrootChunkLength = Math.max(maxSysrootChunkLength, requested);
         }
-        return { chunk: [] };
+        const chunkLength = validateSysrootChunkLength(requested);
+        if (!currentSysrootFile) {
+          throw new Error("No current sysroot file to read data from");
+        }
+        const start = currentSysrootFile.offset;
+        const end = start + chunkLength;
+        if (end > currentSysrootFile.entry.data.length) {
+          throw new Error(
+            `sysroot chunk requested ${chunkLength} bytes with only ${currentSysrootFile.entry.data.length - start} available`,
+          );
+        }
+        const chunk = currentSysrootFile.entry.data.slice(start, end);
+        currentSysrootFile.offset = end;
+        return { chunk: Array.from(chunk) };
       }
       throw new Error(`unexpected callback: ${name ?? "unknown"}`);
     },
@@ -184,43 +194,39 @@ const worker = new Worker(
   new URL("./vfs_lsp_diagnostics_worker.ts", import.meta.url),
   { type: "module" },
 );
-const result = await new Promise<
-  {
-    ok: boolean;
-    detail: string;
-    trace: string;
-    traceDroppedChunks: number;
-  }
->(
-  (resolve) => {
-    const timer = setTimeout(() => {
-      worker.terminate();
-      resolve({
-        ok: false,
-        detail: "diagnostics worker timed out after 360 seconds",
-        trace: "",
-        traceDroppedChunks: 0,
-      });
-    }, 360_000);
-    worker.onmessage = (event) => {
-      clearTimeout(timer);
-      resolve(event.data);
-    };
-    worker.onerror = (event) => {
-      clearTimeout(timer);
-      resolve({
-        ok: false,
-        detail: event.message,
-        trace: "",
-        traceDroppedChunks: 0,
-      });
-    };
-    worker.postMessage(
-      { wasiRef: farm.get_ref(), lspOutputPort: lspOutput.port2 },
-      [lspOutput.port2],
-    );
-  },
-);
+const result = await new Promise<{
+  ok: boolean;
+  detail: string;
+  trace: string;
+  traceDroppedChunks: number;
+}>((resolve) => {
+  const timer = setTimeout(() => {
+    worker.terminate();
+    resolve({
+      ok: false,
+      detail: "diagnostics worker timed out after 360 seconds",
+      trace: "",
+      traceDroppedChunks: 0,
+    });
+  }, 360_000);
+  worker.onmessage = (event) => {
+    clearTimeout(timer);
+    resolve(event.data);
+  };
+  worker.onerror = (event) => {
+    clearTimeout(timer);
+    resolve({
+      ok: false,
+      detail: event.message,
+      trace: "",
+      traceDroppedChunks: 0,
+    });
+  };
+  worker.postMessage(
+    { wasiRef: farm.get_ref(), lspOutputPort: lspOutput.port2 },
+    [lspOutput.port2],
+  );
+});
 worker.terminate();
 lspOutput.port1.close();
 console.log(result.detail);
@@ -228,4 +234,13 @@ console.log(result.trace);
 console.log(`trace dropped chunks: ${result.traceDroppedChunks}`);
 if (result.ok) assertAtLeastFourPairedHostCargoCalls(result.trace);
 console.log(`served ${rustSrcTemplates?.length ?? 0} rust-src archive entries`);
+console.log(`maximum sysroot chunk request: ${maxSysrootChunkLength}`);
+if (
+  maxSysrootChunkLength <= 0 ||
+  maxSysrootChunkLength > MAX_SYSROOT_CHUNK_LENGTH
+) {
+  throw new Error(
+    `maximum sysroot chunk request ${maxSysrootChunkLength} is outside 1..${MAX_SYSROOT_CHUNK_LENGTH}`,
+  );
+}
 if (!result.ok) Deno.exit(1);

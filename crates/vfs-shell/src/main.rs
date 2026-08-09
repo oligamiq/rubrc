@@ -13,7 +13,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use strum::FromRepr;
 use unicode_width::UnicodeWidthStr;
 use wasi_shell::{
-    CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor, handle_parallel,
+    handle_parallel, CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor,
 };
 
 use sysroot_extraction::{sysroot_meta_has_file, with_sysroot_load_lock, write_sysroot_entry};
@@ -242,6 +242,8 @@ unsafe extern "C" {
     pub fn vfs_set_current_session_id(session_id: u32);
 }
 
+const SYSROOT_FILE_CHUNK_SIZE: usize = 512 * 1024;
+
 // Import: vfs_execute_command (scalar-only, no pointer args)
 // ----------------------------------------------------------
 
@@ -383,9 +385,8 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                     data_buf = vec![0u8; data_len as usize];
                     let mut remaining = data_len as usize;
                     let mut offset = 0;
-                    let chunk_size = 50 * 1024 * 1024;
                     while remaining > 0 {
-                        let to_read = std::cmp::min(remaining, chunk_size);
+                        let to_read = std::cmp::min(remaining, SYSROOT_FILE_CHUNK_SIZE);
                         unsafe {
                             sysroot_read_file_chunk(
                                 data_buf[offset..].as_mut_ptr() as i32,
