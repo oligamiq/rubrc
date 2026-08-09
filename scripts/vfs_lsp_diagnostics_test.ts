@@ -26,11 +26,9 @@ function assertAtLeastFourPairedHostCargoCalls(trace: string): void {
     .map((event) => event.id);
   if (requestIds.length < 4 || uniqueRequestIds.size !== requestIds.length) {
     throw new Error(
-      `expected at least four distinct host-cargo requests, received ${
-        requestIds.join(
-          ",",
-        )
-      }`,
+      `expected at least four distinct host-cargo requests, received ${requestIds.join(
+        ",",
+      )}`,
     );
   }
   if (
@@ -86,8 +84,9 @@ const preopen = await (async () => {
 const lspOutput = new MessageChannel();
 let rustSrcTemplates: readonly Readonly<SysrootArchiveEntry>[] | undefined;
 type QueuedSysrootEntry = {
-  entry: Readonly<SysrootArchiveEntry>;
-  offset: number;
+  name: Uint8Array;
+  data: Uint8Array;
+  isDirectory: boolean;
 };
 let sysrootQueue: QueuedSysrootEntry[] = [];
 let currentSysrootFile: QueuedSysrootEntry | null = null;
@@ -141,7 +140,7 @@ const farm = new WASIFarm(
           });
           rustSrcTemplates = Object.freeze(entries);
         }
-        sysrootQueue = rustSrcTemplates.map((entry) => ({ entry, offset: 0 }));
+        sysrootQueue = rustSrcTemplates.map((entry) => ({ ...entry }));
         currentSysrootFile = null;
         return {};
       }
@@ -150,18 +149,18 @@ const farm = new WASIFarm(
           currentSysrootFile = sysrootQueue.shift()!;
           return {
             has_file: true,
-            name_len: currentSysrootFile.entry.name.length,
-            data_len: currentSysrootFile.entry.isDirectory
+            name_len: currentSysrootFile.name.length,
+            data_len: currentSysrootFile.isDirectory
               ? -1
-              : currentSysrootFile.entry.data.length,
+              : currentSysrootFile.data.length,
           };
         }
         currentSysrootFile = null;
         return { has_file: false, name_len: 0, data_len: 0 };
       }
       if (name === "sysrootReadFileName") {
-        if (currentSysrootFile?.entry.name) {
-          return { name: Array.from(currentSysrootFile.entry.name) };
+        if (currentSysrootFile?.name) {
+          return { name: Array.from(currentSysrootFile.name) };
         }
         throw new Error("No current sysroot file to read name from");
       }
@@ -173,11 +172,11 @@ const farm = new WASIFarm(
         if (!currentSysrootFile) {
           throw new Error("No current sysroot file to read data from");
         }
-        const available = currentSysrootFile.entry.data.subarray(
-          currentSysrootFile.offset,
+        const { chunk, remaining } = takeExactSysrootChunk(
+          currentSysrootFile.data,
+          requested,
         );
-        const { chunk } = takeExactSysrootChunk(available, requested);
-        currentSysrootFile.offset += chunk.length;
+        currentSysrootFile.data = remaining;
         return { chunk: Array.from(chunk) };
       }
       throw new Error(`unexpected callback: ${name ?? "unknown"}`);

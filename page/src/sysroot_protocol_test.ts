@@ -29,24 +29,22 @@ Deno.test("sysroot meta protocol preserves host failure status", () => {
   assertEquals(sysrootMetaStatus({ has_file: -1 }), -1);
 });
 
-Deno.test("sysroot chunk protocol accepts positive safe integer lengths", () => {
+Deno.test("sysroot chunk protocol accepts non-negative safe integer lengths", () => {
+  assertEquals(validateSysrootChunkLength(0), 0);
   assertEquals(validateSysrootChunkLength(1), 1);
   assertEquals(validateSysrootChunkLength(50 * 1024 * 1024), 50 * 1024 * 1024);
   assertEquals(
     validateSysrootChunkLength(Number.MAX_SAFE_INTEGER),
     Number.MAX_SAFE_INTEGER,
   );
-  for (
-    const invalid of [
-      0,
-      -1,
-      1.5,
-      Number.NaN,
-      Number.POSITIVE_INFINITY,
-      "1",
-      Number.MAX_SAFE_INTEGER + 1,
-    ]
-  ) {
+  for (const invalid of [
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    "1",
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
     assertThrows(
       () => validateSysrootChunkLength(invalid),
       "sysroot chunk length",
@@ -56,6 +54,15 @@ Deno.test("sysroot chunk protocol accepts positive safe integer lengths", () => 
 
 Deno.test("sysroot chunk protocol never silently truncates", () => {
   const data = new Uint8Array([1, 2, 3]);
+  const probe = takeExactSysrootChunk(data, 0);
+  assertEquals(probe.chunk.length, 0);
+  assertEquals(probe.chunk.buffer, data.buffer);
+  assertEquals(probe.remaining, data);
+  assertEquals(probe.remaining.buffer, data.buffer);
+  assertEquals(probe.remaining.byteOffset, data.byteOffset);
+  assertEquals(probe.remaining.length, data.length);
+  assertEquals(Array.from(probe.remaining).join(","), "1,2,3");
+
   const result = takeExactSysrootChunk(data, 2);
   assertEquals(Array.from(result.chunk).join(","), "1,2");
   assertEquals(Array.from(result.remaining).join(","), "3");
@@ -94,6 +101,12 @@ Deno.test("sysroot chunk batching has one Rust source parameter", async () => {
   assertEquals(protocolSource.includes("MAX_SYSROOT_CHUNK_LENGTH"), false);
   assertEquals(fullVfsSource.includes("MAX_SYSROOT_CHUNK_LENGTH"), false);
   assertEquals(fullVfsSource.includes("takeExactSysrootChunk("), true);
+  assertEquals(
+    /currentSysrootFile\.data\s*=\s*remaining/.test(fullVfsSource),
+    true,
+  );
+  assertEquals(fullVfsSource.includes("currentSysrootFile.offset"), false);
+  assertEquals(fullVfsSource.includes("offset: number"), false);
   assertEquals(
     fullVfsSource.includes("currentSysrootFile.entry.data.slice("),
     false,

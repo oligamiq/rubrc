@@ -14,11 +14,11 @@ export function sysrootMetaStatus(
 }
 
 export function validateSysrootChunkLength(value: unknown): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(
-      `invalid sysroot chunk length ${
-        String(value)
-      }; expected a positive safe integer`,
+      `invalid sysroot chunk length ${String(
+        value,
+      )}; expected a non-negative safe integer`,
     );
   }
   return value;
@@ -36,6 +36,6 @@ export function takeExactSysrootChunk(
   }
   return {
     chunk: data.subarray(0, length),
-    remaining: data.subarray(length),
+    remaining: length === 0 ? data : data.subarray(length),
   };
 }

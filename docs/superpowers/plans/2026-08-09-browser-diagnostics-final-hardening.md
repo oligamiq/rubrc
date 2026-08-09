@@ -1842,3 +1842,113 @@ browser and full-VFS paths publish then clear exact rust-analyzer diagnostics,
 and full-VFS retains the uncapped observed maximum. Append RED/GREEN evidence,
 acceptance results, commit hash, and remaining concerns to the existing
 worktree Task 5 report outside the commit.
+
+## Final Review Fix: Zero-Byte Probes and Remaining-View Cursor (2026-08-10)
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development or superpowers:executing-plans to
+> implement this plan task-by-task.
+
+**Goal:** Permit exact zero-byte sysroot probes and make full-VFS use the
+helper-returned remaining view as its only file cursor.
+
+**Architecture:** `validateSysrootChunkLength` accepts every non-negative safe
+integer, while `takeExactSysrootChunk` remains the sole exact extraction
+boundary. Full-VFS stores each current file's unread `Uint8Array` view and
+replaces it with the helper's `remaining` result after every read, matching the
+browser host without retaining an offset.
+
+**Tech Stack:** TypeScript, Deno tests, Bun/Vite browser acceptance, generated
+VFS Wasm runtime.
+
+### Global Constraints
+
+- Keep `SYSROOT_FILE_CHUNK_SIZE: usize = 50 * 1024 * 1024` unchanged.
+- Keep `RUST_SRC_BOOTSTRAP_TIMEOUT_MS = 300_000` unchanged.
+- Do not introduce a TypeScript sysroot chunk cap.
+- Preserve maximum full-VFS request reporting.
+- Do not stage generated Wasm, bindings, lockfiles, reports, or unrelated files.
+
+### Task 1: Exact Zero Probe and Single Cursor State
+
+**Files:**
+
+- Modify: `page/src/sysroot_protocol_test.ts`
+- Modify: `page/src/sysroot_protocol.ts`
+- Modify: `scripts/vfs_lsp_diagnostics_test.ts`
+- Modify: `docs/superpowers/plans/2026-08-09-browser-diagnostics-final-hardening.md`
+- Append after commit: worktree report `sdd/hardening-task-5-report.md`
+
+**Interfaces:**
+
+- Consumes: `takeExactSysrootChunk(data, requestedLength)` returning
+  `{ chunk: Uint8Array; remaining: Uint8Array }`.
+- Produces: zero-length request acceptance and full-VFS cursor progression solely
+  through `currentSysrootFile.data = remaining`.
+
+- [ ] **Step 1: Write failing zero-probe and cursor source contracts**
+
+Require `validateSysrootChunkLength(0) === 0`. Require
+`takeExactSysrootChunk(data, 0)` to return an empty shared-buffer chunk and the
+remaining view with the same buffer, byte offset, length, and bytes as `data`;
+the remaining view must be the original `data` object. Extend the existing
+cross-source contract test that owns the single-Rust-parameter assertions to
+also require full-VFS assignment from `remaining` and reject manual `offset`
+state.
+
+- [ ] **Step 2: Verify RED**
+
+Run:
+
+```bash
+deno test --no-lock -A page/src/sysroot_protocol_test.ts
+```
+
+Expected: zero validation and the remaining-view cursor contract fail against
+the current implementation.
+
+- [ ] **Step 3: Implement the minimal protocol and harness changes**
+
+Change the validator rejection from `value <= 0` to `value < 0` and use the
+exact error suffix `expected a non-negative safe integer`. The harness already
+imports `takeExactSysrootChunk`; retain that import. Replace full-VFS queued
+`{ entry, offset }` state with mutable `{ name, data, isDirectory }` views; read
+directly from `data`, then assign the helper's `remaining` result back to it.
+Return the original `data` object as `remaining` when the requested length is
+zero; retain `subarray(length)` for nonzero requests.
+Retain the existing
+`maxSysrootChunkLength = Math.max(maxSysrootChunkLength, requested)` tracking
+before validation.
+
+- [ ] **Step 4: Verify GREEN and focused constraints**
+
+Run:
+
+```bash
+deno test --no-lock -A page/src/sysroot_protocol_test.ts page/src/vfs_readiness_test.ts scripts/lsp_browser_diagnostics_contract_test.ts
+```
+
+Expected: all zero-probe, Rust parameter, readiness, and browser contracts pass.
+
+- [ ] **Step 5: Run runtime acceptance**
+
+Run:
+
+```bash
+deno run --no-lock -A scripts/vfs_lsp_diagnostics_test.ts
+bun run test:lsp-browser
+wasm-tools validate dist/vfs.core.wasm
+wasm-tools validate page/src/worker_process/vfs_bindings/vfs.core.wasm
+```
+
+Expected: full-VFS and browser publish then clear rust-analyzer diagnostics,
+full-VFS reports its uncapped maximum, and both Wasm artifacts validate.
+
+- [ ] **Step 6: Format, review, commit, and report**
+
+Run targeted Biome 1.9.4 formatting, focused tests, and `git diff --check`.
+Review the final diff, stage only the four tracked paths listed above, and commit
+with `fix: allow exact zero-byte sysroot probes`. Append the commit, TDD evidence,
+runtime gates, and concerns to the external Task 5 report. State there that the
+full-VFS, Wasm validation, and browser gates complement the static single-Rust-
+parameter source contract.
