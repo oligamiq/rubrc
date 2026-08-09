@@ -10,6 +10,11 @@ const crossOriginIsolationHeaders = {
 };
 
 export default defineConfig({
+  define: {
+    __RUBRC_SOURCE_REVISION__: JSON.stringify(
+      process.env.SOURCE_SHA ?? "development",
+    ),
+  },
   resolve: {
     alias: {
       "monaco-editor": "@codingame/monaco-vscode-editor-api",

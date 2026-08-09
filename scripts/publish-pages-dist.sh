@@ -28,7 +28,7 @@ test "$SOURCE_SHA" = "$REMOTE_MAIN_SHA" || fail "Local HEAD must equal origin/ma
 rm -rf page/dist
 
 bun install --frozen-lockfile
-bun run build:prod
+SOURCE_SHA="$SOURCE_SHA" bun run build:prod
 bun run vfs:prepare:prod
 bun run rust-src:prepare-asset
 

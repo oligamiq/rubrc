@@ -174,3 +174,16 @@ Deno.test("browser readiness requires one named Rust model and an editable edito
     "browser readiness does not require an editable mounted editor",
   );
 });
+
+Deno.test("Pages build injects its validated source SHA", async () => {
+  const vite = await Deno.readTextFile("page/vite.config.ts");
+  const publish = await Deno.readTextFile("scripts/publish-pages-dist.sh");
+  assert(
+    vite.includes('process.env.SOURCE_SHA ?? "development"'),
+    "Vite source revision lacks the explicit development fallback",
+  );
+  assert(
+    publish.includes('SOURCE_SHA="$SOURCE_SHA" bun run build:prod'),
+    "Pages publisher does not pass its validated SHA into build:prod",
+  );
+});

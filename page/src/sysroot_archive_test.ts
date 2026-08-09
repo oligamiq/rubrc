@@ -11,7 +11,11 @@ const assert = (condition: unknown, message: string) => {
 Deno.test("rust-src uses same-origin asset while target sysroots stay remote", () => {
   const sysrootArchiveUrl = (
     sysrootArchive as unknown as {
-      sysrootArchiveUrl?: (triple: string, pageUrl?: string) => string;
+      sysrootArchiveUrl: (
+        triple: string,
+        pageUrl?: string,
+        sourceRevision?: string,
+      ) => string;
     }
   ).sysrootArchiveUrl;
   assert(
@@ -19,14 +23,18 @@ Deno.test("rust-src uses same-origin asset while target sysroots stay remote", (
     "archive URL selector is missing",
   );
   assert(
-    sysrootArchiveUrl("rust-src", "https://example.test/rubrc/index.html") ===
-      "https://example.test/rubrc/rust-src.tar.vfsbr",
-    "rust-src did not select the same-origin asset",
+    sysrootArchiveUrl(
+      "rust-src",
+      "https://example.test/rubrc/index.html",
+      "abc123",
+    ) === "https://example.test/rubrc/rust-src.tar.vfsbr?v=abc123",
+    "rust-src did not include the running source revision",
   );
   assert(
     sysrootArchiveUrl(
       "wasm32-wasip1",
       "https://example.test/rubrc/index.html",
+      "abc123",
     ) === "https://oligamiq.github.io/rust_wasm/v0.2.0/wasm32-wasip1.tar.br",
     "target sysroot URL changed",
   );
@@ -43,6 +51,7 @@ Deno.test("sysroot archive returns complete entries atomically", async () => {
         type: "file",
       });
     },
+    maintainRustSrcCache: () => {},
   });
   assert(entries.length === 1, "missing archive entry");
   assert(
@@ -106,6 +115,7 @@ Deno.test("sysroot archive skips its root directory marker", async () => {
       visit({ name: ".", type: "directory" });
       visit({ name: "core/src/lib.rs", type: "file" });
     },
+    maintainRustSrcCache: () => {},
   });
   assert(entries.length === 1, "archive root marker was queued");
   assert(
@@ -163,4 +173,26 @@ Deno.test("sysroot archive timeout interrupts synchronous cached parsing", async
     rejected = error instanceof Error && error.message.includes("timed out");
   }
   assert(rejected, "synchronous cached parse ran past its deadline");
+});
+
+Deno.test("rust-src cache maintenance starts only after a successful parse", async () => {
+  const maintained: string[] = [];
+  await loadSysrootArchive("rust-src", {
+    fetchStream: async () => new ReadableStream<Uint8Array>(),
+    parse: async () => {},
+    maintainRustSrcCache: (url) => maintained.push(url),
+  });
+  assert(maintained.length === 1, `maintained ${maintained.length} times`);
+});
+
+Deno.test("rust-src parse failure does not prune cache variants", async () => {
+  let maintenanceCalls = 0;
+  await loadSysrootArchive("rust-src", {
+    fetchStream: async () => new ReadableStream<Uint8Array>(),
+    parse: async () => {
+      throw new Error("partial archive");
+    },
+    maintainRustSrcCache: () => maintenanceCalls++,
+  }).catch(() => undefined);
+  assert(maintenanceCalls === 0, "failed parse started cache pruning");
 });

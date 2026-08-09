@@ -1,3 +1,5 @@
+import { pruneRustSrcCacheVariants } from "./rust_src_cache.ts";
+
 export type SysrootArchiveEntry = {
   name: Uint8Array;
   data: Uint8Array;
@@ -15,19 +17,29 @@ type ArchiveOptions = {
     stream: ReadableStream<Uint8Array>,
     visit: (file: ArchiveFile) => void,
   ) => Promise<void>;
+  maintainRustSrcCache?: (archiveUrl: string) => void;
 };
 
 const BASE_URL = "https://oligamiq.github.io/rust_wasm/v0.2.0";
 const RUST_SRC_ASSET = "rust-src.tar.vfsbr";
+declare const __RUBRC_SOURCE_REVISION__: string;
+const SOURCE_REVISION =
+  typeof __RUBRC_SOURCE_REVISION__ === "undefined"
+    ? "development"
+    : __RUBRC_SOURCE_REVISION__;
 
 export function sysrootArchiveUrl(
   triple: string,
   pageUrl = typeof location === "undefined" ? undefined : location.href,
+  sourceRevision = SOURCE_REVISION,
 ): string {
   if (triple !== "rust-src") return `${BASE_URL}/${triple}.tar.br`;
-  return pageUrl === undefined
-    ? `./${RUST_SRC_ASSET}`
-    : new URL(RUST_SRC_ASSET, pageUrl).href;
+  const url =
+    pageUrl === undefined
+      ? new URL(`./${RUST_SRC_ASSET}`, "https://development.invalid/")
+      : new URL(RUST_SRC_ASSET, pageUrl);
+  url.searchParams.set("v", sourceRevision);
+  return pageUrl === undefined ? `./${RUST_SRC_ASSET}${url.search}` : url.href;
 }
 
 export function validateSysrootArchiveEntryName(name: string): string | null {
@@ -71,10 +83,8 @@ export async function loadSysrootArchive(
       (await import("../../lib/src/brotli_stream.ts")).fetch_compressed_stream;
     const parse =
       options.parse ?? (await import("../../lib/src/parse_tar.ts")).parseTar;
-    const stream = await fetchStream(
-      sysrootArchiveUrl(triple),
-      controller.signal,
-    );
+    const archiveUrl = sysrootArchiveUrl(triple);
+    const stream = await fetchStream(archiveUrl, controller.signal);
     const entries: SysrootArchiveEntry[] = [];
     const abortableStream = stream.pipeThrough(
       new TransformStream<Uint8Array, Uint8Array>({
@@ -96,6 +106,19 @@ export async function loadSysrootArchive(
       });
     });
     checkDeadline();
+    if (triple === "rust-src") {
+      const maintainRustSrcCache =
+        options.maintainRustSrcCache ??
+        ((url) => {
+          void pruneRustSrcCacheVariants(url, SOURCE_REVISION, {
+            cacheStorage: "caches" in globalThis ? caches : undefined,
+            fetch: (input, init) => fetch(input, init),
+            reportError: (error) =>
+              console.warn("Failed to maintain rust-src cache", error),
+          });
+        });
+      maintainRustSrcCache(archiveUrl);
+    }
     return entries;
   })();
   void operation.catch(() => undefined);
