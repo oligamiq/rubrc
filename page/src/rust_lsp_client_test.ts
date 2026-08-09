@@ -134,6 +134,22 @@ Deno.test("browser startup waits for main didOpen before resolving", async () =>
   );
 });
 
+Deno.test("browser client wires abort and transport cancellation into startup", async () => {
+  const source = await Deno.readTextFile("page/src/rust_lsp_client.ts");
+  assert(
+    /startRustLspClient\([\s\S]*signal:\s*AbortSignal/.test(source),
+    "browser client does not accept AbortSignal",
+  );
+  assert(
+    source.includes("cancelClientStart: () => connection.dispose()"),
+    "startup cancellation does not close message transports",
+  );
+  assert(
+    /runRustLspStartup\([\s\S]*300_000,\s*signal\s*,?\s*\)/.test(source),
+    "browser client does not pass AbortSignal to startup",
+  );
+});
+
 Deno.test("Fetching progress remains attached to resource ownership", async () => {
   const source = await Deno.readTextFile("page/src/rust_lsp_client.ts");
   const listenerIndex = source.indexOf("client.onProgress(");

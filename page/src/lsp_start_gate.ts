@@ -9,9 +9,13 @@ export class LspStartGate<TMonaco> {
   private session: DisposableLspSession | undefined;
   private disposed = false;
   private disposePromise: Promise<void> | undefined;
+  private readonly abortController = new AbortController();
 
   constructor(
-    private readonly start: (monaco: TMonaco) => Promise<DisposableLspSession>,
+    private readonly start: (
+      monaco: TMonaco,
+      signal: AbortSignal,
+    ) => Promise<DisposableLspSession>,
   ) {}
 
   setMonaco(monaco: TMonaco): void {
@@ -32,6 +36,9 @@ export class LspStartGate<TMonaco> {
   dispose(): Promise<void> {
     if (this.disposePromise) return this.disposePromise;
     this.disposed = true;
+    this.abortController.abort(
+      new DOMException("LSP startup disposed", "AbortError"),
+    );
     this.disposePromise = (async () => {
       let session: DisposableLspSession | undefined;
       try {
@@ -49,10 +56,16 @@ export class LspStartGate<TMonaco> {
 
   private tryStart(): void {
     if (
-      this.disposed || this.startPromise || this.vfsResult?.ok !== true ||
+      this.disposed ||
+      this.startPromise ||
+      this.vfsResult?.ok !== true ||
       !this.monaco
-    ) return;
-    this.startPromise = this.start(this.monaco).then(async (session) => {
+    )
+      return;
+    this.startPromise = this.start(
+      this.monaco,
+      this.abortController.signal,
+    ).then(async (session) => {
       if (this.disposed) await session.dispose();
       else this.session = session;
       return session;

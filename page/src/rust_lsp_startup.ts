@@ -1,27 +1,70 @@
 export type RustLspStartupActions = {
   prepopulateMain(): Promise<void>;
   startClient(): Promise<void>;
+  cancelClientStart(): void;
   createMainModel(): Promise<void> | void;
 };
 
 export async function runRustLspStartup(
   actions: RustLspStartupActions,
   timeoutMs: number,
+  signal: AbortSignal,
+  cancellationSettleTimeoutMs = 1_000,
 ): Promise<void> {
   await actions.prepopulateMain();
+  signal.throwIfAborted();
 
-  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let startupTimer: ReturnType<typeof setTimeout> | undefined;
+  let settleTimer: ReturnType<typeof setTimeout> | undefined;
+  let removeAbortListener = () => {};
+  let timedOut = false;
+  const timeoutError = new Error("rust-analyzer startup timed out");
   const startupTimeout = new Promise<never>((_, reject) => {
-    timeout = setTimeout(
-      () => reject(new Error("rust-analyzer startup timed out")),
-      timeoutMs,
-    );
+    startupTimer = setTimeout(() => {
+      timedOut = true;
+      reject(timeoutError);
+    }, timeoutMs);
   });
+  const aborted = new Promise<never>((_, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+    if (signal.aborted) onAbort();
+  });
+  let startupPromise: Promise<void> | undefined;
 
   try {
-    await Promise.race([actions.startClient(), startupTimeout]);
-    await Promise.race([actions.createMainModel(), startupTimeout]);
+    startupPromise = Promise.resolve().then(async () => {
+      await actions.startClient();
+      if (timedOut) throw timeoutError;
+      signal.throwIfAborted();
+      await actions.createMainModel();
+    });
+    void startupPromise.catch(() => undefined);
+    await Promise.race([startupPromise, startupTimeout, aborted]);
+  } catch (error) {
+    const activelyCancelled =
+      error === timeoutError || (signal.aborted && error === signal.reason);
+    if (activelyCancelled && startupPromise) {
+      try {
+        actions.cancelClientStart();
+      } catch (cleanupError) {
+        console.error("Failed to cancel LSP startup:", cleanupError);
+      }
+      await Promise.race([
+        startupPromise.then(
+          () => undefined,
+          () => undefined,
+        ),
+        new Promise<void>((resolve) => {
+          settleTimer = setTimeout(resolve, cancellationSettleTimeoutMs);
+        }),
+      ]);
+    }
+    throw error;
   } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
+    if (startupTimer !== undefined) clearTimeout(startupTimer);
+    if (settleTimer !== undefined) clearTimeout(settleTimer);
+    removeAbortListener();
   }
 }

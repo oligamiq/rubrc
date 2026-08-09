@@ -42,6 +42,7 @@ const App = (props: {
   callback: (wasi_ref: WASIFarmRef) => void;
   startLspClient: (
     monaco: typeof import("monaco-editor"),
+    signal: AbortSignal,
   ) => Promise<DisposableLspSession>;
 }) => {
   const lspGate = new LspStartGate<typeof import("monaco-editor")>(
@@ -135,7 +136,9 @@ const App = (props: {
     setMountedMonacoRef(undefined);
     setMountedEditorRef(undefined);
     sharedReady.bc.close();
-    void lspGate.dispose();
+    void lspGate
+      .dispose()
+      .catch((error) => console.error("LSP gate cleanup failed:", error));
   });
 
   const close_session_fn = new SharedObjectRef(

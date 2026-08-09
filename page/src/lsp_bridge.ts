@@ -47,6 +47,7 @@ class MyMessageReader extends AbstractMessageReader {
   override dispose(): void {
     if (!this.closed) {
       this.closed = true;
+      this.fireClose();
       closeUnderlyingChannel(this.shared);
       this.shared = undefined;
     }

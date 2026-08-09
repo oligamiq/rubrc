@@ -74,6 +74,19 @@ test("lsp_bridge: listen after dispose throws without opening a channel", () => 
   expect(FakeBroadcastChannel.created.length).toBe(channelsBeforeDispose);
 });
 
+test("lsp_bridge: reader disposal emits close exactly once", () => {
+  const ctx = { ls_id: "ls-close", input_string_id: "in-close" } as Ctx;
+  const connection = createLspConnection(ctx);
+  let closes = 0;
+  connection.reader.onClose(() => closes++);
+  connection.reader.listen(() => {});
+
+  connection.reader.dispose();
+  connection.reader.dispose();
+
+  expect(closes).toBe(1);
+});
+
 test("lsp_bridge: malformed input fires error and close exactly once and ignores later data", () => {
   const ctx = { ls_id: "ls-3", input_string_id: "in-3" } as Ctx;
   const connection = createLspConnection(ctx);
@@ -88,7 +101,7 @@ test("lsp_bridge: malformed input fires error and close exactly once and ignores
   connection.reader.listen(() => dataCount++);
 
   const readerChannel = FakeBroadcastChannel.created.find((c) =>
-    c.name.includes("ls-3")
+    c.name.includes("ls-3"),
   );
   expect(readerChannel).toBeDefined();
 
@@ -97,9 +110,7 @@ test("lsp_bridge: malformed input fires error and close exactly once and ignores
     msg: "func_call::call",
     to: "parent",
     names: [".self"],
-    args: [
-      { data: new TextEncoder().encode("Content-Length: bad\r\n\r\n{}") },
-    ],
+    args: [{ data: new TextEncoder().encode("Content-Length: bad\r\n\r\n{}") }],
   });
 
   expect(errorCount).toBe(1);

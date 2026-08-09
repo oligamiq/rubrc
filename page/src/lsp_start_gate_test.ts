@@ -71,6 +71,27 @@ Deno.test("failed VFS readiness settles without starting LSP", () => {
   assert(starts === 0, "failed VFS bootstrap started LSP");
 });
 
+Deno.test("gate disposal aborts and settles an in-progress starter", async () => {
+  let starts = 0;
+  let observedSignal: AbortSignal | undefined;
+  const gate = new LspStartGate<object>((_monaco, signal) => {
+    starts++;
+    observedSignal = signal;
+    return new Promise<never>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      });
+    });
+  });
+  gate.setMonaco({});
+  gate.setVfsResult({ ok: true });
+
+  await gate.dispose();
+
+  assert(starts === 1, `starter called ${starts} times`);
+  assert(observedSignal?.aborted, "gate disposal did not abort startup");
+});
+
 Deno.test("App mounts the editor before LSP startup but defers the main model", async () => {
   const source = await Deno.readTextFile("page/src/App.tsx");
   const indexSource = await Deno.readTextFile("page/src/index.tsx");
@@ -106,6 +127,10 @@ Deno.test("App mounts the editor before LSP startup but defers the main model", 
     /startLspClient\s*:/.test(source) &&
       source.includes("Promise<DisposableLspSession>"),
     "App must accept the typed injected LSP starter",
+  );
+  assert(
+    source.includes("signal: AbortSignal"),
+    "App starter lacks AbortSignal",
   );
   assert(
     /new\s+LspStartGate[\s\S]*?\(\s*(?:props\.)?startLspClient\s*,?\s*\)/.test(
@@ -260,5 +285,9 @@ Deno.test("App mounts the editor before LSP startup but defers the main model", 
   assert(
     cleanupBlock.includes("temporaryModel?.dispose()"),
     "App cleanup does not dispose the temporary model",
+  );
+  assert(
+    source.includes('console.error("LSP gate cleanup failed:", error)'),
+    "App does not observe asynchronous gate cleanup failures",
   );
 });

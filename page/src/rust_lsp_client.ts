@@ -34,7 +34,11 @@ class RustMonacoLanguageClient extends MonacoLanguageClient {
   }
 }
 
-export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
+export async function startRustLspClient(
+  ctx: Ctx,
+  monaco: typeof Monaco,
+  signal: AbortSignal,
+) {
   const owner = new RustLspResourceOwner();
   let createdMainModel: Monaco.editor.ITextModel | undefined;
 
@@ -93,6 +97,7 @@ export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
         prepopulateMain: () =>
           writeAndRecordWorkspace("/src/main.rs", default_value),
         startClient: () => client.start(),
+        cancelClientStart: () => connection.dispose(),
         createMainModel: async () => {
           const uri = monaco.Uri.parse("file:///src/main.rs");
           if (!monaco.editor.getModel(uri)) {
@@ -106,6 +111,7 @@ export async function startRustLspClient(ctx: Ctx, monaco: typeof Monaco) {
         },
       },
       300_000,
+      signal,
     );
 
     if (import.meta.env.VITE_RUBRC_LSP_TEST === "1") {

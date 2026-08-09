@@ -75,9 +75,9 @@ render(
           wasi_ref,
         })
       }
-      startLspClient={async (monaco) => {
+      startLspClient={async (monaco, signal) => {
         const { startRustLspClient } = await import("./rust_lsp_client");
-        return startRustLspClient(ctx, monaco);
+        return startRustLspClient(ctx, monaco, signal);
       }}
     />
   ),

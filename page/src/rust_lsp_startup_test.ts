@@ -4,6 +4,16 @@ const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
 };
 
+const deferred = () => {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
+
 Deno.test("startup pre-populates VFS and opens the model without progress", async () => {
   const order: string[] = [];
 
@@ -15,11 +25,13 @@ Deno.test("startup pre-populates VFS and opens the model without progress", asyn
       startClient: async () => {
         order.push("start");
       },
+      cancelClientStart: () => {},
       createMainModel: () => {
         order.push("model");
       },
     },
     100,
+    new AbortController().signal,
   );
 
   assert(
@@ -48,6 +60,7 @@ Deno.test("startup waits for main didOpen completion after model creation", asyn
       startClient: async () => {
         order.push("start");
       },
+      cancelClientStart: () => {},
       createMainModel: async () => {
         order.push("model");
         resolveModelCreated();
@@ -56,6 +69,7 @@ Deno.test("startup waits for main didOpen completion after model creation", asyn
       },
     },
     100,
+    new AbortController().signal,
   ).then(() => {
     startupSettled = true;
   });
@@ -84,10 +98,13 @@ Deno.test("client startup timeout does not create the model", async () => {
       {
         prepopulateMain: async () => {},
         startClient: () => new Promise<void>(() => {}),
+        cancelClientStart: () => {},
         createMainModel: () => {
           modelCreated = true;
         },
       },
+      1,
+      new AbortController().signal,
       1,
     );
   } catch (error) {
@@ -114,11 +131,13 @@ Deno.test("client startup failure preserves the original error", async () => {
           await Promise.resolve();
           throw original;
         },
+        cancelClientStart: () => {},
         createMainModel: () => {
           modelCreated = true;
         },
       },
       100,
+      new AbortController().signal,
     );
   } catch (error) {
     received = error;
@@ -130,6 +149,7 @@ Deno.test("client startup failure preserves the original error", async () => {
 
 Deno.test("startup timeout remains active while didOpen is pending", async () => {
   let modelCreated = false;
+  let cancellations = 0;
   let message = "";
 
   try {
@@ -137,11 +157,14 @@ Deno.test("startup timeout remains active while didOpen is pending", async () =>
       {
         prepopulateMain: async () => {},
         startClient: async () => {},
+        cancelClientStart: () => cancellations++,
         createMainModel: () => {
           modelCreated = true;
           return new Promise<void>(() => {});
         },
       },
+      1,
+      new AbortController().signal,
       1,
     );
   } catch (error) {
@@ -153,6 +176,7 @@ Deno.test("startup timeout remains active while didOpen is pending", async () =>
     message === "rust-analyzer startup timed out",
     `wrong didOpen timeout error: ${message}`,
   );
+  assert(cancellations === 1, `cancelled ${cancellations} times`);
 });
 
 Deno.test("didOpen failure preserves the original startup error", async () => {
@@ -164,11 +188,13 @@ Deno.test("didOpen failure preserves the original startup error", async () => {
       {
         prepopulateMain: async () => {},
         startClient: async () => {},
+        cancelClientStart: () => {},
         createMainModel: async () => {
           throw original;
         },
       },
       100,
+      new AbortController().signal,
     );
   } catch (error) {
     received = error;
@@ -190,9 +216,11 @@ Deno.test("VFS pre-population failure prevents client startup", async () => {
         startClient: async () => {
           started = true;
         },
+        cancelClientStart: () => {},
         createMainModel: () => {},
       },
       100,
+      new AbortController().signal,
     );
   } catch (error) {
     message = error instanceof Error ? error.message : String(error);
@@ -200,4 +228,79 @@ Deno.test("VFS pre-population failure prevents client startup", async () => {
 
   assert(message === "VFS write failed", `wrong VFS error: ${message}`);
   assert(!started, "client started after VFS pre-population failed");
+});
+
+Deno.test("abort cancels start, waits for settlement, and preserves its reason", async () => {
+  const controller = new AbortController();
+  const start = deferred();
+  const reason = new Error("component unmounted");
+  const order: string[] = [];
+  let starts = 0;
+  let caught: unknown;
+  const startup = runRustLspStartup(
+    {
+      prepopulateMain: async () => {
+        order.push("prepopulate");
+      },
+      startClient: () => {
+        starts++;
+        order.push("start");
+        return start.promise.finally(() => order.push("start-settled"));
+      },
+      cancelClientStart: () => {
+        order.push("cancel");
+        start.reject(new Error("transport closed"));
+      },
+      createMainModel: () => {
+        order.push("model");
+      },
+    },
+    1_000,
+    controller.signal,
+    20,
+  );
+  await Promise.resolve();
+  controller.abort(reason);
+  try {
+    await startup;
+  } catch (error) {
+    caught = error;
+    order.push("cleanup");
+  }
+  assert(starts === 1, `startClient called ${starts} times`);
+  assert(caught === reason, "abort reason identity was replaced");
+  assert(
+    order.join(",") === "prepopulate,start,cancel,start-settled,cleanup",
+    `wrong cancellation order: ${order}`,
+  );
+});
+
+Deno.test("timeout cancellation is bounded and observes a late rejection", async () => {
+  const start = deferred();
+  let cancellations = 0;
+  let message = "";
+  try {
+    await runRustLspStartup(
+      {
+        prepopulateMain: async () => {},
+        startClient: () => start.promise,
+        cancelClientStart: () => cancellations++,
+        createMainModel: () => {
+          throw new Error("model must not be created");
+        },
+      },
+      1,
+      new AbortController().signal,
+      1,
+    );
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  start.reject(new Error("late transport rejection"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert(cancellations === 1, `cancelled ${cancellations} times`);
+  assert(
+    message === "rust-analyzer startup timed out",
+    `wrong timeout reason: ${message}`,
+  );
 });
