@@ -24,15 +24,17 @@ valid asset becomes available.
 ## Development Asset Lifecycle
 
 Add a root `rust-src:prepare-dev-asset` script that invokes the existing
-validated archive preparation, writes the development copy to
-`.rubrc-cache/dev/rust-src.tar.vfsbr`, and atomically writes its SHA-256 to a
-sidecar file. Add `predev` and `prestart` lifecycle scripts to
+validated archive preparation, computes SHA-256 directly from the returned
+bytes, atomically writes the content-addressed development copy to
+`.rubrc-cache/dev/rust-src-<sha256>.tar.vfsbr`, and atomically updates an active
+SHA-256 sidecar. Add `predev` and `prestart` lifecycle scripts to
 `page/package.json`; Bun runs these before `dev` and `start` and does not launch
 Vite if preparation fails.
 
-A small Vite `configureServer` plugin reads the sidecar at server startup and
-serves only the `/rust-src.tar.vfsbr` development request from that ignored
-cache path with `Content-Type: application/octet-stream`. Vite uses the same
+A small Vite `configureServer` plugin reads the sidecar at server startup,
+selects the matching immutable content-addressed file, and serves only the
+`/rust-src.tar.vfsbr` development request from that ignored cache path with
+`Content-Type: application/octet-stream`. Vite uses the same
 SHA-256 as the development `SOURCE_REVISION` define. The middleware requires
 the request's `v` query parameter to equal that hash before serving the file;
 an identity mismatch returns an explicit conflict error rather than caching
@@ -45,10 +47,16 @@ under `.rubrc-cache/sysroot` keeps repeated development starts cheap. A branch
 switch with the same toolchain remains valid because the archive contains the
 installed toolchain's standard-library source, not repository source. A
 toolchain change is detected by the existing archive identity validation on the
-next dev/start lifecycle, produces a new content hash, and therefore receives a
-new browser cache key. Changing the active Rust toolchain while a dev server is
+next dev/start lifecycle, produces a new content hash, immutable file, and
+browser cache key. Concurrent preparation never overwrites bytes selected by an
+already-running server. Changing the active Rust toolchain while a dev server is
 already running requires restarting that server, matching other Vite config
 changes.
+
+After publishing the active sidecar, preparation keeps the active archive plus
+the two newest prior content-addressed archives and removes older variants on a
+best-effort basis. This bounds disk growth while allowing overlapping server
+restart/preparation windows to retain their selected immutable file.
 
 ## Cache And Response Validation
 
@@ -62,6 +70,10 @@ and cache deletion boundary.
   not cached; `fetch_compressed_stream` then rejects it before exposing a body.
 - Cache open, match, delete, and put failures remain optional-cache failures and
   never replace the network response.
+- CacheStorage is used only for GET requests. Requests with methods or bodies
+  unsupported by CacheStorage bypass it without cloning their body stream.
+- A response clone created for `cache.put` is canceled if the put fails, so its
+  unread tee branch cannot stall the response returned to the caller.
 
 The application has one rust-src archive loader. Cache recovery therefore does
 not introduce a global fetch-coalescing layer: doing so would have to reconcile
