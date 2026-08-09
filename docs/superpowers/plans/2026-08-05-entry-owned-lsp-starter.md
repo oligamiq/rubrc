@@ -6,13 +6,13 @@
 entry-owned module graph so browser rust-analyzer startup reaches semantic
 Monaco diagnostics.
 
-**Architecture:** `index.tsx` owns the runtime import of `startRustLspClient`
-and injects a typed starter callback into lazy `App`. `App` retains the existing
-Monaco/VFS `LspStartGate`, but no longer imports the language client itself.
-Static evaluation is safe because constructing `MonacoLanguageClient` and
-accessing guarded `vscode` APIs occur only when the starter is called. The
-browser acceptance harness asserts that the built asset graph contains one
-VS Code default-API singleton asset before launching Chromium.
+**Architecture:** `index.tsx` owns an async dynamic import of
+`startRustLspClient` inside a typed starter callback injected into lazy `App`.
+`App` retains the existing Monaco/VFS `LspStartGate`, but no longer imports the
+language client itself. The callback executes only after wrapper startup and
+both readiness gates, preserving the wrapper's extension-service loading
+boundary. The browser acceptance harness asserts that the built asset graph
+contains one VS Code default-API singleton asset before launching Chromium.
 
 **Tech Stack:** TypeScript, Solid, Vite, `monaco-languageclient`, Deno tests,
 Puppeteer.
@@ -26,7 +26,8 @@ Puppeteer.
 - Keep `MonacoLanguageClient` as the sole Monaco marker owner; do not call
   `monaco.editor.setModelMarkers`.
 - Do not add a fallback language server, custom Atomics synchronization, Vite
-  chunk configuration, or a lazy-chunk `vscode/localExtensionHost` import.
+  manual chunk configuration, or a lazy-chunk `vscode/localExtensionHost`
+  import.
 - Do not modify generated Wasm, lockfiles, VFS source/bindings, minimal/layered
   experiments, or unrelated dirty paths.
 - The browser acceptance must observe a semantic `source: "rust-analyzer"`
@@ -40,6 +41,7 @@ Puppeteer.
 - Modify: `page/src/index.tsx:5-8, 69-79`
 - Modify: `page/src/App.tsx:1-14, 34-40`
 - Modify: `page/src/lsp_start_gate_test.ts:74-118`
+- Modify: `page/vite.config.ts:12-17`
 - Modify: `scripts/lsp_browser_diagnostics_test.mjs:1-20` and its post-build,
   pre-browser-launch setup
 
@@ -60,35 +62,49 @@ Puppeteer.
 
   ```ts
   const indexSource = await Deno.readTextFile("page/src/index.tsx");
-  const rustLspImport =
-    /import\s*\{\s*startRustLspClient\s*\}\s*from\s*["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']/;
+  const viteSource = await Deno.readTextFile("page/vite.config.ts");
+  const rustLspModuleImport =
+    /from\s*["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']/;
 
   assert(
-    rustLspImport.test(indexSource),
-    "index.tsx must statically import startRustLspClient",
+    !rustLspModuleImport.test(indexSource),
+    "index.tsx must not statically import rust_lsp_client",
   );
   assert(
-    /startLspClient=\{\s*\(\s*monaco\s*\)\s*=>\s*startRustLspClient\(\s*ctx\s*,\s*monaco\s*\)\s*\}/s.test(
-      indexSource,
-    ),
-    "index.tsx must inject the entry-owned LSP starter",
+    /startLspClient\s*=/.test(indexSource) &&
+      /await\s+import\s*\(\s*["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']\s*\)/.test(
+        indexSource,
+      ),
+    "index.tsx must inject an entry-owned dynamic LSP starter",
   );
   assert(
-    !rustLspImport.test(source),
-    "App must not own a runtime rust_lsp_client import",
+    !rustLspModuleImport.test(source),
+    "App must not import rust_lsp_client",
   );
   assert(
-    /startLspClient:\s*\(\s*monaco:\s*typeof import\(["']monaco-editor["']\),?\s*\)\s*=>\s*Promise<DisposableLspSession>/s.test(
-      source,
-    ),
+    /startLspClient\s*:/.test(source) &&
+      source.includes("Promise<DisposableLspSession>"),
     "App must accept the typed injected LSP starter",
   );
   assert(
-    /new LspStartGate<typeof import\(["']monaco-editor["']\)>\(\s*props\.startLspClient,?\s*\)/s.test(
+    /new\s+LspStartGate[\s\S]*?\(\s*(?:props\.)?startLspClient\s*,?\s*\)/.test(
       source,
     ),
     "App must give the injected starter to LspStartGate",
   );
+  const dedupeBlock = viteSource.match(/dedupe\s*:\s*\[([\s\S]*?)\]/)?.[1] ?? "";
+  for (const dependency of [
+    "vscode",
+    "@codingame/monaco-vscode-api",
+    "@codingame/monaco-vscode-extension-api",
+    "@codingame/monaco-vscode-extensions-service-override",
+  ]) {
+    assert(
+      dedupeBlock.includes(`"${dependency}"`) ||
+        dedupeBlock.includes(`'${dependency}'`),
+      `Vite does not dedupe ${dependency}`,
+    );
+  }
   ```
 
 - [ ] **Step 2: Run the source-contract test and verify RED**
@@ -99,8 +115,10 @@ Puppeteer.
   deno test --no-lock --allow-read page/src/lsp_start_gate_test.ts
   ```
 
-  Expected: FAIL because `index.tsx` does not yet statically import and inject
-  `startRustLspClient`, and `App.tsx` still imports it directly.
+  Expected: FAIL because `page/vite.config.ts` does not yet dedupe the four VS
+  Code singleton packages. During the earlier RED sequence, the source test
+  also failed for the App-owned and index-static client imports before the
+  dynamic callback was introduced.
 
 - [ ] **Step 3: Add the failing built-asset singleton regression check**
 
@@ -151,16 +169,14 @@ Puppeteer.
 
 - [ ] **Step 5: Implement the minimum entry-owned dependency boundary**
 
-  In `page/src/index.tsx`, add the runtime entry import:
-
-  ```ts
-  import { startRustLspClient } from "./rust_lsp_client";
-  ```
-
-  Pass the callback when rendering `App`:
+  In `page/src/index.tsx`, remove any top-level `rust_lsp_client` import and
+  pass this callback when rendering `App`:
 
   ```tsx
-  startLspClient={(monaco) => startRustLspClient(ctx, monaco)}
+  startLspClient={async (monaco) => {
+    const { startRustLspClient } = await import("./rust_lsp_client");
+    return startRustLspClient(ctx, monaco);
+  }}
   ```
 
   In `page/src/App.tsx`, remove the runtime `startRustLspClient` import. Import
@@ -190,12 +206,23 @@ Puppeteer.
   Do not change `handleMount`, `observeLspStart`, the anonymous editor model,
   the VFS readiness callback, or any LSP resource lifecycle code.
 
+  In `page/vite.config.ts`, preserve the existing Monaco alias and add:
+
+  ```ts
+  dedupe: [
+    "vscode",
+    "@codingame/monaco-vscode-api",
+    "@codingame/monaco-vscode-extension-api",
+    "@codingame/monaco-vscode-extensions-service-override",
+  ],
+  ```
+
 - [ ] **Step 6: Run focused GREEN tests**
 
   Run:
 
   ```bash
-  deno test --no-lock --allow-read page/src/lsp_start_gate_test.ts page/src/rust_lsp_startup_test.ts page/src/rust_lsp_client_test.ts page/src/rust_document_sync_test.ts
+  deno test --no-lock -A page/src/lsp_start_gate_test.ts page/src/rust_lsp_startup_test.ts page/src/rust_lsp_client_test.ts page/src/rust_document_sync_test.ts
   bun run test:lsp-browser
   deno run --no-lock -A scripts/vfs_lsp_diagnostics_test.ts
   ```
@@ -212,20 +239,22 @@ Puppeteer.
   Run:
 
   ```bash
-  bun x biome format --check page/src/index.tsx page/src/App.tsx page/src/lsp_start_gate_test.ts scripts/lsp_browser_diagnostics_test.mjs
+  bun x @biomejs/biome@1.9.4 format page/src/index.tsx page/vite.config.ts
   bun run --cwd page build
   git diff --check
   git status --short
   ```
 
-  Expected: formatting and diff checks exit 0; page build succeeds; the only
-  tracked changes are the four task paths.
+  Expected: focused formatting and diff checks exit 0; page build succeeds.
+  `App.tsx`, the existing gate test, and browser harness have documented
+  pre-existing whole-file Biome differences and must not be bulk-reformatted.
+  The only tracked changes are the five task paths.
 
 - [ ] **Step 8: Commit the fix**
 
   ```bash
-  git add page/src/index.tsx page/src/App.tsx page/src/lsp_start_gate_test.ts scripts/lsp_browser_diagnostics_test.mjs
+  git add page/src/index.tsx page/src/App.tsx page/src/lsp_start_gate_test.ts page/vite.config.ts scripts/lsp_browser_diagnostics_test.mjs
   git commit -m "fix(lsp): keep VS Code API singleton entry-owned"
   ```
 
-  Expected: one commit containing only the four paths above.
+  Expected: one commit containing only the five paths above.
