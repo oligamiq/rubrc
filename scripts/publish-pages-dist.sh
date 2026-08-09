@@ -24,11 +24,58 @@ SOURCE_SHA="$(git rev-parse HEAD)"
 REMOTE_MAIN_SHA="$(git rev-parse origin/main)"
 test "$SOURCE_SHA" = "$REMOTE_MAIN_SHA" || fail "Local HEAD must equal origin/main"
 
+REMOTE_URL="$(git remote get-url origin)"
+REMOTE_DIST_SHA="$(
+  git ls-remote \
+    "$REMOTE_URL" \
+    refs/heads/pages-dist |
+  awk '{print $1}'
+)"
+PREVIOUS_BUILD_EPOCH=0
+
+if [ -n "$REMOTE_DIST_SHA" ]; then
+  git fetch \
+    --quiet \
+    --no-tags \
+    --depth=1 \
+    origin \
+    refs/heads/pages-dist
+  test "$(git rev-parse FETCH_HEAD)" = "$REMOTE_DIST_SHA" || \
+    fail "Fetched pages-dist SHA changed while establishing build epoch"
+
+  if git cat-file -e "$REMOTE_DIST_SHA:.rubrc-pages-build.json" 2>/dev/null; then
+    if ! PREVIOUS_BUILD_EPOCH="$(
+      git show "$REMOTE_DIST_SHA:.rubrc-pages-build.json" |
+      node -e '
+        const fs = require("node:fs");
+        const metadata = JSON.parse(fs.readFileSync(0, "utf8"));
+        if (metadata.version !== 1 || typeof metadata.sourceSha !== "string") {
+          throw new Error("invalid previous deployment metadata");
+        }
+        if (metadata.buildEpoch === undefined) {
+          process.stdout.write("0");
+        } else if (
+          Number.isSafeInteger(metadata.buildEpoch) &&
+          metadata.buildEpoch > 0
+        ) {
+          process.stdout.write(String(metadata.buildEpoch));
+        } else {
+          throw new Error("invalid previous deployment build epoch");
+        }
+      '
+    )"; then
+      fail "Could not establish the previous deployment build epoch"
+    fi
+  fi
+fi
+
+BUILD_EPOCH=$((PREVIOUS_BUILD_EPOCH + 1))
+
 # 4.2 ローカルビルド
 rm -rf page/dist
 
 bun install --frozen-lockfile
-SOURCE_SHA="$SOURCE_SHA" bun run build:prod
+SOURCE_SHA="$SOURCE_SHA" BUILD_EPOCH="$BUILD_EPOCH" bun run build:prod
 bun run vfs:prepare:prod
 bun run rust-src:prepare-asset
 
@@ -53,11 +100,12 @@ git archive --format=tar FETCH_HEAD | tar -xf - -C page/dist/v1
 test -f page/dist/v1/index.html || fail "v1 snapshot is missing index.html"
 
 # 4.4 metadata
-SOURCE_SHA="$SOURCE_SHA" node -e "
+SOURCE_SHA="$SOURCE_SHA" BUILD_EPOCH="$BUILD_EPOCH" node -e "
 const fs = require('fs');
 fs.writeFileSync('page/dist/.rubrc-pages-build.json', JSON.stringify({
   version: 1,
-  sourceSha: process.env.SOURCE_SHA
+  sourceSha: process.env.SOURCE_SHA,
+  buildEpoch: Number(process.env.BUILD_EPOCH)
 }, null, 2));
 "
 
@@ -81,14 +129,6 @@ git -C "$SITE_REPO" add --all
 git -C "$SITE_REPO" commit --quiet -m "Deploy Pages for ${SOURCE_SHA}"
 
 DIST_SHA="$(git -C "$SITE_REPO" rev-parse HEAD)"
-REMOTE_URL="$(git remote get-url origin)"
-
-REMOTE_DIST_SHA="$(
-  git ls-remote \
-    "$REMOTE_URL" \
-    refs/heads/pages-dist |
-  awk '{print $1}'
-)"
 
 if [ -z "$REMOTE_DIST_SHA" ]; then
   git -C "$SITE_REPO" push \

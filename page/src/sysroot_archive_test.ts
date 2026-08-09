@@ -15,6 +15,7 @@ Deno.test("rust-src uses same-origin asset while target sysroots stay remote", (
         triple: string,
         pageUrl?: string,
         sourceRevision?: string,
+        buildEpoch?: string,
       ) => string;
     }
   ).sysrootArchiveUrl;
@@ -27,14 +28,16 @@ Deno.test("rust-src uses same-origin asset while target sysroots stay remote", (
       "rust-src",
       "https://example.test/rubrc/index.html",
       "abc123",
-    ) === "https://example.test/rubrc/rust-src.tar.vfsbr?v=abc123",
-    "rust-src did not include the running source revision",
+      "42",
+    ) === "https://example.test/rubrc/rust-src.tar.vfsbr?v=abc123&build=42",
+    "rust-src did not include the running source revision and build epoch",
   );
   assert(
     sysrootArchiveUrl(
       "wasm32-wasip1",
       "https://example.test/rubrc/index.html",
       "abc123",
+      "42",
     ) === "https://oligamiq.github.io/rust_wasm/v0.2.0/wasm32-wasip1.tar.br",
     "target sysroot URL changed",
   );
@@ -195,4 +198,58 @@ Deno.test("rust-src parse failure does not prune cache variants", async () => {
     maintainRustSrcCache: () => maintenanceCalls++,
   }).catch(() => undefined);
   assert(maintenanceCalls === 0, "failed parse started cache pruning");
+});
+
+Deno.test("blocked CacheStorage does not reject a parsed archive", async () => {
+  const cachesDescriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "caches",
+  );
+  const warn = console.warn;
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    get() {
+      throw new DOMException("storage disabled", "SecurityError");
+    },
+  });
+  console.warn = () => {};
+  try {
+    const entries = await loadSysrootArchive("rust-src", {
+      fetchStream: async () => new ReadableStream<Uint8Array>(),
+      parse: async () => {},
+    });
+    assert(entries.length === 0, "parsed archive did not complete");
+  } finally {
+    console.warn = warn;
+    if (cachesDescriptor) {
+      Object.defineProperty(globalThis, "caches", cachesDescriptor);
+    } else {
+      delete (globalThis as { caches?: unknown }).caches;
+    }
+  }
+});
+
+Deno.test("parse failure aborts the archive signal with its original error", async () => {
+  const parseError = new Error("partial archive");
+  let signal: AbortSignal | undefined;
+  let rejected: unknown;
+  try {
+    await loadSysrootArchive("rust-src", {
+      fetchStream: async (_url, currentSignal) => {
+        signal = currentSignal;
+        return new ReadableStream<Uint8Array>();
+      },
+      parse: async () => {
+        throw parseError;
+      },
+    });
+  } catch (error) {
+    rejected = error;
+  }
+  assert(rejected === parseError, "parse failure reason was replaced");
+  assert(signal?.aborted, "parse failure did not abort the archive signal");
+  assert(
+    signal?.reason === parseError,
+    "abort reason was not the parse failure",
+  );
 });

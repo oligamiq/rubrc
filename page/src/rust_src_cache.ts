@@ -11,20 +11,32 @@ export type RustSrcCacheDependencies = {
   reportError(error: unknown): void;
 };
 
+function cacheBuildEpoch(url: URL): number | undefined {
+  const values = url.searchParams.getAll("build");
+  if (values.length === 0) return 0;
+  if (values.length !== 1 || !/^(0|[1-9]\d*)$/.test(values[0])) {
+    return undefined;
+  }
+  const value = Number(values[0]);
+  return Number.isSafeInteger(value) ? value : undefined;
+}
+
 export async function pruneRustSrcCacheVariants(
   archiveUrl: string,
   sourceRevision: string,
   dependencies: RustSrcCacheDependencies,
 ): Promise<void> {
-  if (!dependencies.cacheStorage) return;
   try {
+    const cacheStorage = dependencies.cacheStorage;
+    if (!cacheStorage) return;
     const current = new URL(
       archiveUrl,
       typeof location === "undefined"
         ? "https://development.invalid/"
         : location.href,
     );
-    const cache = await dependencies.cacheStorage.open("rubrc-assets-v1");
+    const currentBuildEpoch = cacheBuildEpoch(current);
+    const cache = await cacheStorage.open("rubrc-assets-v1");
     const requests = await cache.keys();
     const metadataUrl = new URL(".rubrc-pages-build.json", current);
     const response = await dependencies.fetch(metadataUrl, {
@@ -38,7 +50,12 @@ export async function pruneRustSrcCacheVariants(
       !("version" in metadata) ||
       metadata.version !== 1 ||
       !("sourceSha" in metadata) ||
-      metadata.sourceSha !== sourceRevision
+      metadata.sourceSha !== sourceRevision ||
+      !("buildEpoch" in metadata) ||
+      typeof metadata.buildEpoch !== "number" ||
+      !Number.isSafeInteger(metadata.buildEpoch) ||
+      metadata.buildEpoch <= 0 ||
+      metadata.buildEpoch !== currentBuildEpoch
     )
       return;
 
@@ -49,7 +66,13 @@ export async function pruneRustSrcCacheVariants(
         candidate.pathname === current.pathname &&
         candidate.href !== current.href
       ) {
-        await cache.delete(request);
+        const candidateBuildEpoch = cacheBuildEpoch(candidate);
+        if (
+          candidateBuildEpoch !== undefined &&
+          candidateBuildEpoch < metadata.buildEpoch
+        ) {
+          await cache.delete(request);
+        }
       }
     }
   } catch (error) {

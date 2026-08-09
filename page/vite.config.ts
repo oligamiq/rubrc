@@ -14,6 +14,7 @@ export default defineConfig({
     __RUBRC_SOURCE_REVISION__: JSON.stringify(
       process.env.SOURCE_SHA ?? "development",
     ),
+    __RUBRC_BUILD_EPOCH__: JSON.stringify(process.env.BUILD_EPOCH ?? "0"),
   },
   resolve: {
     alias: {

@@ -175,15 +175,57 @@ Deno.test("browser readiness requires one named Rust model and an editable edito
   );
 });
 
-Deno.test("Pages build injects its validated source SHA", async () => {
+Deno.test("Pages build injects its validated source SHA and epoch", async () => {
   const vite = await Deno.readTextFile("page/vite.config.ts");
   const publish = await Deno.readTextFile("scripts/publish-pages-dist.sh");
+  const workflow = await Deno.readTextFile(".github/workflows/static.yml");
   assert(
     vite.includes('process.env.SOURCE_SHA ?? "development"'),
     "Vite source revision lacks the explicit development fallback",
   );
   assert(
-    publish.includes('SOURCE_SHA="$SOURCE_SHA" bun run build:prod'),
-    "Pages publisher does not pass its validated SHA into build:prod",
+    vite.includes('process.env.BUILD_EPOCH ?? "0"'),
+    "Vite build epoch lacks the explicit development fallback",
+  );
+  assert(
+    publish.includes(
+      'SOURCE_SHA="$SOURCE_SHA" BUILD_EPOCH="$BUILD_EPOCH" bun run build:prod',
+    ),
+    "Pages publisher does not pass its SHA and epoch into build:prod",
+  );
+  assert(
+    publish.includes("BUILD_EPOCH=$((PREVIOUS_BUILD_EPOCH + 1))") &&
+      publish.includes("buildEpoch: Number(process.env.BUILD_EPOCH)"),
+    "Pages publisher does not generate and record the next build epoch",
+  );
+  assert(
+    publish.indexOf('REMOTE_DIST_SHA="$(') <
+      publish.indexOf("bun run build:prod") &&
+      publish.includes(
+        '--force-with-lease="refs/heads/pages-dist:${REMOTE_DIST_SHA}"',
+      ),
+    "Pages publisher does not bind its epoch to the push lease base",
+  );
+  assert(
+    workflow.includes("Number.isSafeInteger(metadata.buildEpoch)"),
+    "Pages workflow does not validate the deployment build epoch",
+  );
+});
+
+Deno.test("Pages artifact retains deployment metadata", async () => {
+  const workflow = await Deno.readTextFile(".github/workflows/static.yml");
+  const metadataCheck = workflow.indexOf(
+    "test -f site/.rubrc-pages-build.json",
+  );
+  const artifactUpload = workflow.indexOf(
+    "uses: actions/upload-pages-artifact",
+  );
+  assert(
+    !workflow.includes("rm -f site/.rubrc-pages-build.json"),
+    "Pages workflow deletes deployment metadata",
+  );
+  assert(
+    metadataCheck >= 0 && metadataCheck < artifactUpload,
+    "Pages workflow does not retain metadata through artifact upload",
   );
 });

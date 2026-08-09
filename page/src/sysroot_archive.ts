@@ -23,15 +23,19 @@ type ArchiveOptions = {
 const BASE_URL = "https://oligamiq.github.io/rust_wasm/v0.2.0";
 const RUST_SRC_ASSET = "rust-src.tar.vfsbr";
 declare const __RUBRC_SOURCE_REVISION__: string;
+declare const __RUBRC_BUILD_EPOCH__: string;
 const SOURCE_REVISION =
   typeof __RUBRC_SOURCE_REVISION__ === "undefined"
     ? "development"
     : __RUBRC_SOURCE_REVISION__;
+const BUILD_EPOCH =
+  typeof __RUBRC_BUILD_EPOCH__ === "undefined" ? "0" : __RUBRC_BUILD_EPOCH__;
 
 export function sysrootArchiveUrl(
   triple: string,
   pageUrl = typeof location === "undefined" ? undefined : location.href,
   sourceRevision = SOURCE_REVISION,
+  buildEpoch = BUILD_EPOCH,
 ): string {
   if (triple !== "rust-src") return `${BASE_URL}/${triple}.tar.br`;
   const url =
@@ -39,6 +43,7 @@ export function sysrootArchiveUrl(
       ? new URL(`./${RUST_SRC_ASSET}`, "https://development.invalid/")
       : new URL(RUST_SRC_ASSET, pageUrl);
   url.searchParams.set("v", sourceRevision);
+  url.searchParams.set("build", buildEpoch);
   return pageUrl === undefined ? `./${RUST_SRC_ASSET}${url.search}` : url.href;
 }
 
@@ -111,7 +116,9 @@ export async function loadSysrootArchive(
         options.maintainRustSrcCache ??
         ((url) => {
           void pruneRustSrcCacheVariants(url, SOURCE_REVISION, {
-            cacheStorage: "caches" in globalThis ? caches : undefined,
+            get cacheStorage() {
+              return "caches" in globalThis ? globalThis.caches : undefined;
+            },
             fetch: (input, init) => fetch(input, init),
             reportError: (error) =>
               console.warn("Failed to maintain rust-src cache", error),
@@ -134,6 +141,9 @@ export async function loadSysrootArchive(
         }, timeoutMs);
       }),
     ]);
+  } catch (error) {
+    controller.abort(error);
+    throw error;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
