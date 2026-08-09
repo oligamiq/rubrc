@@ -68,10 +68,11 @@ component itself.
 The change is test-first:
 
 1. Extend `page/src/lsp_start_gate_test.ts` to require an injected App starter,
-   reject App-local and index-level static `rust_lsp_client` imports, require
-   the index callback's dynamic import, and require all four Vite dedupe keys.
-   The source contract checks those boundaries without fixing quote style,
-   inline type spelling, or whether App props are destructured.
+   reject every App-local `rust_lsp_client` import, reject index-level static
+   imports including side-effect imports, require the index callback's dynamic
+   import, and require all four Vite dedupe keys. The source contract checks
+   those boundaries without fixing quote style, inline type spelling, or
+   whether App props are destructured.
 2. Extend `scripts/lsp_browser_diagnostics_test.mjs` to inspect built JavaScript
    assets before browser launch and require the default-API error literal in
    exactly one asset file. The current broken bundle has two such assets, so

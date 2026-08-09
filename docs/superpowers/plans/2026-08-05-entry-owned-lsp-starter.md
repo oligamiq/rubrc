@@ -63,22 +63,32 @@ Puppeteer.
   ```ts
   const indexSource = await Deno.readTextFile("page/src/index.tsx");
   const viteSource = await Deno.readTextFile("page/vite.config.ts");
-  const rustLspModuleImport =
-    /from\s*["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']/;
+  const rustLspStaticImport =
+    /(?:\bimport\s*|\bfrom\s*)["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']/;
+  const rustLspDynamicImport =
+    /\bimport\s*\(\s*["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']\s*\)/;
 
   assert(
-    !rustLspModuleImport.test(indexSource),
+    rustLspStaticImport.test('import "./rust_lsp_client";'),
+    "static-import matcher must reject side-effect imports",
+  );
+  assert(
+    rustLspDynamicImport.test('await import("./rust_lsp_client")'),
+    "dynamic-import matcher must detect direct module ownership",
+  );
+
+  assert(
+    !rustLspStaticImport.test(indexSource),
     "index.tsx must not statically import rust_lsp_client",
   );
   assert(
     /startLspClient\s*=/.test(indexSource) &&
-      /await\s+import\s*\(\s*["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']\s*\)/.test(
-        indexSource,
-      ),
+      rustLspDynamicImport.test(indexSource),
     "index.tsx must inject an entry-owned dynamic LSP starter",
   );
   assert(
-    !rustLspModuleImport.test(source),
+    !rustLspStaticImport.test(source) &&
+      !rustLspDynamicImport.test(source),
     "App must not import rust_lsp_client",
   );
   assert(
