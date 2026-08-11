@@ -7,7 +7,9 @@
   "license": "MIT OR Apache-2.0",
   "type": "module",
   "scripts": {
+    "prestart": "bun run --cwd .. rust-src:prepare-dev-asset",
     "start": "vite",
+    "predev": "bun run --cwd .. rust-src:prepare-dev-asset",
     "dev": "vite",
     "build": "vite build",
     "serve": "vite preview",
