@@ -54,9 +54,16 @@ already running requires restarting that server, matching other Vite config
 changes.
 
 After publishing the active sidecar, preparation keeps the active archive plus
-the two newest prior content-addressed archives and removes older variants on a
-best-effort basis. This bounds disk growth while allowing overlapping server
-restart/preparation windows to retain their selected immutable file.
+the two newest prior content-addressed archives and removes older variants,
+ignoring only concurrent `NotFound` races. This bounds disk growth while
+allowing overlapping server restart/preparation windows to retain their
+selected immutable file. Re-preparing the same hash may atomically replace the
+same regular file on POSIX; if the destination already exists, preparation
+validates that it is a regular file rather than assuming `rename` reports
+`AlreadyExists`.
+Preparation also removes abandoned temporary files older than one hour. It
+ignores only concurrent `NotFound` races; permission and other filesystem
+errors remain visible and prevent Vite startup.
 
 ## Cache And Response Validation
 
@@ -71,9 +78,15 @@ and cache deletion boundary.
 - Cache open, match, delete, and put failures remain optional-cache failures and
   never replace the network response.
 - CacheStorage is used only for GET requests. Requests with methods or bodies
-  unsupported by CacheStorage bypass it without cloning their body stream.
+  unsupported by CacheStorage bypass it without cloning their body stream. The
+  effective method includes a `RequestInit.method` override, and accepted GET
+  requests use `new Request(input, init)` as the cache key so the effective
+  request metadata is represented consistently in match, delete, and put.
 - A response clone created for `cache.put` is canceled if the put fails, so its
   unread tee branch cannot stall the response returned to the caller.
+- Invalid cached bodies are canceled before deletion. If the acceptance
+  predicate throws for a cached or network response, that response body is
+  canceled before the same error is rethrown.
 
 The application has one rust-src archive loader. Cache recovery therefore does
 not introduce a global fetch-coalescing layer: doing so would have to reconcile
@@ -99,20 +112,50 @@ payloads never enter CacheStorage or reach `BrotliDecStream`.
 - A non-OK response retains the existing HTTP failure path.
 - Corrupt non-text compressed bytes still reach the decoder and retain its
   detailed Brotli error.
+- Non-OK responses, invalid or missing Content-Type responses, and accepted
+  responses whose Brotli transform cannot initialize cancel their owned body
+  branch before propagating the original error.
+
+## Development HTTP Boundary
+
+The Vite development middleware handles only `GET` and `HEAD` requests for the
+revision-matched rust-src path. Both methods return the same status,
+`Content-Type`, `Content-Length`, and
+`Cache-Control: public, max-age=31536000, immutable`; `HEAD` sends no body.
+Other methods continue through Vite without opening the archive. Client aborts
+before or after headers close the selected file/stream without calling Vite's
+error middleware or producing expected-abort noise. Genuine missing or
+unreadable-file failures before headers still call `next(error)`.
+
+## Browser Acceptance Server
+
+The browser diagnostics command runs its ESM/TypeScript-importing harness with
+Bun rather than Node 22. The harness uses a test-only static server for
+`page/dist` instead of Vite preview. That server provides COOP/COEP, SPA
+fallback, safe root-confined path resolution, only `GET`/`HEAD` serving,
+header-only `HEAD` responses, normal JavaScript/CSS/Wasm/HTML types, and
+`application/octet-stream` specifically for `.vfsbr`. Production Vite config
+and deployment behavior remain unchanged while strict compressed MIME is
+exercised in acceptance.
 
 ## Test Strategy
 
 1. Add cache tests proving an invalid hit is deleted and replaced by a valid
    network response, and that invalid network HTML/JSON is not cached.
-2. Add compressed-stream tests proving HTML and JSON are rejected before body
-   decompression and acceptable binary/unspecified content types remain valid.
-3. Add script contracts requiring `predev` and `prestart`, the development
-   output/sidecar paths, content-hash Vite identity, middleware query check, and
-   the Git ignore rule.
+2. Add compressed-stream tests proving HTML, JSON, malformed, and missing
+   Content-Type responses are canceled and rejected before body decompression,
+   while the three accepted binary types remain valid.
+3. Add script tests requiring `predev` and `prestart`, exact retention and stale
+   temporary pruning, `NotFound`-only race handling, regular-file destination
+   validation, content-hash Vite identity, GET/HEAD middleware behavior, and the
+   Git ignore rule.
 4. Run the development preparation command, start Vite dev, and verify the
    revisioned rust-src URL returns `application/octet-stream` bytes that native
    Brotli decompression accepts.
-5. Re-run focused cache/archive tests and exact browser diagnostics acceptance.
+5. Directly test the root-confined `page/dist` static server's methods, SPA
+   fallback, isolation headers, and MIME map, then run exact browser diagnostics
+   acceptance through that server under Bun.
+6. Re-run focused cache/archive tests and exact browser diagnostics acceptance.
 
 ## Rejected Alternatives
 
