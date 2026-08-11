@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { open, readFile } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
@@ -74,6 +75,7 @@ async function serveDevelopmentRustSrcAsset(
     response.statusCode = 409;
     response.setHeader("Content-Type", "text/plain; charset=utf-8");
     const message = `rust-src development asset revision mismatch; expected ${asset.sha256}\n`;
+    response.setHeader("Content-Length", String(Buffer.byteLength(message)));
     response.end(request.method === "HEAD" ? undefined : message);
     return;
   }

@@ -274,6 +274,9 @@ Deno.test("Vite development identity and middleware are hash-bound", async () =>
       vite.includes('requestUrl.searchParams.get("v") !== asset.sha256') &&
       vite.includes("response.statusCode = 409") &&
       vite.includes(
+        'response.setHeader("Content-Length", String(Buffer.byteLength(message)))',
+      ) &&
+      vite.includes(
         'response.setHeader("Content-Type", "application/octet-stream")',
       ) &&
       vite.includes(

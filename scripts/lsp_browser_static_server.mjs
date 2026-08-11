@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { open, realpath, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -73,38 +73,59 @@ export function resolveStaticPath(rootDirectory, pathname) {
   return candidate;
 }
 
-async function regularFile(path) {
+async function safeRegularFile(canonicalRoot, path) {
+  let canonicalPath;
   try {
-    const fileStat = await stat(path);
-    return fileStat.isFile() ? fileStat : null;
+    canonicalPath = await realpath(path);
   } catch (error) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+  if (!canonicalPath.startsWith(canonicalRoot + sep) && canonicalPath !== canonicalRoot) {
+    return null;
+  }
+  let handle;
+  try {
+    handle = await open(canonicalPath, "r");
+    const fileStat = await handle.stat();
+    if (!fileStat.isFile()) {
+      await handle.close();
+      return null;
+    }
+    return { handle, fileStat, canonicalPath };
+  } catch (error) {
+    if (handle) await handle.close().catch(() => {});
     if (isMissing(error)) return null;
     throw error;
   }
 }
 
-async function serveFile(request, response, path, fileStat) {
-  response.statusCode = 200;
-  response.setHeader(
-    "Content-Type",
-    CONTENT_TYPES.get(extname(path).toLowerCase()) ??
-      "application/octet-stream",
-  );
-  response.setHeader("Content-Length", String(fileStat.size));
-  if (request.method === "HEAD") {
-    response.end();
-    return;
-  }
-
+async function serveFile(request, response, path, handle, fileStat) {
   try {
-    await pipeline(createReadStream(path), response);
-  } catch (error) {
-    if (isClientAbort(error, request, response)) return;
-    if (response.headersSent) {
-      response.destroy(error instanceof Error ? error : undefined);
+    response.statusCode = 200;
+    response.setHeader(
+      "Content-Type",
+      CONTENT_TYPES.get(extname(path).toLowerCase()) ??
+        "application/octet-stream",
+    );
+    response.setHeader("Content-Length", String(fileStat.size));
+    if (request.method === "HEAD") {
+      response.end();
       return;
     }
-    throw error;
+
+    try {
+      await pipeline(handle.createReadStream(), response);
+    } catch (error) {
+      if (isClientAbort(error, request, response)) return;
+      if (response.headersSent) {
+        response.destroy(error instanceof Error ? error : undefined);
+        return;
+      }
+      throw error;
+    }
+  } finally {
+    await handle.close().catch(() => {});
   }
 }
 
@@ -136,20 +157,37 @@ async function handleRequest(rootDirectory, request, response) {
     return;
   }
 
-  const requestedStat = await regularFile(requestedPath);
-  if (requestedStat !== null) {
-    await serveFile(request, response, requestedPath, requestedStat);
+  let canonicalRoot;
+  try {
+    canonicalRoot = await realpath(rootDirectory);
+  } catch (error) {
+    response.statusCode = 500;
+    endResponse(request, response, "Internal Server Error\n");
     return;
   }
 
-  const fallbackPath = resolve(rootDirectory, "index.html");
-  const fallbackStat = await regularFile(fallbackPath);
-  if (fallbackStat === null) {
+  const requestedSafe = await safeRegularFile(canonicalRoot, requestedPath);
+  if (requestedSafe !== null) {
+    await serveFile(request, response, requestedPath, requestedSafe.handle, requestedSafe.fileStat);
+    return;
+  }
+
+  const accept = request.headers.accept ?? "";
+  const ext = extname(pathname).toLowerCase();
+  if (!accept.includes("text/html") || (ext !== "" && ext !== ".html")) {
     response.statusCode = 404;
     endResponse(request, response, "Not Found\n");
     return;
   }
-  await serveFile(request, response, fallbackPath, fallbackStat);
+
+  const fallbackPath = resolve(rootDirectory, "index.html");
+  const fallbackSafe = await safeRegularFile(canonicalRoot, fallbackPath);
+  if (fallbackSafe === null) {
+    response.statusCode = 404;
+    endResponse(request, response, "Not Found\n");
+    return;
+  }
+  await serveFile(request, response, fallbackPath, fallbackSafe.handle, fallbackSafe.fileStat);
 }
 
 export function createBrowserStaticServer(rootDirectory = DEFAULT_ROOT) {
@@ -162,8 +200,13 @@ export function createBrowserStaticServer(rootDirectory = DEFAULT_ROOT) {
         response.destroy(error instanceof Error ? error : undefined);
         return;
       }
+      response.removeHeader("Content-Length");
+      response.removeHeader("Content-Type");
       response.statusCode = 500;
-      endResponse(request, response, "Internal Server Error\n");
+      response.setHeader("Content-Type", "text/plain; charset=utf-8");
+      const body = "Internal Server Error\n";
+      response.setHeader("Content-Length", String(body.length));
+      endResponse(request, response, body);
     });
   });
 }

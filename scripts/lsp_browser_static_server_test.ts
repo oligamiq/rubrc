@@ -109,6 +109,109 @@ Deno.test("browser static path resolution rejects traversal", () => {
   }
 });
 
+Deno.test("browser static server prevents real-filesystem symlink escapes", async () => {
+  const directory = await Deno.makeTempDir();
+  const root = `${directory}/root`;
+  const outside = `${directory}/outside`;
+  await Deno.mkdir(root);
+  await Deno.writeTextFile(outside, "secret");
+  await Deno.symlink(outside, `${root}/symlink`);
+
+  const server = await startBrowserStaticServer({
+    rootDirectory: root,
+    hostname: "127.0.0.1",
+    port: 0,
+  });
+
+  try {
+    const address = server.address();
+    assert(
+      address !== null && typeof address === "object",
+      "server has no TCP address",
+    );
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const response = await fetch(`${base}/symlink`);
+    await response.body?.cancel();
+    assert(response.status === 400 || response.status === 404, `Symlink escaped with status ${response.status}`);
+  } finally {
+    await closeBrowserStaticServer(server);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("browser static server handles pre-header open/stream failure without partial 200", async () => {
+  const directory = await Deno.makeTempDir();
+  const file = `${directory}/unreadable.txt`;
+  await Deno.writeTextFile(file, "test");
+  await Deno.chmod(file, 0o000);
+
+  const server = await startBrowserStaticServer({
+    rootDirectory: directory,
+    hostname: "127.0.0.1",
+    port: 0,
+  });
+
+  try {
+    const address = server.address();
+    assert(
+      address !== null && typeof address === "object",
+      "server has no TCP address",
+    );
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const response = await fetch(`${base}/unreadable.txt`);
+    await response.body?.cancel();
+    assert(response.status === 500, `Expected 500, got ${response.status}`);
+    assert(
+      response.headers.get("content-type") === "text/plain" || response.headers.get("content-type") === "text/plain; charset=utf-8",
+      `Outer 500 omitted text/plain Content-Type, got ${response.headers.get("content-type")}`
+    );
+    assert(response.headers.get("content-length") !== "4", "Outer 500 leaked stale Content-Length");
+  } finally {
+    await Deno.chmod(file, 0o644); // Restore to delete
+    await closeBrowserStaticServer(server);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("browser static server SPA fallback is navigation/HTML-only", async () => {
+  const directory = await Deno.makeTempDir();
+  await Deno.writeTextFile(`${directory}/index.html`, "<main>rubrc</main>");
+
+  const server = await startBrowserStaticServer({
+    rootDirectory: directory,
+    hostname: "127.0.0.1",
+    port: 0,
+  });
+
+  try {
+    const address = server.address();
+    assert(
+      address !== null && typeof address === "object",
+      "server has no TCP address",
+    );
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const htmlReq = await fetch(`${base}/deep/client/route`, { headers: { accept: "text/html" }});
+    assert(htmlReq.status === 200, "Accept: text/html missing route did not return 200");
+    assert(htmlReq.headers.get("content-type") === "text/html; charset=utf-8", "SPA fallback omitted text/html Content-Type");
+    await htmlReq.body?.cancel();
+
+    const anyReq = await fetch(`${base}/deep/client/route`, { headers: { accept: "*/*" }});
+    assert(anyReq.status === 404, `Accept: */* missing route did not return 404, got ${anyReq.status}`);
+    await anyReq.body?.cancel();
+
+    const assetReq = await fetch(`${base}/missing-asset.js`, { headers: { accept: "text/html" }});
+    assert(assetReq.status === 404, `Missing asset with text/html Accept did not return 404, got ${assetReq.status}`);
+    await assetReq.body?.cancel();
+  } finally {
+    await closeBrowserStaticServer(server);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+
 Deno.test("browser diagnostics uses the Bun static server without changing Vite preview", async () => {
   const rootPackage = JSON.parse(await Deno.readTextFile("package.json"));
   const harness = await Deno.readTextFile(
