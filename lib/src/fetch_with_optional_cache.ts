@@ -28,7 +28,9 @@ export async function fetchWithOptionalCache(
     reportCacheError,
     acceptResponse = () => true,
   } = dependencies;
-  if (input instanceof Request && input.method !== "GET") {
+  const method =
+    init?.method ?? (input instanceof Request ? input.method : "GET");
+  if (method.toUpperCase() !== "GET") {
     return await fetch(input, init);
   }
   if (!cacheStorage) return await fetch(input, init);
@@ -50,7 +52,10 @@ export async function fetchWithOptionalCache(
   }
 
   if (cachedResponse) {
-    if (acceptResponse(cachedResponse)) return cachedResponse;
+    if (cachedResponse.ok && acceptResponse(cachedResponse)) {
+      return cachedResponse;
+    }
+    await cachedResponse.body?.cancel().catch(() => undefined);
     try {
       await cache.delete(input);
     } catch (error) {

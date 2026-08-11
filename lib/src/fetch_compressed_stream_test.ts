@@ -12,25 +12,44 @@ async function readBytes(
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-Deno.test("invalid MIME types are rejected before body access or decompression", async () => {
+function cancellableResponse(
+  bytes: Uint8Array,
+  init: ResponseInit,
+  onCancel: () => void,
+): Response {
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes);
+      },
+      cancel() {
+        onCancel();
+      },
+    }),
+    init,
+  );
+}
+
+Deno.test("invalid and malformed MIME types cancel before decompression", async () => {
   for (const contentType of [
     "text/html; charset=utf-8",
     "application/json",
     "image/png",
+    "application/octet-stream, text/html",
+    "application/octet-stream; profile=archive, text/html",
+    "application/octet-stream;",
+    "application/octet-stream; charset",
   ]) {
     const url = `https://example.test/rust-src.tar.vfsbr?v=${encodeURIComponent(contentType)}`;
-    let bodyReads = 0;
+    let cancelCalls = 0;
     let decompressCalls = 0;
-    const response = {
-      ok: true,
-      status: 200,
-      statusText: "OK",
-      headers: new Headers({ "content-type": contentType }),
-      get body(): ReadableStream<Uint8Array> {
-        bodyReads += 1;
-        throw new Error("invalid response body was accessed");
+    const response = cancellableResponse(
+      new Uint8Array([1, 2, 3]),
+      { headers: { "content-type": contentType } },
+      () => {
+        cancelCalls += 1;
       },
-    } as Response;
+    );
     let rejection: unknown;
 
     try {
@@ -57,23 +76,76 @@ Deno.test("invalid MIME types are rejected before body access or decompression",
       rejection.message.includes(contentType),
       `${contentType} error omitted the Content-Type`,
     );
-    assert(bodyReads === 0, `${contentType} response body was accessed`);
+    assert(cancelCalls === 1, `${contentType} body was not canceled once`);
     assert(decompressCalls === 0, `${contentType} reached decompression`);
   }
 });
 
-Deno.test("binary Brotli and absent Content-Type responses reach decompression", async () => {
+Deno.test("missing Content-Type is canceled, rejected, and never cached", async () => {
+  const url = "https://example.test/rust-src.tar.vfsbr?v=missing-type";
+  let cancelCalls = 0;
+  let decompressCalls = 0;
+  let putCalls = 0;
+  let rejection: unknown;
+
+  try {
+    await fetchCompressedStream(url, undefined, {
+      cacheStorage: {
+        async open() {
+          return {
+            async match() {
+              return undefined;
+            },
+            async delete() {
+              throw new Error("cache delete must not run after a miss");
+            },
+            async put() {
+              putCalls += 1;
+            },
+          };
+        },
+      },
+      async fetch() {
+        return cancellableResponse(new Uint8Array([1, 2, 3]), {}, () => {
+          cancelCalls += 1;
+        });
+      },
+      reportCacheError(error) {
+        throw error;
+      },
+      async getDecompressStream() {
+        decompressCalls += 1;
+        return new TransformStream<Uint8Array, Uint8Array>();
+      },
+    });
+  } catch (error) {
+    rejection = error;
+  }
+
+  assert(rejection instanceof Error, "missing Content-Type did not reject");
+  assert(
+    rejection.message.includes(url),
+    "missing header error omitted the URL",
+  );
+  assert(
+    rejection.message.includes("Content-Type null"),
+    "missing header error is unclear",
+  );
+  assert(cancelCalls === 1, "missing Content-Type body was not canceled once");
+  assert(decompressCalls === 0, "missing Content-Type reached decompression");
+  assert(putCalls === 0, "missing Content-Type response was cached");
+});
+
+Deno.test("binary Brotli Content-Type responses reach decompression", async () => {
   const expected = new Uint8Array([11, 12, 13]);
   for (const contentType of [
-    undefined,
     "application/octet-stream",
     "application/brotli",
     "application/x-brotli; profile=archive",
     "Application/Octet-Stream; Charset=binary",
   ]) {
     let decompressCalls = 0;
-    const headers = new Headers();
-    if (contentType !== undefined) headers.set("content-type", contentType);
+    const headers = new Headers({ "content-type": contentType });
 
     const stream = await fetchCompressedStream(
       "https://example.test/rust-src.tar.vfsbr?v=accepted",
@@ -102,7 +174,8 @@ Deno.test("binary Brotli and absent Content-Type responses reach decompression",
   }
 });
 
-Deno.test("non-OK responses retain the HTTP failure path", async () => {
+Deno.test("non-OK responses cancel before retaining the HTTP failure path", async () => {
+  let cancelCalls = 0;
   let decompressCalls = 0;
   let rejection: unknown;
   try {
@@ -111,10 +184,16 @@ Deno.test("non-OK responses retain the HTTP failure path", async () => {
       undefined,
       {
         async fetch() {
-          return new Response("missing", {
-            status: 404,
-            headers: { "content-type": "text/html" },
-          });
+          return cancellableResponse(
+            new TextEncoder().encode("missing"),
+            {
+              status: 404,
+              headers: { "content-type": "text/html" },
+            },
+            () => {
+              cancelCalls += 1;
+            },
+          );
         },
         reportCacheError() {},
         async getDecompressStream() {
@@ -132,5 +211,47 @@ Deno.test("non-OK responses retain the HTTP failure path", async () => {
     rejection.message === "Failed to fetch wasm",
     "HTTP error path changed",
   );
+  assert(cancelCalls === 1, "non-OK response body was not canceled once");
   assert(decompressCalls === 0, "non-OK response reached decompression");
+});
+
+Deno.test("a Request signal is preserved when no explicit signal is provided", async () => {
+  const controller = new AbortController();
+  const request = new Request(
+    "https://example.test/rust-src.tar.vfsbr?v=request-signal",
+    { signal: controller.signal },
+  );
+  const requestSignal = request.signal;
+
+  const stream = await fetchCompressedStream(request, undefined, {
+    async fetch(fetchInput, init) {
+      assert(
+        fetchInput === request,
+        "fetch did not receive the original Request",
+      );
+      assert(fetchInput instanceof Request, "fetch input was not a Request");
+      assert(
+        fetchInput.signal === requestSignal,
+        "Request signal identity changed",
+      );
+      assert(
+        init === undefined,
+        "undefined explicit signal created RequestInit",
+      );
+      return new Response(new Uint8Array([4, 5, 6]), {
+        headers: { "content-type": "application/octet-stream" },
+      });
+    },
+    reportCacheError() {},
+    async getDecompressStream() {
+      return new TransformStream<Uint8Array, Uint8Array>();
+    },
+  });
+
+  await readBytes(stream);
+  controller.abort();
+  assert(
+    requestSignal.aborted,
+    "Request signal stopped following its controller",
+  );
 });

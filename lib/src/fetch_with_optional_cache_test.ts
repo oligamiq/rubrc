@@ -94,6 +94,7 @@ Deno.test("cache put rejection preserves the fetched response body", async () =>
   const expected = new Uint8Array([0, 1, 2, 127, 255]);
   const cacheError = new Error("cache failed");
   const reportedErrors: unknown[] = [];
+  let cacheCloneCancelCalls = 0;
   let unhandledRejections = 0;
   const onUnhandledRejection = () => {
     unhandledRejections += 1;
@@ -114,7 +115,14 @@ Deno.test("cache put rejection preserves the fetched response body", async () =>
               async delete() {
                 throw new Error("cache delete must not run after a miss");
               },
-              put() {
+              put(_input, cacheResponse) {
+                const cacheBody = cacheResponse.body;
+                assert(cacheBody !== null, "cached clone had no body");
+                const cancel = cacheBody.cancel.bind(cacheBody);
+                cacheBody.cancel = async (reason) => {
+                  cacheCloneCancelCalls += 1;
+                  await cancel(reason);
+                };
                 return Promise.reject(cacheError);
               },
             };
@@ -134,6 +142,7 @@ Deno.test("cache put rejection preserves the fetched response body", async () =>
 
     assert(reportedErrors.length === 1, "cache error was not reported once");
     assert(reportedErrors[0] === cacheError, "reported the wrong cache error");
+    assert(cacheCloneCancelCalls === 1, "cached clone was not canceled once");
     assert(unhandledRejections === 0, "cache rejection was left unhandled");
   } finally {
     globalThis.removeEventListener("unhandledrejection", onUnhandledRejection);
@@ -177,9 +186,17 @@ Deno.test("cache hit returns the cached response without fetching", async () => 
 
 Deno.test("invalid cache hit is deleted and replaced from the network", async () => {
   const input = "https://example.test/rust-src.tar.vfsbr?v=valid";
-  const cachedResponse = new Response("<!doctype html>", {
-    headers: { "content-type": "text/html" },
-  });
+  let cachedBodyCancelCalls = 0;
+  const cachedResponse = new Response(
+    new ReadableStream({
+      cancel() {
+        cachedBodyCancelCalls += 1;
+      },
+    }),
+    {
+      headers: { "content-type": "text/html" },
+    },
+  );
   const networkBytes = new Uint8Array([1, 2, 3, 4]);
   const networkResponse = new Response(networkBytes, {
     headers: { "content-type": "application/octet-stream" },
@@ -196,6 +213,10 @@ Deno.test("invalid cache hit is deleted and replaced from the network", async ()
             return cachedResponse;
           },
           async delete(deletedInput) {
+            assert(
+              cachedBodyCancelCalls === 1,
+              "invalid cached body was not canceled before deletion",
+            );
             deleted.push(deletedInput);
             return true;
           },
@@ -236,6 +257,68 @@ Deno.test("invalid cache hit is deleted and replaced from the network", async ()
   );
   assert(fetchCalls === 1, "network was not fetched exactly once");
   assert(putCalls === 1, "valid replacement was not cached exactly once");
+  assert(
+    cachedBodyCancelCalls === 1,
+    "invalid cached body cancellation changed",
+  );
+});
+
+Deno.test("non-OK cache hits are deleted and replaced from the network", async () => {
+  const input = "https://example.test/rust-src.tar.vfsbr?v=stale-error";
+  let cachedBodyCancelCalls = 0;
+  const cachedResponse = new Response(
+    new ReadableStream({
+      cancel() {
+        cachedBodyCancelCalls += 1;
+      },
+    }),
+    {
+      status: 404,
+      headers: { "content-type": "application/octet-stream" },
+    },
+  );
+  const networkResponse = new Response(new Uint8Array([1, 2, 3]), {
+    headers: { "content-type": "application/octet-stream" },
+  });
+  let deleteCalls = 0;
+  let fetchCalls = 0;
+
+  const response = await fetchWithOptionalCache(input, undefined, {
+    cacheStorage: {
+      async open() {
+        return {
+          async match() {
+            return cachedResponse;
+          },
+          async delete() {
+            deleteCalls += 1;
+            return true;
+          },
+          async put() {},
+        };
+      },
+    },
+    async fetch() {
+      fetchCalls += 1;
+      return networkResponse;
+    },
+    acceptResponse(candidate) {
+      return (
+        candidate.headers.get("content-type") === "application/octet-stream"
+      );
+    },
+    reportCacheError(error) {
+      throw error;
+    },
+  });
+
+  assert(response === networkResponse, "non-OK cache hit was returned");
+  assert(
+    cachedBodyCancelCalls === 1,
+    "non-OK cached body was not canceled once",
+  );
+  assert(deleteCalls === 1, "non-OK cache hit was not deleted once");
+  assert(fetchCalls === 1, "non-OK cache hit did not recover from the network");
 });
 
 Deno.test("invalid successful network responses are returned but not cached", async () => {
@@ -376,4 +459,60 @@ Deno.test("non-GET Request bodies bypass CacheStorage", async () => {
     fetchedBody === "compressed-request-body",
     "network Request body changed",
   );
+});
+
+Deno.test("non-GET init methods bypass CacheStorage for string and URL inputs", async () => {
+  for (const input of [
+    "https://example.test/string-upload",
+    new URL("https://example.test/url-upload"),
+  ]) {
+    let fetchCalls = 0;
+    const init = { method: "POST", body: "compressed-request-body" };
+
+    await fetchWithOptionalCache(input, init, {
+      cacheStorage: {
+        open() {
+          throw new Error("non-GET init must not open CacheStorage");
+        },
+      },
+      async fetch(fetchInput, fetchInit) {
+        assert(fetchInput === input, "network input identity changed");
+        assert(fetchInit === init, "network init identity changed");
+        fetchCalls += 1;
+        return new Response(new Uint8Array([1]));
+      },
+      reportCacheError(error) {
+        throw error;
+      },
+    });
+
+    assert(fetchCalls === 1, "network fetch did not run exactly once");
+  }
+});
+
+Deno.test("init method overrides a GET Request when bypassing CacheStorage", async () => {
+  const input = new Request("https://example.test/request-upload");
+  const init = { method: "post", body: "overridden-request-body" };
+  let fetchCalls = 0;
+
+  await fetchWithOptionalCache(input, init, {
+    cacheStorage: {
+      open() {
+        throw new Error(
+          "overridden non-GET Request must not open CacheStorage",
+        );
+      },
+    },
+    async fetch(fetchInput, fetchInit) {
+      assert(fetchInput === input, "network Request identity changed");
+      assert(fetchInit === init, "network override identity changed");
+      fetchCalls += 1;
+      return new Response(new Uint8Array([1]));
+    },
+    reportCacheError(error) {
+      throw error;
+    },
+  });
+
+  assert(fetchCalls === 1, "overridden Request was not fetched exactly once");
 });
