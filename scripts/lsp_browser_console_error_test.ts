@@ -8,6 +8,7 @@ function assert(condition: unknown, message: string): asserts condition {
 
 const missingResourceText =
   "Failed to load resource: the server responded with a status of 404 (Not Found)";
+const expectedMetadataUrl = "http://127.0.0.1:4173/.rubrc-pages-build.json";
 
 Deno.test("optional metadata suppression requires its exact valid absolute URL", () => {
   for (const locationUrl of [
@@ -17,29 +18,35 @@ Deno.test("optional metadata suppression requires its exact valid absolute URL",
     "/.rubrc-pages-build.json",
     "pptr:internal",
     "http://127.0.0.1:4173/app.js",
+    "https://example.test/.rubrc-pages-build.json",
+    "http://127.0.0.1:8080/.rubrc-pages-build.json",
     "http://127.0.0.1:4173/.rubrc-pages-build.json?v=1",
     "http://127.0.0.1:4173/.rubrc-pages-build.json#fragment",
   ]) {
     assert(
-      !shouldSuppressOptionalMetadataNotFound(missingResourceText, locationUrl),
+      !shouldSuppressOptionalMetadataNotFound(
+        missingResourceText,
+        locationUrl,
+        expectedMetadataUrl,
+      ),
       `suppressed invalid or unrelated location ${String(locationUrl)}`,
     );
   }
 
-  for (const locationUrl of [
-    "http://127.0.0.1:4173/.rubrc-pages-build.json",
-    "https://example.test/.rubrc-pages-build.json",
-  ]) {
-    assert(
-      shouldSuppressOptionalMetadataNotFound(missingResourceText, locationUrl),
-      `did not suppress exact metadata location ${locationUrl}`,
-    );
-  }
+  assert(
+    shouldSuppressOptionalMetadataNotFound(
+      missingResourceText,
+      expectedMetadataUrl,
+      expectedMetadataUrl,
+    ),
+    `did not suppress exact metadata location ${expectedMetadataUrl}`,
+  );
 
   assert(
     !shouldSuppressOptionalMetadataNotFound(
       "Unrelated browser error",
-      "http://127.0.0.1:4173/.rubrc-pages-build.json",
+      expectedMetadataUrl,
+      expectedMetadataUrl,
     ),
     "suppressed an unrelated error at the metadata URL",
   );

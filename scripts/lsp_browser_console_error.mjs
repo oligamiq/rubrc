@@ -1,25 +1,24 @@
 const OPTIONAL_METADATA_NOT_FOUND_TEXT =
   "Failed to load resource: the server responded with a status of 404 (Not Found)";
 
-export function shouldSuppressOptionalMetadataNotFound(text, locationUrl) {
+export function shouldSuppressOptionalMetadataNotFound(
+  text,
+  locationUrl,
+  expectedMetadataUrl,
+) {
   if (
     text !== OPTIONAL_METADATA_NOT_FOUND_TEXT ||
     typeof locationUrl !== "string" ||
-    locationUrl === ""
+    locationUrl === "" ||
+    typeof expectedMetadataUrl !== "string" ||
+    expectedMetadataUrl === ""
   ) {
     return false;
   }
 
-  let location;
   try {
-    location = new URL(locationUrl);
+    return new URL(locationUrl).href === new URL(expectedMetadataUrl).href;
   } catch {
     return false;
   }
-  return (
-    (location.protocol === "http:" || location.protocol === "https:") &&
-    location.pathname === "/.rubrc-pages-build.json" &&
-    location.search === "" &&
-    location.hash === ""
-  );
 }

@@ -15,6 +15,7 @@ import {
 import { VfsDebugTraceCollector } from "../page/src/vfs_debug_trace.ts";
 
 const url = "http://127.0.0.1:4173";
+const expectedMetadataUrl = new URL("/.rubrc-pages-build.json", url).href;
 const invalidMain = 'fn main() { let value: i32 = "wrong"; }\n';
 const validMain = "fn main() {}\n";
 const invalidSecondary = "pub fn secondary() { let value = ; }\n";
@@ -85,7 +86,11 @@ try {
       !text.startsWith("overly long loop turn took ")
     ) {
       if (
-        !shouldSuppressOptionalMetadataNotFound(text, message.location().url)
+        !shouldSuppressOptionalMetadataNotFound(
+          text,
+          message.location().url,
+          expectedMetadataUrl,
+        )
       ) {
         browserErrors.push(text);
       }

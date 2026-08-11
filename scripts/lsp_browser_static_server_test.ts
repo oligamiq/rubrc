@@ -279,9 +279,12 @@ Deno.test("browser diagnostics uses the Bun static server without changing Vite 
   assert(
     harness.includes('from "./lsp_browser_console_error.mjs"') &&
       harness.includes(
-        "shouldSuppressOptionalMetadataNotFound(text, message.location().url)",
+        'const expectedMetadataUrl = new URL("/.rubrc-pages-build.json", url).href;',
+      ) &&
+      /shouldSuppressOptionalMetadataNotFound\(\s*text,\s*message\.location\(\)\.url,\s*expectedMetadataUrl,\s*\)/.test(
+        harness,
       ),
-    "browser harness does not bind the optional metadata 404 to its URL",
+    "browser harness does not bind the optional metadata 404 to its origin",
   );
   assert(
     vite.includes("preview: { headers: crossOriginIsolationHeaders }") &&
