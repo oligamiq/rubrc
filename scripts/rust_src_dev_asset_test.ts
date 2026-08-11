@@ -93,7 +93,12 @@ Deno.test("development pruning removes only temporary files older than one hour"
       new Date(now - 3_599_999),
     );
 
-    await pruneDevelopmentRustSrcAssets(directory, "a".repeat(64), undefined);
+    await pruneDevelopmentRustSrcAssets(directory, "a".repeat(64), {
+      readDir: (path) => Deno.readDir(path),
+      stat: (path) => Deno.stat(path),
+      remove: (path) => Deno.remove(path),
+      now: () => now,
+    });
 
     let oldExists = true;
     try {

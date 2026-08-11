@@ -81,7 +81,10 @@ async function safeRegularFile(canonicalRoot, path) {
     if (isMissing(error)) return null;
     throw error;
   }
-  if (!canonicalPath.startsWith(canonicalRoot + sep) && canonicalPath !== canonicalRoot) {
+  if (
+    !canonicalPath.startsWith(canonicalRoot + sep) &&
+    canonicalPath !== canonicalRoot
+  ) {
     return null;
   }
   let handle;
@@ -168,7 +171,13 @@ async function handleRequest(rootDirectory, request, response) {
 
   const requestedSafe = await safeRegularFile(canonicalRoot, requestedPath);
   if (requestedSafe !== null) {
-    await serveFile(request, response, requestedPath, requestedSafe.handle, requestedSafe.fileStat);
+    await serveFile(
+      request,
+      response,
+      requestedPath,
+      requestedSafe.handle,
+      requestedSafe.fileStat,
+    );
     return;
   }
 
@@ -187,7 +196,13 @@ async function handleRequest(rootDirectory, request, response) {
     endResponse(request, response, "Not Found\n");
     return;
   }
-  await serveFile(request, response, fallbackPath, fallbackSafe.handle, fallbackSafe.fileStat);
+  await serveFile(
+    request,
+    response,
+    fallbackPath,
+    fallbackSafe.handle,
+    fallbackSafe.fileStat,
+  );
 }
 
 export function createBrowserStaticServer(rootDirectory = DEFAULT_ROOT) {

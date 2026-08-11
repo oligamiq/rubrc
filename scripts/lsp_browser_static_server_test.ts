@@ -58,6 +58,10 @@ Deno.test("browser static server confines paths and serves GET/HEAD with explici
           response.headers.get("cross-origin-opener-policy") === "same-origin",
         `${path} omitted cross-origin isolation`,
       );
+      assert(
+        response.headers.get("cache-control") === null,
+        `${path} unexpectedly enabled caching`,
+      );
       await response.body?.cancel();
     }
 
@@ -69,7 +73,9 @@ Deno.test("browser static server confines paths and serves GET/HEAD with explici
     );
     assert((await head.arrayBuffer()).byteLength === 0, "HEAD returned a body");
 
-    const fallback = await fetch(`${base}/deep/client/route`);
+    const fallback = await fetch(`${base}/deep/client/route`, {
+      headers: { accept: "text/html" },
+    });
     assert(fallback.status === 200, "SPA fallback did not return 200");
     assert(
       fallback.headers.get("content-type") === "text/html; charset=utf-8" &&
@@ -116,6 +122,7 @@ Deno.test("browser static server prevents real-filesystem symlink escapes", asyn
   await Deno.mkdir(root);
   await Deno.writeTextFile(outside, "secret");
   await Deno.symlink(outside, `${root}/symlink`);
+  await Deno.symlink(outside, `${root}/index.html`);
 
   const server = await startBrowserStaticServer({
     rootDirectory: root,
@@ -133,7 +140,22 @@ Deno.test("browser static server prevents real-filesystem symlink escapes", asyn
 
     const response = await fetch(`${base}/symlink`);
     await response.body?.cancel();
-    assert(response.status === 400 || response.status === 404, `Symlink escaped with status ${response.status}`);
+    assert(
+      response.status === 400 || response.status === 404,
+      `Symlink escaped with status ${response.status}`,
+    );
+
+    const fallback = await fetch(`${base}/missing/route`, {
+      headers: { accept: "text/html" },
+    });
+    assert(
+      fallback.status === 404,
+      "symlinked SPA fallback escaped static root",
+    );
+    assert(
+      (await fallback.text()) !== "secret",
+      "symlinked fallback leaked bytes",
+    );
   } finally {
     await closeBrowserStaticServer(server);
     await Deno.remove(directory, { recursive: true });
@@ -161,15 +183,20 @@ Deno.test("browser static server handles pre-header open/stream failure without 
     const base = `http://127.0.0.1:${address.port}`;
 
     const response = await fetch(`${base}/unreadable.txt`);
-    await response.body?.cancel();
+    const body = await response.text();
     assert(response.status === 500, `Expected 500, got ${response.status}`);
     assert(
-      response.headers.get("content-type") === "text/plain" || response.headers.get("content-type") === "text/plain; charset=utf-8",
-      `Outer 500 omitted text/plain Content-Type, got ${response.headers.get("content-type")}`
+      response.headers.get("content-type") === "text/plain; charset=utf-8",
+      `Outer 500 omitted text/plain Content-Type, got ${response.headers.get("content-type")}`,
     );
-    assert(response.headers.get("content-length") !== "4", "Outer 500 leaked stale Content-Length");
+    assert(body === "Internal Server Error\n", "Outer 500 body changed");
+    assert(
+      response.headers.get("content-length") ===
+        String(new TextEncoder().encode(body).byteLength),
+      "Outer 500 retained stale response framing",
+    );
   } finally {
-    await Deno.chmod(file, 0o644); // Restore to delete
+    await Deno.chmod(file, 0o644);
     await closeBrowserStaticServer(server);
     await Deno.remove(directory, { recursive: true });
   }
@@ -193,24 +220,41 @@ Deno.test("browser static server SPA fallback is navigation/HTML-only", async ()
     );
     const base = `http://127.0.0.1:${address.port}`;
 
-    const htmlReq = await fetch(`${base}/deep/client/route`, { headers: { accept: "text/html" }});
-    assert(htmlReq.status === 200, "Accept: text/html missing route did not return 200");
-    assert(htmlReq.headers.get("content-type") === "text/html; charset=utf-8", "SPA fallback omitted text/html Content-Type");
+    const htmlReq = await fetch(`${base}/deep/client/route`, {
+      headers: { accept: "text/html" },
+    });
+    assert(
+      htmlReq.status === 200,
+      "Accept: text/html missing route did not return 200",
+    );
+    assert(
+      htmlReq.headers.get("content-type") === "text/html; charset=utf-8",
+      "SPA fallback omitted text/html Content-Type",
+    );
     await htmlReq.body?.cancel();
 
-    const anyReq = await fetch(`${base}/deep/client/route`, { headers: { accept: "*/*" }});
-    assert(anyReq.status === 404, `Accept: */* missing route did not return 404, got ${anyReq.status}`);
+    const anyReq = await fetch(`${base}/deep/client/route`, {
+      headers: { accept: "*/*" },
+    });
+    assert(
+      anyReq.status === 404,
+      `Accept: */* missing route did not return 404, got ${anyReq.status}`,
+    );
     await anyReq.body?.cancel();
 
-    const assetReq = await fetch(`${base}/missing-asset.js`, { headers: { accept: "text/html" }});
-    assert(assetReq.status === 404, `Missing asset with text/html Accept did not return 404, got ${assetReq.status}`);
+    const assetReq = await fetch(`${base}/missing-asset.js`, {
+      headers: { accept: "text/html" },
+    });
+    assert(
+      assetReq.status === 404,
+      `Missing asset with text/html Accept did not return 404, got ${assetReq.status}`,
+    );
     await assetReq.body?.cancel();
   } finally {
     await closeBrowserStaticServer(server);
     await Deno.remove(directory, { recursive: true });
   }
 });
-
 
 Deno.test("browser diagnostics uses the Bun static server without changing Vite preview", async () => {
   const rootPackage = JSON.parse(await Deno.readTextFile("package.json"));
@@ -231,6 +275,12 @@ Deno.test("browser diagnostics uses the Bun static server without changing Vite 
       !harness.includes('from "node:child_process"') &&
       !harness.includes('"serve"'),
     "browser harness still owns a Vite preview child",
+  );
+  assert(
+    harness.includes("message.location().url") &&
+      harness.includes('"/.rubrc-pages-build.json"') &&
+      !harness.includes("optionalMetadataNotFoundResponses"),
+    "browser harness does not bind the optional metadata 404 to its URL",
   );
   assert(
     vite.includes("preview: { headers: crossOriginIsolationHeaders }") &&

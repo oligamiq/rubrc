@@ -83,7 +83,15 @@ try {
       message.type() === "error" &&
       !text.startsWith("overly long loop turn took ")
     ) {
-      browserErrors.push(text);
+      const locationUrl = message.location().url;
+      const pathname = locationUrl === "" ? "" : new URL(locationUrl).pathname;
+      if (
+        text !==
+          "Failed to load resource: the server responded with a status of 404 (Not Found)" ||
+        pathname !== "/.rubrc-pages-build.json"
+      ) {
+        browserErrors.push(text);
+      }
     }
   });
   page.on("requestfailed", (request) => {
