@@ -1,6 +1,9 @@
 import type { VfsReadyResult } from "./vfs_readiness.ts";
 
-export type DisposableLspSession = { dispose(): Promise<void> };
+export type DisposableLspSession = {
+  flush(): Promise<void>;
+  dispose(): Promise<void>;
+};
 
 export class LspStartGate<TMonaco> {
   private monaco: TMonaco | undefined;
@@ -31,6 +34,35 @@ export class LspStartGate<TMonaco> {
 
   started(): Promise<void> | undefined {
     return this.startPromise?.then(() => undefined);
+  }
+
+  async flush(): Promise<void> {
+    if (this.disposed) throw this.abortController.signal.reason;
+    let session: DisposableLspSession | undefined;
+    try {
+      session = await this.startPromise;
+    } catch (error) {
+      if (this.abortController.signal.aborted) {
+        throw this.abortController.signal.reason;
+      }
+      return;
+    }
+    if (this.disposed) throw this.abortController.signal.reason;
+    if (session) {
+      const signal = this.abortController.signal;
+      const onAbort = () => rejectCancellation(signal.reason);
+      let rejectCancellation!: (reason: unknown) => void;
+      const cancellation = new Promise<never>((_resolve, reject) => {
+        rejectCancellation = reject;
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+      try {
+        await Promise.race([session.flush(), cancellation]);
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
+    }
+    if (this.disposed) throw this.abortController.signal.reason;
   }
 
   dispose(): Promise<void> {

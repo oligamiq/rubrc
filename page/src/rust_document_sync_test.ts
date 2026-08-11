@@ -146,6 +146,133 @@ Deno.test("didChange forwards immediately and debounces only VFS", async () => {
   );
 });
 
+Deno.test("flush writes a pending debounce before the run callback", async () => {
+  const order: string[] = [];
+  const scheduler = new FakeScheduler();
+  const sync = new RustDocumentSync(
+    async () => {
+      order.push("write");
+    },
+    { scheduler },
+  );
+  const changed = document("file:///src/main.rs", "fn main() {}", 2);
+  await sync.middleware.didChange!(
+    { document: changed, contentChanges: [] } as never,
+    async () => {},
+  );
+
+  await sync.flush();
+  order.push("run");
+
+  assert(
+    order.join(",") === "write,run",
+    `pending write did not precede run: ${order}`,
+  );
+});
+
+Deno.test("flush waits for an in-flight write before the run callback", async () => {
+  const order: string[] = [];
+  const scheduler = new FakeScheduler();
+  let completeWrite!: () => void;
+  const writeCompletion = new Promise<void>((resolve) => {
+    completeWrite = resolve;
+  });
+  const sync = new RustDocumentSync(
+    async () => {
+      order.push("write-start");
+      await writeCompletion;
+      order.push("write-complete");
+    },
+    { scheduler },
+  );
+  const changed = document("file:///src/main.rs", "fn main() {}", 2);
+  await sync.middleware.didChange!(
+    { document: changed, contentChanges: [] } as never,
+    async () => {},
+  );
+  scheduler.runAll();
+  await Promise.resolve();
+
+  const run = sync.flush().then(() => order.push("run"));
+  await Promise.resolve();
+  assert(!order.includes("run"), `run started during VFS write: ${order}`);
+
+  completeWrite();
+  await run;
+  assert(
+    order.join(",") === "write-start,write-complete,run",
+    `in-flight write did not precede run: ${order}`,
+  );
+});
+
+Deno.test("failed workspace flush suppresses the run callback", async () => {
+  const original = new Error("write failed");
+  const scheduler = new FakeScheduler();
+  const sync = new RustDocumentSync(
+    async () => {
+      throw original;
+    },
+    { scheduler, logger: () => {} },
+  );
+  const changed = document("file:///src/main.rs", "fn main() {}", 2);
+  await sync.middleware.didChange!(
+    { document: changed, contentChanges: [] } as never,
+    async () => {},
+  );
+
+  let caught: unknown;
+  let ran = false;
+  await sync
+    .flush()
+    .then(() => {
+      ran = true;
+    })
+    .catch((error) => {
+      caught = error;
+    });
+
+  assert(caught === original, "workspace flush replaced the writer failure");
+  assert(!ran, "run continued after workspace flush failure");
+});
+
+Deno.test("a later successful write clears the workspace flush failure", async () => {
+  let shouldFail = true;
+  let writes = 0;
+  const scheduler = new FakeScheduler();
+  const sync = new RustDocumentSync(
+    async () => {
+      writes++;
+      if (shouldFail) throw new Error("write failed");
+    },
+    { scheduler, logger: () => {} },
+  );
+  const next = async () => {};
+  await sync.middleware.didChange!(
+    {
+      document: document("file:///src/main.rs", "fn main() {}", 2),
+      contentChanges: [],
+    } as never,
+    next,
+  );
+  let firstFlushRejected = false;
+  await sync.flush().catch(() => {
+    firstFlushRejected = true;
+  });
+  assert(firstFlushRejected, "initial workspace flush did not reject");
+
+  shouldFail = false;
+  await sync.middleware.didChange!(
+    {
+      document: document("file:///src/main.rs", "fn main() { ok(); }", 3),
+      contentChanges: [],
+    } as never,
+    next,
+  );
+  await sync.flush();
+
+  assert(writes === 2, `recovery write count was ${writes}`);
+});
+
 Deno.test("different Rust file URIs retain independent snapshots", async () => {
   const writes: string[] = [];
   const scheduler = new FakeScheduler();
@@ -238,6 +365,7 @@ Deno.test("writer failure is logged and does not suppress LSP continuation", asy
   await sync.middleware.didClose!(opened, async () => {
     calls.push("close");
   });
+  await sync.dispose();
   assert(
     calls.join(",") === "open,change,close",
     `suppressed continuation: ${calls}`,

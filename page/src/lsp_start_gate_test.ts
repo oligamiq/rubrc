@@ -11,6 +11,7 @@ Deno.test("gate starts exactly once after both readiness states", async () => {
     const gate = new LspStartGate<object>(async () => {
       starts++;
       return {
+        async flush() {},
         async dispose() {
           disposals++;
         },
@@ -32,11 +33,52 @@ Deno.test("gate starts exactly once after both readiness states", async () => {
   }
 });
 
+Deno.test("gate waits for session startup and flush before the run callback", async () => {
+  const order: string[] = [];
+  let resolveStart!: (session: {
+    flush(): Promise<void>;
+    dispose(): Promise<void>;
+  }) => void;
+  let completeFlush!: () => void;
+  const flushCompletion = new Promise<void>((resolve) => {
+    completeFlush = resolve;
+  });
+  const gate = new LspStartGate<object>(
+    () =>
+      new Promise((resolve) => {
+        resolveStart = resolve;
+      }),
+  );
+  gate.setMonaco({});
+  gate.setVfsResult({ ok: true });
+
+  const run = gate.flush().then(() => order.push("run"));
+  resolveStart({
+    async flush() {
+      order.push("flush-start");
+      await flushCompletion;
+      order.push("flush-complete");
+    },
+    async dispose() {},
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert(!order.includes("run"), `run started during session flush: ${order}`);
+
+  completeFlush();
+  await run;
+  assert(
+    order.join(",") === "flush-start,flush-complete,run",
+    `session flush did not precede run: ${order}`,
+  );
+  await gate.dispose();
+});
+
 Deno.test("gate never starts after disposal", async () => {
   let starts = 0;
   const gate = new LspStartGate<object>(async () => {
     starts++;
-    return { async dispose() {} };
+    return { async flush() {}, async dispose() {} };
   });
   await gate.dispose();
   gate.setMonaco({});
@@ -59,11 +101,113 @@ Deno.test("failed startup is not retried within the same mount", async () => {
   assert(starts === 1, `failed startup retried ${starts} times`);
 });
 
+Deno.test("flush does not suppress run after failed LSP startup", async () => {
+  const gate = new LspStartGate<object>(async () => {
+    throw new Error("start failed after sync cleanup");
+  });
+  gate.setMonaco({});
+  gate.setVfsResult({ ok: true });
+
+  let ran = false;
+  await gate.flush().then(() => {
+    ran = true;
+  });
+
+  assert(ran, "failed LSP startup suppressed run");
+});
+
+Deno.test("flush rejects after gate disposal before or during startup", async () => {
+  const beforeStart = new LspStartGate<object>(async () => ({
+    async flush() {},
+    async dispose() {},
+  }));
+  await beforeStart.dispose();
+  let beforeStartError: unknown;
+  await beforeStart.flush().catch((error) => {
+    beforeStartError = error;
+  });
+  assert(
+    beforeStartError instanceof DOMException &&
+      beforeStartError.name === "AbortError",
+    "flush resolved after disposal before startup",
+  );
+
+  let startupSignal!: AbortSignal;
+  const duringStart = new LspStartGate<object>((_monaco, signal) => {
+    startupSignal = signal;
+    return new Promise<never>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      });
+    });
+  });
+  duringStart.setMonaco({});
+  duringStart.setVfsResult({ ok: true });
+  let ran = false;
+  let duringStartError: unknown;
+  const run = duringStart
+    .flush()
+    .then(() => {
+      ran = true;
+    })
+    .catch((error) => {
+      duringStartError = error;
+    });
+
+  await duringStart.dispose();
+  await run;
+  assert(
+    duringStartError === startupSignal.reason,
+    "cancellation was replaced",
+  );
+  assert(!ran, "run continued after gate disposal during startup");
+});
+
+Deno.test("gate disposal promptly cancels an in-flight session flush", async () => {
+  let startupSignal!: AbortSignal;
+  let completeFlush!: () => void;
+  const flushCompletion = new Promise<void>((resolve) => {
+    completeFlush = resolve;
+  });
+  const gate = new LspStartGate<object>(async (_monaco, signal) => {
+    startupSignal = signal;
+    return {
+      async flush() {
+        await flushCompletion;
+      },
+      async dispose() {},
+    };
+  });
+  gate.setMonaco({});
+  gate.setVfsResult({ ok: true });
+  await gate.started();
+
+  let settled = false;
+  let caught: unknown;
+  const barrier = gate
+    .flush()
+    .catch((error) => {
+      caught = error;
+    })
+    .finally(() => {
+      settled = true;
+    });
+  await Promise.resolve();
+  await gate.dispose();
+  await Promise.resolve();
+  const settledAfterDisposal = settled;
+  completeFlush();
+  await barrier;
+
+  assert(settledAfterDisposal, "session flush ignored gate disposal");
+  assert(caught === startupSignal.reason, "session cancellation was replaced");
+});
+
 Deno.test("failed VFS readiness settles without starting LSP", () => {
   let starts = 0;
   const gate = new LspStartGate<object>(async () => {
     starts++;
-    return { async dispose() {} };
+    return { async flush() {}, async dispose() {} };
   });
   gate.setMonaco({});
   gate.setVfsResult({ ok: false, error: "rust-src failed" });
@@ -93,7 +237,10 @@ Deno.test("gate disposal aborts and settles an in-progress starter", async () =>
 });
 
 Deno.test("gate disposal reports rejecting late-session cleanup", async () => {
-  let resolveStart!: (session: { dispose(): Promise<void> }) => void;
+  let resolveStart!: (session: {
+    flush(): Promise<void>;
+    dispose(): Promise<void>;
+  }) => void;
   const cleanupError = new Error("late session cleanup failed");
   const gate = new LspStartGate<object>(
     () =>
@@ -106,6 +253,7 @@ Deno.test("gate disposal reports rejecting late-session cleanup", async () => {
 
   const disposal = gate.dispose();
   resolveStart({
+    async flush() {},
     dispose: async () => {
       throw cleanupError;
     },

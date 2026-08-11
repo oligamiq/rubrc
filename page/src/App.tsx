@@ -404,7 +404,7 @@ const App = (props: {
 
       <div class="flex items-center bg-gray-900 border-t border-gray-700">
         <div class="p-2 text-white">
-          <RunButton triple={triple()} />
+          <RunButton triple={triple()} flush={() => lspGate.flush()} />
         </div>
         <div class="p-2 text-white flex-1 max-w-sm">
           <Select

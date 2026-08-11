@@ -117,6 +117,11 @@ export async function startRustLspClient(
     if (import.meta.env.VITE_RUBRC_LSP_TEST === "1") {
       owner.setTestApiDisposable(exposeSyntaxTreeRequest(client));
     }
+
+    return {
+      flush: () => sync.flush(),
+      dispose: () => owner.dispose(),
+    };
   } catch (error) {
     try {
       createdMainModel?.dispose();
@@ -133,8 +138,4 @@ export async function startRustLspClient(
     }
     throw error;
   }
-
-  return {
-    dispose: () => owner.dispose(),
-  };
 }

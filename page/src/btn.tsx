@@ -1,14 +1,17 @@
 import { compile_and_run, download } from "./compile_and_run";
+import { createRunAfterFlush } from "./run_after_flush";
 
 export const RunButton = (props: {
-  triple: string;
+  triple?: string;
+  flush: () => Promise<void>;
 }) => {
+  const run = createRunAfterFlush(props.flush, compile_and_run, console.error);
   return (
     <button
       type="button"
       onClick={() => {
         console.log("run button clicked");
-        compile_and_run(props.triple);
+        void run(props.triple);
       }}
       class="text-2xl text-green-700"
     >
