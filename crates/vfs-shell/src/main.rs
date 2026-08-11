@@ -16,7 +16,9 @@ use wasi_shell::{
     handle_parallel, CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor,
 };
 
-use sysroot_extraction::{sysroot_meta_has_file, with_sysroot_load_lock, write_sysroot_entry};
+use sysroot_extraction::{
+    sysroot_entry_name_len, sysroot_meta_has_file, with_sysroot_load_lock, write_sysroot_entry,
+};
 
 macro_rules! debug_log {
     ($($arg:tt)*) => {
@@ -375,7 +377,8 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                     ));
                 }
 
-                let mut name_buf = vec![0u8; name_len as usize];
+                let name_len_usize = sysroot_entry_name_len(name_len)?;
+                let mut name_buf = vec![0u8; name_len_usize];
                 unsafe {
                     sysroot_read_file_name(name_buf.as_mut_ptr() as i32, name_len);
                 }

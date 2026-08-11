@@ -3,6 +3,9 @@ use std::sync::Mutex;
 
 static SYSROOT_LOAD_LOCK: Mutex<()> = Mutex::new(());
 
+// Rust archive paths are far shorter than 4 KiB; cap host-controlled allocation accordingly.
+const MAX_SYSROOT_ENTRY_NAME_LEN: usize = 4096;
+
 pub(crate) fn with_sysroot_load_lock<T>(
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
@@ -21,6 +24,17 @@ pub(crate) fn sysroot_meta_has_file(status: i32, triple: &str) -> Result<bool, S
             "invalid sysroot archive status {status} for '{triple}'"
         )),
     }
+}
+
+pub(crate) fn sysroot_entry_name_len(name_len: i32) -> Result<usize, String> {
+    let name_len = usize::try_from(name_len)
+        .map_err(|_| format!("invalid sysroot archive entry name length: {name_len}"))?;
+    if name_len > MAX_SYSROOT_ENTRY_NAME_LEN {
+        return Err(format!(
+            "sysroot archive entry name length {name_len} exceeds maximum {MAX_SYSROOT_ENTRY_NAME_LEN} bytes"
+        ));
+    }
+    Ok(name_len)
 }
 
 pub(crate) fn sysroot_entry_path(base_dir: &Path, name: &str) -> Result<PathBuf, String> {
@@ -69,7 +83,8 @@ pub(crate) fn write_sysroot_entry(
 #[cfg(test)]
 mod tests {
     use super::{
-        sysroot_entry_path, sysroot_meta_has_file, with_sysroot_load_lock, write_sysroot_entry,
+        sysroot_entry_name_len, sysroot_entry_path, sysroot_meta_has_file, with_sysroot_load_lock,
+        write_sysroot_entry,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -85,6 +100,18 @@ mod tests {
             std::process::id(),
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ))
+    }
+
+    #[test]
+    fn accepts_maximum_sysroot_entry_name_length() {
+        assert_eq!(sysroot_entry_name_len(4096).unwrap(), 4096);
+    }
+
+    #[test]
+    fn rejects_oversized_sysroot_entry_name_length() {
+        let error = sysroot_entry_name_len(4097).unwrap_err();
+        assert!(error.contains("4097"), "unexpected error: {error}");
+        assert!(error.contains("4096"), "unexpected error: {error}");
     }
 
     #[test]
