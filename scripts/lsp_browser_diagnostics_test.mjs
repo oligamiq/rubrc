@@ -6,6 +6,7 @@ import {
   STARTUP_TIMEOUT_MS,
   waitForDiagnosticsQuiescence,
 } from "./lsp_browser_quiescence.mjs";
+import { shouldSuppressOptionalMetadataNotFound } from "./lsp_browser_console_error.mjs";
 import { safeFailureState } from "./lsp_browser_failure_state.mjs";
 import {
   closeBrowserStaticServer,
@@ -83,12 +84,8 @@ try {
       message.type() === "error" &&
       !text.startsWith("overly long loop turn took ")
     ) {
-      const locationUrl = message.location().url;
-      const pathname = locationUrl === "" ? "" : new URL(locationUrl).pathname;
       if (
-        text !==
-          "Failed to load resource: the server responded with a status of 404 (Not Found)" ||
-        pathname !== "/.rubrc-pages-build.json"
+        !shouldSuppressOptionalMetadataNotFound(text, message.location().url)
       ) {
         browserErrors.push(text);
       }

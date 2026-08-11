@@ -277,9 +277,10 @@ Deno.test("browser diagnostics uses the Bun static server without changing Vite 
     "browser harness still owns a Vite preview child",
   );
   assert(
-    harness.includes("message.location().url") &&
-      harness.includes('"/.rubrc-pages-build.json"') &&
-      !harness.includes("optionalMetadataNotFoundResponses"),
+    harness.includes('from "./lsp_browser_console_error.mjs"') &&
+      harness.includes(
+        "shouldSuppressOptionalMetadataNotFound(text, message.location().url)",
+      ),
     "browser harness does not bind the optional metadata 404 to its URL",
   );
   assert(
