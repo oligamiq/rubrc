@@ -34,6 +34,15 @@ export async function fetchWithOptionalCache(
     return await fetch(input, init);
   }
   if (!cacheStorage) return await fetch(input, init);
+  const cacheInput = new Request(input, init);
+  const responseIsAccepted = async (response: Response): Promise<boolean> => {
+    try {
+      return acceptResponse(response);
+    } catch (error) {
+      await response.body?.cancel().catch(() => undefined);
+      throw error;
+    }
+  };
 
   let cache: CacheBoundary;
   try {
@@ -45,28 +54,28 @@ export async function fetchWithOptionalCache(
 
   let cachedResponse: Response | undefined;
   try {
-    cachedResponse = await cache.match(input);
+    cachedResponse = await cache.match(cacheInput);
   } catch (error) {
     reportCacheError(error);
     return await fetch(input, init);
   }
 
   if (cachedResponse) {
-    if (cachedResponse.ok && acceptResponse(cachedResponse)) {
+    if (cachedResponse.ok && (await responseIsAccepted(cachedResponse))) {
       return cachedResponse;
     }
     await cachedResponse.body?.cancel().catch(() => undefined);
     try {
-      await cache.delete(input);
+      await cache.delete(cacheInput);
     } catch (error) {
       reportCacheError(error);
     }
   }
 
   const response = await fetch(input, init);
-  if (response.ok && acceptResponse(response)) {
+  if (response.ok && (await responseIsAccepted(response))) {
     const cacheResponse = response.clone();
-    void cache.put(input, cacheResponse).catch(async (error) => {
+    void cache.put(cacheInput, cacheResponse).catch(async (error) => {
       await cacheResponse.body?.cancel().catch(() => undefined);
       reportCacheError(error);
     });

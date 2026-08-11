@@ -222,7 +222,7 @@ Deno.test("invalid cache hit is deleted and replaced from the network", async ()
           },
           async put(putInput, putResponse) {
             assert(
-              putInput === input,
+              putInput instanceof Request && putInput.url === input,
               "network response used the wrong cache key",
             );
             assert(
@@ -252,7 +252,9 @@ Deno.test("invalid cache hit is deleted and replaced from the network", async ()
 
   assert(response === networkResponse, "network response identity changed");
   assert(
-    deleted.length === 1 && deleted[0] === input,
+    deleted.length === 1 &&
+      deleted[0] instanceof Request &&
+      deleted[0].url === input,
     "invalid hit was not deleted",
   );
   assert(fetchCalls === 1, "network was not fetched exactly once");
@@ -515,4 +517,208 @@ Deno.test("init method overrides a GET Request when bypassing CacheStorage", asy
   });
 
   assert(fetchCalls === 1, "overridden Request was not fetched exactly once");
+});
+
+Deno.test("a POST Request overridden to GET uses a derived GET cache key", async () => {
+  const input = new Request("https://example.test/request-cache-key", {
+    method: "POST",
+  });
+  const init = { method: "GET" };
+  const cachedResponse = new Response(new Uint8Array([1]));
+
+  const response = await fetchWithOptionalCache(input, init, {
+    cacheStorage: {
+      async open() {
+        return {
+          async match(cacheInput) {
+            assert(
+              cacheInput instanceof Request,
+              "cache key was not a Request",
+            );
+            assert(cacheInput !== input, "cache key reused the POST Request");
+            assert(cacheInput.method === "GET", "cache key method was not GET");
+            assert(cacheInput.url === input.url, "cache key URL changed");
+            return cachedResponse;
+          },
+          async delete() {
+            throw new Error("accepted cache hit must not be deleted");
+          },
+          async put() {
+            throw new Error("accepted cache hit must not be replaced");
+          },
+        };
+      },
+    },
+    async fetch() {
+      throw new Error("accepted cache hit must not fetch the network");
+    },
+    reportCacheError(error) {
+      throw error;
+    },
+  });
+
+  assert(response === cachedResponse, "derived GET cache hit identity changed");
+});
+
+Deno.test("RequestInit metadata is represented in the derived cache key", async () => {
+  const input = "https://example.test/metadata-cache-key";
+  const init: RequestInit = {
+    headers: { "x-rubrc-cache-variant": "strict" },
+    credentials: "include",
+    mode: "cors",
+  };
+  const cachedResponse = new Response(new Uint8Array([2]));
+
+  const response = await fetchWithOptionalCache(input, init, {
+    cacheStorage: {
+      async open() {
+        return {
+          async match(cacheInput) {
+            assert(
+              cacheInput instanceof Request,
+              "cache key was not a Request",
+            );
+            assert(
+              cacheInput.headers.get("x-rubrc-cache-variant") === "strict",
+              "cache key omitted init headers",
+            );
+            assert(
+              cacheInput.credentials === "include",
+              "cache key omitted init credentials",
+            );
+            assert(cacheInput.mode === "cors", "cache key omitted init mode");
+            return cachedResponse;
+          },
+          async delete() {
+            throw new Error("accepted cache hit must not be deleted");
+          },
+          async put() {
+            throw new Error("accepted cache hit must not be replaced");
+          },
+        };
+      },
+    },
+    async fetch() {
+      throw new Error("accepted cache hit must not fetch the network");
+    },
+    reportCacheError(error) {
+      throw error;
+    },
+  });
+
+  assert(response === cachedResponse, "metadata cache hit identity changed");
+});
+
+Deno.test("cached acceptResponse errors cancel the body before rethrowing", async () => {
+  const predicateError = new Error("cached predicate failed");
+  let cancelCalls = 0;
+  let deleteCalls = 0;
+  let fetchCalls = 0;
+  const cachedResponse = new Response(
+    new ReadableStream({
+      cancel() {
+        cancelCalls += 1;
+      },
+    }),
+  );
+  let rejection: unknown;
+
+  try {
+    await fetchWithOptionalCache(
+      "https://example.test/cached-predicate-error",
+      undefined,
+      {
+        cacheStorage: {
+          async open() {
+            return {
+              async match() {
+                return cachedResponse;
+              },
+              async delete() {
+                deleteCalls += 1;
+                return true;
+              },
+              async put() {},
+            };
+          },
+        },
+        async fetch() {
+          fetchCalls += 1;
+          return new Response();
+        },
+        acceptResponse() {
+          throw predicateError;
+        },
+        reportCacheError(error) {
+          throw error;
+        },
+      },
+    );
+  } catch (error) {
+    rejection = error;
+  }
+
+  assert(
+    rejection === predicateError,
+    "cached predicate error identity changed",
+  );
+  assert(cancelCalls === 1, "cached predicate body was not canceled once");
+  assert(deleteCalls === 0, "cached predicate error deleted the cache entry");
+  assert(fetchCalls === 0, "cached predicate error fetched the network");
+});
+
+Deno.test("network acceptResponse errors cancel the body before rethrowing", async () => {
+  const predicateError = new Error("network predicate failed");
+  let cancelCalls = 0;
+  let putCalls = 0;
+  const networkResponse = new Response(
+    new ReadableStream({
+      cancel() {
+        cancelCalls += 1;
+      },
+    }),
+  );
+  let rejection: unknown;
+
+  try {
+    await fetchWithOptionalCache(
+      "https://example.test/network-predicate-error",
+      undefined,
+      {
+        cacheStorage: {
+          async open() {
+            return {
+              async match() {
+                return undefined;
+              },
+              async delete() {
+                throw new Error("cache delete must not run after a miss");
+              },
+              async put() {
+                putCalls += 1;
+              },
+            };
+          },
+        },
+        async fetch() {
+          return networkResponse;
+        },
+        acceptResponse() {
+          throw predicateError;
+        },
+        reportCacheError(error) {
+          throw error;
+        },
+      },
+    );
+  } catch (error) {
+    rejection = error;
+  }
+
+  assert(
+    rejection === predicateError,
+    "network predicate error identity changed",
+  );
+  assert(cancelCalls === 1, "network predicate body was not canceled once");
+  assert(putCalls === 0, "network predicate error cached the response");
 });

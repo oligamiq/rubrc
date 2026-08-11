@@ -128,7 +128,7 @@ Deno.test("missing Content-Type is canceled, rejected, and never cached", async 
     "missing header error omitted the URL",
   );
   assert(
-    rejection.message.includes("Content-Type null"),
+    rejection.message.includes("missing Content-Type"),
     "missing header error is unclear",
   );
   assert(cancelCalls === 1, "missing Content-Type body was not canceled once");
@@ -172,6 +172,42 @@ Deno.test("binary Brotli Content-Type responses reach decompression", async () =
       `${contentType} did not reach decompression once`,
     );
   }
+});
+
+Deno.test("decompressor initialization errors cancel the accepted body", async () => {
+  const initializationError = new Error("decompressor initialization failed");
+  let cancelCalls = 0;
+  let rejection: unknown;
+
+  try {
+    await fetchCompressedStream(
+      "https://example.test/rust-src.tar.vfsbr?v=decompressor-error",
+      undefined,
+      {
+        async fetch() {
+          return cancellableResponse(
+            new Uint8Array([1, 2, 3]),
+            { headers: { "content-type": "application/octet-stream" } },
+            () => {
+              cancelCalls += 1;
+            },
+          );
+        },
+        reportCacheError() {},
+        async getDecompressStream() {
+          throw initializationError;
+        },
+      },
+    );
+  } catch (error) {
+    rejection = error;
+  }
+
+  assert(
+    rejection === initializationError,
+    "decompressor initialization error identity changed",
+  );
+  assert(cancelCalls === 1, "accepted response body was not canceled once");
 });
 
 Deno.test("non-OK responses cancel before retaining the HTTP failure path", async () => {

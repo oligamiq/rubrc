@@ -76,13 +76,24 @@ export async function fetchCompressedStream(
   if (!isAcceptedCompressedResponse(response)) {
     const contentType = response.headers.get("content-type");
     await response.body?.cancel().catch(() => undefined);
+    const reason =
+      contentType === null
+        ? "missing Content-Type"
+        : `unsupported Content-Type ${JSON.stringify(contentType)}`;
     throw new Error(
-      `Invalid compressed asset response for ${requestUrl(url)}: unsupported Content-Type ${JSON.stringify(contentType)}`,
+      `Invalid compressed asset response for ${requestUrl(url)}: ${reason}`,
     );
   }
   if (!response.body) {
     throw new Error("No body in response");
   }
 
-  return response.body.pipeThrough(await dependencies.getDecompressStream());
+  let decompressStream: TransformStream<Uint8Array, Uint8Array>;
+  try {
+    decompressStream = await dependencies.getDecompressStream();
+  } catch (error) {
+    await response.body.cancel().catch(() => undefined);
+    throw error;
+  }
+  return response.body.pipeThrough(decompressStream);
 }
