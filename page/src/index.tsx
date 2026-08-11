@@ -3,8 +3,11 @@ import "./index.css";
 import { render } from "solid-js/web";
 
 import { MonacoVscodeApiWrapper } from "monaco-languageclient/vscodeApiWrapper";
+import { registerWorkspaceFileProvider } from "./workspace_file_provider";
 
 import "@codingame/monaco-vscode-theme-defaults-default-extension";
+
+registerWorkspaceFileProvider();
 
 // @ts-ignore
 if (!window.__MONACO_VSCODE_INITIALIZED__) {
@@ -15,7 +18,7 @@ if (!window.__MONACO_VSCODE_INITIALIZED__) {
     $type: "extended",
     viewsConfig: { $type: "EditorService" },
     userConfiguration: {
-      json: "{\"editor.fontSize\": 14}"
+      json: '{"editor.fontSize": 14}',
     },
     workspaceConfig: {
       workspaceProvider: {
@@ -37,7 +40,9 @@ if (!window.__MONACO_VSCODE_INITIALIZED__) {
 
 const { default: App } = await import("./App");
 const { gen_ctx } = await import("./ctx");
-const { default: MainWorkerPath } = await import("./worker_process/worker?worker&url");
+const { default: MainWorkerPath } = await import(
+  "./worker_process/worker?worker&url"
+);
 const { parser_setup } = await import("./cmd_parser");
 await import("./monaco_worker");
 const { compile_and_run_setup } = await import("./compile_and_run");
@@ -70,6 +75,10 @@ render(
           wasi_ref,
         })
       }
+      startLspClient={async (monaco, signal) => {
+        const { startRustLspClient } = await import("./rust_lsp_client");
+        return startRustLspClient(ctx, monaco, signal);
+      }}
     />
   ),
   // biome-ignore lint/style/noNonNullAssertion: <explanation>

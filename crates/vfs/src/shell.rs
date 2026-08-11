@@ -25,6 +25,7 @@ unsafe extern "C" {
 
     /// Dispatch an event to vfs-shell
     pub fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32);
+    pub fn vfs_shell_rust_src_load_state() -> u32;
 }
 
 thread_local! {

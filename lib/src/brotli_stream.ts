@@ -2,6 +2,7 @@ import init, {
   BrotliDecStream,
   BrotliStreamResultCode,
 } from "brotli-dec-wasm/web"; // Import the default export
+import { fetchCompressedStream } from "./fetch_compressed_stream.ts";
 // @ts-ignore
 import brotli_dec_wasm_bg from "brotli-dec-wasm/web/bg.wasm?wasm&url"; // Import the wasm file
 
@@ -47,29 +48,13 @@ export const get_brotli_decompress_stream = async (): Promise<
 
 export const fetch_compressed_stream = async (
   url: string | URL | globalThis.Request,
-): Promise<ReadableStream<Uint8Array>> => {
-  let response: Response | undefined;
-
-  if ("caches" in globalThis) {
-    const cache = await caches.open("rubrc-assets-v1");
-    response = await cache.match(url);
-
-    if (!response) {
-      response = await fetch(url);
-      if (response.ok) {
-        await cache.put(url, response.clone());
-      }
-    }
-  } else {
-    response = await fetch(url);
-  }
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch wasm");
-  }
-  if (!response.body) {
-    throw new Error("No body in response");
-  }
-
-  return response.body.pipeThrough(await get_brotli_decompress_stream());
-};
+  signal?: AbortSignal,
+): Promise<ReadableStream<Uint8Array>> =>
+  await fetchCompressedStream(url, signal, {
+    cacheStorage: "caches" in globalThis ? caches : undefined,
+    fetch,
+    reportCacheError(error) {
+      console.warn("Failed to cache compressed asset", error);
+    },
+    getDecompressStream: get_brotli_decompress_stream,
+  });

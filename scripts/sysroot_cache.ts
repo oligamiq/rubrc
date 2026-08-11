@@ -37,6 +37,115 @@ const DEFAULT_TRIPLE = "wasm32-wasip1";
 const DEFAULT_CACHE_DIR = ".rubrc-cache/sysroot";
 const DEFAULT_WORKSPACE_SYSROOT = "test_workspace_rustc/sysroot";
 const DEFAULT_BASE_URL = "https://oligamiq.github.io/rust_wasm/v0.2.0";
+const REQUIRED_RUST_SRC_ENTRIES = [
+  "core/src/lib.rs",
+  "alloc/src/lib.rs",
+  "std/src/lib.rs",
+] as const;
+
+export function rustSrcToolchainIdentity(
+  rustcVerboseVersion: string,
+  sysroot: string,
+): string {
+  return JSON.stringify({
+    schema: 1,
+    rustc: rustcVerboseVersion.trim(),
+    sysroot,
+  });
+}
+
+export function rustSrcCacheMatchesIdentity(
+  expected: string,
+  cached: string,
+): boolean {
+  return expected === cached.trim();
+}
+
+async function archiveSha256(archive: Uint8Array): Promise<string> {
+  const bytes = new Uint8Array(archive.byteLength);
+  bytes.set(archive);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+export async function createRustSrcCacheMetadata(
+  toolchainIdentity: string,
+  archive: Uint8Array,
+): Promise<string> {
+  return JSON.stringify({
+    schema: 2,
+    toolchainIdentity,
+    archiveSha256: await archiveSha256(archive),
+  });
+}
+
+export async function rustSrcCacheMatchesMetadata(
+  expectedToolchainIdentity: string,
+  archive: Uint8Array,
+  cachedMetadata: string,
+): Promise<boolean> {
+  try {
+    const metadata = JSON.parse(cachedMetadata) as Record<string, unknown>;
+    return metadata.schema === 2 &&
+      metadata.toolchainIdentity === expectedToolchainIdentity &&
+      metadata.archiveSha256 === await archiveSha256(archive);
+  } catch {
+    return false;
+  }
+}
+
+export function deterministicRustSrcTarArgs(libraryPath: string): string[] {
+  return [
+    "--create",
+    "--file",
+    "-",
+    "--sort=name",
+    "--mtime=@0",
+    "--owner=0",
+    "--group=0",
+    "--numeric-owner",
+    "--mode=u+rwX,go+rX,go-w",
+    "--pax-option=delete=atime,delete=ctime",
+    "--directory",
+    libraryPath,
+    ".",
+  ];
+}
+
+type RustSrcArchiveEntryLister = (
+  archive: Uint8Array,
+) => Promise<readonly string[]>;
+
+async function listRustSrcArchiveEntries(
+  archive: Uint8Array,
+): Promise<readonly string[]> {
+  const buffer = new ArrayBuffer(archive.byteLength);
+  new Uint8Array(buffer).set(archive);
+  const stream = new Blob([buffer]).stream().pipeThrough(
+    new DecompressionStream("brotli"),
+  );
+  const entries: string[] = [];
+  await parseTar(stream, (file) => entries.push(file.name));
+  return entries;
+}
+
+export async function validateRustSrcArchive(
+  archive: Uint8Array,
+  listEntries: RustSrcArchiveEntryLister = listRustSrcArchiveEntries,
+): Promise<boolean> {
+  try {
+    const normalized = new Set<string>();
+    for (const entry of await listEntries(archive)) {
+      const name = validateTarEntryName(entry);
+      if (name !== null) normalized.add(name);
+    }
+    return REQUIRED_RUST_SRC_ENTRIES.every((entry) => normalized.has(entry));
+  } catch {
+    return false;
+  }
+}
 
 export function sysrootCachePaths(
   options: Partial<Omit<SysrootCacheOptions, "deps">> = {},
@@ -54,6 +163,44 @@ export function sysrootCachePaths(
   };
 }
 
+export async function prepareCachedArchive(
+  options: Pick<
+    Partial<SysrootCacheOptions>,
+    "triple" | "cacheDir" | "url" | "deps"
+  > = {},
+): Promise<{
+  archive: Uint8Array;
+  source: SysrootCacheSource;
+  cacheArchive: string;
+  url: string;
+}> {
+  const triple = options.triple ?? DEFAULT_TRIPLE;
+  const cacheDir = options.cacheDir ?? DEFAULT_CACHE_DIR;
+  const cacheArchive = `${cacheDir}/${triple}.tar.br`;
+  const url = options.url ?? `${DEFAULT_BASE_URL}/${triple}.tar.br`;
+  const deps = options.deps ?? denoSysrootCacheDeps;
+
+  await deps.mkdir(cacheDir);
+  if (await deps.exists(cacheArchive)) {
+    return {
+      archive: await deps.readFile(cacheArchive),
+      source: "cache",
+      cacheArchive,
+      url,
+    };
+  }
+
+  const archive = await deps.fetchBytes(url);
+  const temporaryArchive = `${cacheArchive}.${crypto.randomUUID()}.tmp`;
+  try {
+    await deps.writeFile(temporaryArchive, archive);
+    await deps.rename(temporaryArchive, cacheArchive);
+    return { archive, source: "download", cacheArchive, url };
+  } finally {
+    await deps.remove(temporaryArchive);
+  }
+}
+
 export async function prepareCachedSysroot(
   options: Partial<SysrootCacheOptions> = {},
 ): Promise<SysrootCacheResult> {
@@ -61,19 +208,7 @@ export async function prepareCachedSysroot(
   const deps = options.deps ?? denoSysrootCacheDeps;
 
   await deps.remove(paths.expandedSysroot);
-  await deps.mkdir(paths.cacheDir);
-
-  let source: SysrootCacheSource;
-  let archive: Uint8Array;
-  if (await deps.exists(paths.cacheArchive)) {
-    source = "cache";
-    archive = await deps.readFile(paths.cacheArchive);
-  } else {
-    source = "download";
-    archive = await deps.fetchBytes(paths.url);
-    await deps.writeFile(`${paths.cacheArchive}.tmp`, archive);
-    await deps.rename(`${paths.cacheArchive}.tmp`, paths.cacheArchive);
-  }
+  const { archive, source } = await prepareCachedArchive(options);
 
   await deps.mkdir(paths.sysrootLibDir);
   await deps.extractTarBr(archive, paths.sysrootLibDir);
@@ -137,10 +272,7 @@ export function validateTarEntryName(name: string): string | null {
       continue;
     }
     if (part === "..") {
-      if (parts.length === 0) {
-        throw new Error(`unsafe sysroot archive entry: ${name}`);
-      }
-      parts.pop();
+      throw new Error(`unsafe sysroot archive entry: ${name}`);
     } else {
       parts.push(part);
     }

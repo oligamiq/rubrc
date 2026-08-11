@@ -1,13 +1,22 @@
-import { createSignal, For, lazy, Suspense } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  For,
+  lazy,
+  onCleanup,
+  Suspense,
+} from "solid-js";
+import * as monaco from "monaco-editor";
 import { SetupMyTerminal } from "./xterm";
 import type { WASIFarmRef } from "@oligami/browser_wasi_shim-threads";
 import type { Ctx } from "./ctx";
-import { default_value, rust_file } from "./config";
+import { default_value } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
 import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
-import { createLspConnection } from "./lsp_bridge";
-import { MonacoLanguageClient } from "monaco-languageclient";
+import { type DisposableLspSession, LspStartGate } from "./lsp_start_gate";
+import type { VfsReadyResult } from "./vfs_readiness";
+import { exposeEditor, markLspReady } from "./lsp_test_api";
 
 import { TargetSelector } from "./TargetSelector";
 
@@ -24,91 +33,126 @@ type Pane = {
 const App = (props: {
   ctx: Ctx;
   callback: (wasi_ref: WASIFarmRef) => void;
+  startLspClient: (
+    monaco: typeof import("monaco-editor"),
+    signal: AbortSignal,
+  ) => Promise<DisposableLspSession>;
 }) => {
-  const handleMount = (_monaco, _editor) => {
-    console.log("[App] Monaco Editor mounted. Starting LSP client...");
-    const connection = createLspConnection(props.ctx);
-    console.log("[App] LSP connection created.");
-    const languageClient = new MonacoLanguageClient({
-      name: "Rust Language Client",
-      clientOptions: {
-        documentSelector: [{ scheme: "file", language: "rust" }],
-        initializationOptions: {
-          cargo: {
-            sysroot: "/sysroot",
-          },
-          linkedProjects: ["/rust-project.json"],
-          procMacro: {
-            enable: false,
-          },
-          checkOnSave: {
-            enable: false,
-          },
-          diagnostics: {
-            enable: true,
-            experimental: {
-              enable: true,
-            },
-          },
-        },
-      },
-      messageTransports: connection
-    });
-    console.log("[App] Starting LanguageClient...");
-    languageClient.start().then(() => {
-      console.log("[App] LanguageClient started successfully.");
-    }).catch(e => {
-      console.error("[App] Failed to start LanguageClient:", e);
-    });
+  const lspGate = new LspStartGate<typeof import("monaco-editor")>(
+    props.startLspClient,
+  );
+  const [isLspReady, setIsLspReady] = createSignal(false);
+  const [isEditorReady, setIsEditorReady] = createSignal(false);
+  let temporaryModel: monaco.editor.ITextModel | null | undefined;
+  let modelSwitchDisposable: { dispose(): void } | undefined;
+  const [mountedMonacoRef, setMountedMonacoRef] = createSignal<
+    typeof import("monaco-editor") | undefined
+  >();
+  const [mountedEditorRef, setMountedEditorRef] = createSignal<
+    monaco.editor.IStandaloneCodeEditor | undefined
+  >();
+  createEffect(() => {
+    const mountedMonaco = mountedMonacoRef();
+    const mountedEditor = mountedEditorRef();
+    if (!isLspReady() || !mountedMonaco || !mountedEditor) return;
+    const mainModel = mountedMonaco.editor.getModel(
+      mountedMonaco.Uri.parse("file:///src/main.rs"),
+    );
+    if (mainModel && mountedEditor.getModel() !== mainModel) {
+      mountedEditor.setModel(null);
+      temporaryModel?.dispose();
+      temporaryModel = undefined;
+      mountedEditor.setModel(mainModel);
+    }
+  });
+  createEffect(() => {
+    const mountedEditor = mountedEditorRef();
+    const readOnly = !isEditorReady();
+    mountedEditor?.updateOptions({ readOnly });
+  });
+  let lspStartObserved = false;
+  const observeLspStart = () => {
+    const started = lspGate.started();
+    if (!started || lspStartObserved) return;
+    lspStartObserved = true;
+    void started.then(() => setIsLspReady(true)).catch(console.error);
   };
-  const handleEditorChange = (value) => {
-    // Handle editor value change
-    rust_file.data = new TextEncoder().encode(value);
 
-    // Sync to Rust VFS
-    const input_string = new SharedObjectRef(props.ctx.input_string_id).proxy<
-      (args: { sessionId: number, data: string }) => Promise<void>
-    >();
-
-    // session_id 0 is fine for sync, but we need a specific way to trigger WRITE_FILE
-    // In util_cmd.ts, we'll handle a special sessionId or just add a new SharedObject
-    // For now, let's assume util_cmd.ts will be updated to handle a special sessionId for VFS SYNC
-    input_string({
-      sessionId: 0xEEEEEEEE, // Special ID for VFS Sync
-      data: JSON.stringify({ path: "/src/main.rs", content: value })
-    }).catch(console.error);
+  const handleMount = (
+    mountedMonaco: typeof import("monaco-editor"),
+    mountedEditor: monaco.editor.IStandaloneCodeEditor,
+  ) => {
+    setMountedMonacoRef(mountedMonaco);
+    setMountedEditorRef(mountedEditor);
+    temporaryModel = mountedEditor.getModel();
+    modelSwitchDisposable = mountedEditor.onDidChangeModel(() => {
+      const currentModel = mountedEditor.getModel();
+      if (currentModel?.uri.toString() !== "file:///src/main.rs") return;
+      setIsEditorReady(true);
+      modelSwitchDisposable?.dispose();
+      modelSwitchDisposable = undefined;
+    });
+    exposeEditor(mountedMonaco, mountedEditor);
+    lspGate.setMonaco(mountedMonaco);
+    observeLspStart();
+    markLspReady();
   };
-  let load_additional_sysroot:
-    | ((triple: string) => Promise<void>)
-    | undefined;
+  let load_additional_sysroot: ((triple: string) => Promise<void>) | undefined;
 
   const [triple, setTriple] = createSignal<string | undefined>(undefined);
-  const [panes, setPanes] = createSignal<Pane[]>([{ id: 1, tabs: [0], activeTab: 0 }]);
+  const [panes, setPanes] = createSignal<Pane[]>([
+    {
+      id: 1,
+      tabs: [0],
+      activeTab: 0,
+    },
+  ]);
   const [nextPaneId, setNextPaneId] = createSignal(2);
   const [nextSessionId, setNextSessionId] = createSignal(1);
-  const [draggedTab, setDraggedTab] = createSignal<{ paneId: number, sessionId: number } | null>(null);
+  const [draggedTab, setDraggedTab] = createSignal<{
+    paneId: number;
+    sessionId: number;
+  } | null>(null);
   const [isReady, setIsReady] = createSignal(false);
+  const sharedReady = new SharedObject((result: VfsReadyResult) => {
+    setIsReady(true);
+    lspGate.setVfsResult(result);
+    observeLspStart();
+    if (!result.ok) console.error(result.error);
+  }, props.ctx.vfs_ready_id);
 
-  let shared_ready: SharedObject | undefined;
-  if (!shared_ready) {
-    shared_ready = new SharedObject(() => {
-      setIsReady(true);
-    }, props.ctx.vfs_ready_id);
-  }
+  onCleanup(() => {
+    modelSwitchDisposable?.dispose();
+    modelSwitchDisposable = undefined;
+    temporaryModel?.dispose();
+    temporaryModel = undefined;
+    setMountedMonacoRef(undefined);
+    setMountedEditorRef(undefined);
+    sharedReady.bc.close();
+    void lspGate
+      .dispose()
+      .catch((error) => console.error("LSP gate cleanup failed:", error));
+  });
 
-  const close_session_fn = new SharedObjectRef(props.ctx.close_session_id).proxy<
-    (args: { sessionId: number }) => Promise<void>
-  >();
+  const close_session_fn = new SharedObjectRef(
+    props.ctx.close_session_id,
+  ).proxy<(args: { sessionId: number }) => Promise<void>>();
 
   const addTerminalToPane = (paneId: number) => {
     const newSessionId = nextSessionId();
     setNextSessionId(newSessionId + 1);
-    setPanes(panes().map(p => {
-      if (p.id === paneId) {
-        return { ...p, tabs: [...p.tabs, newSessionId], activeTab: newSessionId };
-      }
-      return p;
-    }));
+    setPanes(
+      panes().map((p) => {
+        if (p.id === paneId) {
+          return {
+            ...p,
+            tabs: [...p.tabs, newSessionId],
+            activeTab: newSessionId,
+          };
+        }
+        return p;
+      }),
+    );
   };
 
   const splitPane = (paneId: number) => {
@@ -118,11 +162,15 @@ const App = (props: {
     setNextPaneId(newPaneId + 1);
 
     const currentPanes = panes();
-    const paneIndex = currentPanes.findIndex(p => p.id === paneId);
+    const paneIndex = currentPanes.findIndex((p) => p.id === paneId);
     if (paneIndex === -1) return;
 
     const newPanes = [...currentPanes];
-    newPanes.splice(paneIndex + 1, 0, { id: newPaneId, tabs: [newSessionId], activeTab: newSessionId });
+    newPanes.splice(paneIndex + 1, 0, {
+      id: newPaneId,
+      tabs: [newSessionId],
+      activeTab: newSessionId,
+    });
     setPanes(newPanes);
   };
 
@@ -132,20 +180,31 @@ const App = (props: {
 
     close_session_fn({ sessionId }).catch(console.error);
 
-    setPanes(panes().map(p => {
-      if (p.id === paneId) {
-        const newTabs = p.tabs.filter(t => t !== sessionId);
-        const newActive = p.activeTab === sessionId
-          ? (newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1)
-          : p.activeTab;
-        return { ...p, tabs: newTabs, activeTab: newActive };
-      }
-      return p;
-    }).filter(p => p.tabs.length > 0 || p.id === panes()[0].id));
+    setPanes(
+      panes()
+        .map((p) => {
+          if (p.id === paneId) {
+            const newTabs = p.tabs.filter((t) => t !== sessionId);
+            const newActive =
+              p.activeTab === sessionId
+                ? newTabs.length > 0
+                  ? newTabs[newTabs.length - 1]
+                  : -1
+                : p.activeTab;
+            return { ...p, tabs: newTabs, activeTab: newActive };
+          }
+          return p;
+        })
+        .filter((p) => p.tabs.length > 0 || p.id === panes()[0].id),
+    );
   };
 
   const setActiveTab = (paneId: number, sessionId: number) => {
-    setPanes(panes().map(p => p.id === paneId ? { ...p, activeTab: sessionId } : p));
+    setPanes(
+      panes().map((p) =>
+        p.id === paneId ? { ...p, activeTab: sessionId } : p,
+      ),
+    );
   };
 
   const onDragStart = (e: DragEvent, paneId: number, sessionId: number) => {
@@ -161,19 +220,30 @@ const App = (props: {
     if (!dragged) return;
     if (dragged.paneId === targetPaneId) return;
 
-    setPanes(panes().map(p => {
-      if (p.id === dragged.paneId) {
-        const newTabs = p.tabs.filter(t => t !== dragged.sessionId);
-        const newActive = p.activeTab === dragged.sessionId
-          ? (newTabs.length > 0 ? newTabs[newTabs.length - 1] : -1)
-          : p.activeTab;
-        return { ...p, tabs: newTabs, activeTab: newActive };
-      }
-      if (p.id === targetPaneId) {
-        return { ...p, tabs: [...p.tabs, dragged.sessionId], activeTab: dragged.sessionId };
-      }
-      return p;
-    }).filter(p => p.tabs.length > 0 || p.id === panes()[0].id));
+    setPanes(
+      panes()
+        .map((p) => {
+          if (p.id === dragged.paneId) {
+            const newTabs = p.tabs.filter((t) => t !== dragged.sessionId);
+            const newActive =
+              p.activeTab === dragged.sessionId
+                ? newTabs.length > 0
+                  ? newTabs[newTabs.length - 1]
+                  : -1
+                : p.activeTab;
+            return { ...p, tabs: newTabs, activeTab: newActive };
+          }
+          if (p.id === targetPaneId) {
+            return {
+              ...p,
+              tabs: [...p.tabs, dragged.sessionId],
+              activeTab: dragged.sessionId,
+            };
+          }
+          return p;
+        })
+        .filter((p) => p.tabs.length > 0 || p.id === panes()[0].id),
+    );
 
     setDraggedTab(null);
   };
@@ -205,12 +275,10 @@ const App = (props: {
         }
       >
         <MonacoEditor
-          language="rust"
-          path="/src/main.rs"
-          value={default_value}
+          language="plaintext"
+          options={{ readOnly: !isEditorReady() }}
           height="30vh"
           onMount={handleMount}
-          onChange={handleEditorChange}
         />
       </Suspense>
 
@@ -218,7 +286,10 @@ const App = (props: {
         <div class="flex">
           <For each={panes()}>
             {(pane, pIndex) => (
-              <div class={`flex-1 flex bg-gray-800 overflow-x-auto min-w-0 ${pIndex() > 0 ? 'border-l border-gray-700' : ''}`}
+              <div
+                class={`flex-1 flex bg-gray-800 overflow-x-auto min-w-0 ${
+                  pIndex() > 0 ? "border-l border-gray-700" : ""
+                }`}
                 onDragOver={onDragOver}
                 onDrop={(e) => onDrop(e, pane.id)}
               >
@@ -236,7 +307,9 @@ const App = (props: {
                     >
                       <button
                         class={`px-4 py-2 text-sm focus:outline-none ${
-                          pane.activeTab === sessionId ? "text-green-400" : "text-gray-400"
+                          pane.activeTab === sessionId
+                            ? "text-green-400"
+                            : "text-gray-400"
                         }`}
                       >
                         Session {sessionId}
@@ -285,35 +358,38 @@ const App = (props: {
 
         <div
           class="flex-1 min-h-0 min-w-0 grid overflow-hidden"
-          style={{ "grid-template-columns": `repeat(${panes().length}, minmax(0, 1fr))` }}
+          style={{
+            "grid-template-columns": `repeat(${panes().length}, minmax(0, 1fr))`,
+          }}
         >
           <For each={allSessionIds()}>
             {(sessionId) => {
-               const paneIndex = () => panes().findIndex(p => p.tabs.includes(sessionId));
-               const isActive = () => {
-                 const pIdx = paneIndex();
-                 if (pIdx === -1) return false;
-                 return panes()[pIdx].activeTab === sessionId;
-               };
+              const paneIndex = () =>
+                panes().findIndex((p) => p.tabs.includes(sessionId));
+              const isActive = () => {
+                const pIdx = paneIndex();
+                if (pIdx === -1) return false;
+                return panes()[pIdx].activeTab === sessionId;
+              };
 
-               return (
-                 <div
-                   class="relative w-full h-full min-w-0 min-h-0 overflow-hidden"
-                   style={{
-                     "grid-column": (paneIndex() + 1).toString(),
-                     "grid-row": "1",
-                     "display": isActive() ? "block" : "none"
-                   }}
-                 >
-                   <SetupMyTerminal
-                     ctx={props.ctx}
-                     sessionId={sessionId}
-                     isMain={sessionId === 0}
-                     isActive={isActive()}
-                     callback={sessionId === 0 ? props.callback : undefined}
-                   />
-                 </div>
-               )
+              return (
+                <div
+                  class="relative w-full h-full min-w-0 min-h-0 overflow-hidden"
+                  style={{
+                    "grid-column": (paneIndex() + 1).toString(),
+                    "grid-row": "1",
+                    display: isActive() ? "block" : "none",
+                  }}
+                >
+                  <SetupMyTerminal
+                    ctx={props.ctx}
+                    sessionId={sessionId}
+                    isMain={sessionId === 0}
+                    isActive={isActive()}
+                    callback={sessionId === 0 ? props.callback : undefined}
+                  />
+                </div>
+              );
             }}
           </For>
         </div>
@@ -321,17 +397,14 @@ const App = (props: {
 
       <div class="flex flex-nowrap items-center justify-between gap-2 sm:gap-4 bg-gray-950 border-t border-gray-800 p-2 sm:px-6 sm:py-3 shadow-lg z-10 relative">
         <div class="flex-none">
-          <RunButton triple={triple()} />
+          <RunButton triple={triple()} flush={() => lspGate.flush()} />
         </div>
         <div class="flex-1 min-w-[150px] sm:max-w-xs mx-auto">
           <TargetSelector
             options={triples}
             value={triple()}
             onChange={(value) => {
-              if (
-                typeof value !== "string" ||
-                !triples.includes(value)
-              ) {
+              if (typeof value !== "string" || !triples.includes(value)) {
                 return;
               }
 

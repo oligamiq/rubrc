@@ -3,107 +3,116 @@ import {
   AbstractMessageReader,
   AbstractMessageWriter,
   DataCallback,
+  Disposable,
   Message,
-  createMessageConnection,
-  MessageConnection
-} from 'vscode-jsonrpc/browser';
+} from "vscode-jsonrpc/browser";
 import type { Ctx } from "./ctx";
+import {
+  LSP_SESSION_ID,
+  LspFrameDecoder,
+  OrderedLspSender,
+} from "./lsp_protocol";
 
-const LSP_SESSION_ID = 0xFFFFFFFF;
+import { closeUnderlyingChannel } from "./shared_object_channel.ts";
 
 class MyMessageReader extends AbstractMessageReader {
-  private ctx: Ctx;
-  private buffer: Uint8Array = new Uint8Array(0);
+  private readonly decoder = new LspFrameDecoder();
+  private shared: SharedObject | undefined;
+  private closed = false;
 
-  constructor(ctx: Ctx) {
+  constructor(private readonly ctx: Ctx) {
     super();
-    this.ctx = ctx;
   }
 
-  private appendToBuffer(data: Uint8Array) {
-    const newBuffer = new Uint8Array(this.buffer.length + data.length);
-    newBuffer.set(this.buffer);
-    newBuffer.set(data, this.buffer.length);
-    this.buffer = newBuffer;
-  }
-
-  listen(callback: DataCallback): void {
-    console.log("[LSP Bridge] MessageReader listening on ls_id:", this.ctx.ls_id);
-    new SharedObject(({ data }: { data: Uint8Array }) => {
-      this.appendToBuffer(data);
-      this.processBuffer(callback);
-    }, this.ctx.ls_id);
-  }
-
-  private processBuffer(callback: DataCallback) {
-    while (true) {
-      const headerEnd = this.findHeaderEnd();
-      if (headerEnd === -1) break;
-
-      const header = new TextDecoder().decode(this.buffer.slice(0, headerEnd));
-      const contentLengthMatch = header.match(/Content-Length: (\d+)/i);
-      if (!contentLengthMatch) {
-        console.error("[LSP Bridge] Missing Content-Length in header:", header);
-        this.buffer = this.buffer.slice(headerEnd + 4); // Skip broken header
-        continue;
-      }
-
-      const contentLength = parseInt(contentLengthMatch[1], 10);
-      const messageStart = headerEnd + 4;
-      if (this.buffer.length < messageStart + contentLength) break;
-
-      const messageData = this.buffer.slice(messageStart, messageStart + contentLength);
-      this.buffer = this.buffer.slice(messageStart + contentLength);
-
-      const messageStr = new TextDecoder().decode(messageData);
-      console.log("[LSP Bridge] Received message from worker:", messageStr);
+  listen(callback: DataCallback): Disposable {
+    if (this.closed) throw new Error("LSP reader is disposed");
+    if (this.shared) throw new Error("LSP reader already listening");
+    this.shared = new SharedObject(({ data }: { data: unknown }) => {
+      if (this.closed) return;
       try {
-        const message = JSON.parse(messageStr);
-        callback(message);
-      } catch (e) {
-        console.error("[LSP Bridge] Failed to parse LSP message", e, messageStr);
+        for (const message of this.decoder.push(data)) {
+          callback(message as Message);
+        }
+      } catch (error) {
+        this.closed = true;
+        try {
+          this.fireError(error);
+        } finally {
+          try {
+            this.fireClose();
+          } finally {
+            closeUnderlyingChannel(this.shared);
+            this.shared = undefined;
+          }
+        }
       }
-    }
+    }, this.ctx.ls_id);
+    return { dispose: () => this.dispose() };
   }
 
-  private findHeaderEnd(): number {
-    for (let i = 0; i < this.buffer.length - 3; i++) {
-      if (
-        this.buffer[i] === 13 && this.buffer[i + 1] === 10 &&
-        this.buffer[i + 2] === 13 && this.buffer[i + 3] === 10
-      ) {
-        return i;
+  override dispose(): void {
+    try {
+      if (!this.closed) {
+        this.closed = true;
+        try {
+          this.fireClose();
+        } finally {
+          closeUnderlyingChannel(this.shared);
+          this.shared = undefined;
+        }
       }
+    } finally {
+      super.dispose();
     }
-    return -1;
   }
 }
 
 class MyMessageWriter extends AbstractMessageWriter {
-  private inputStringProxy: any;
+  private readonly inputStringProxy: (args: {
+    sessionId: number;
+    data: string | number[];
+  }) => Promise<void>;
+  private readonly sender: OrderedLspSender;
+  private readonly sharedRef: SharedObjectRef;
+  private closed = false;
 
   constructor(ctx: Ctx) {
     super();
-    console.log("[LSP Bridge] Creating MessageWriter with input_string_id:", ctx.input_string_id);
-    this.inputStringProxy = new SharedObjectRef(ctx.input_string_id).proxy<
-      (args: { sessionId: number, data: string }) => Promise<void>
-    >();
+    this.sharedRef = new SharedObjectRef(ctx.input_string_id);
+    this.inputStringProxy =
+      this.sharedRef.proxy<
+        (args: { sessionId: number; data: string | number[] }) => Promise<void>
+      >();
+    this.sender = new OrderedLspSender((data) =>
+      this.inputStringProxy({ sessionId: LSP_SESSION_ID, data }),
+    );
   }
 
-  async write(msg: Message): Promise<void> {
-    const jsonStr = JSON.stringify(msg);
-    const data = `Content-Length: ${new TextEncoder().encode(jsonStr).length}\r\n\r\n${jsonStr}`;
-    if (msg.method !== '$/setTrace' && msg.method !== '$/logTrace') {
-      console.log("[LSP Bridge] Writing message to worker (session LSP):", jsonStr);
+  write(msg: Message): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("LSP writer is disposed"));
+    return this.sender.write(msg);
+  }
+
+  end(): void {}
+
+  override dispose(): void {
+    if (!this.closed) {
+      this.closed = true;
+      closeUnderlyingChannel(this.sharedRef);
     }
-    await this.inputStringProxy({ sessionId: LSP_SESSION_ID, data });
+    super.dispose();
   }
-
-  end(): void { }
 }
 
 export function createLspConnection(ctx: Ctx) {
   const reader = new MyMessageReader(ctx);
   const writer = new MyMessageWriter(ctx);
-  return { reader, writer };
+  return {
+    reader,
+    writer,
+    dispose() {
+      reader.dispose();
+      writer.dispose();
+    },
+  };
 }

@@ -103,16 +103,21 @@ jobs:
               "metadata.sourceSha does not match source_sha",
             );
           }
+
+          if (
+            !Number.isSafeInteger(metadata.buildEpoch) ||
+            metadata.buildEpoch <= 0
+          ) {
+            throw new Error("metadata.buildEpoch is not a positive safe integer");
+          }
           NODE
 
       - name: Verify artifacts
         run: node source/scripts/verify-vfs-asset.mjs site
 
-      - name: Remove .rubrc-pages-build.json
-        run: rm -f site/.rubrc-pages-build.json
-
-      - name: Confirm index.html and v1/index.html
+      - name: Confirm deployment files
         run: |
+          test -f site/.rubrc-pages-build.json
           test -f site/index.html
           test -f site/v1/index.html
 

@@ -1,5 +1,7 @@
 import type { TarFileItem } from "nanotar";
 
+type ParsedTarFile = TarFileItem & { type: string };
+
 // https://github.com/unjs/nanotar/blob/c1247bdec97163b487c8ca55003e291dfea755ab/src/parse.ts
 // MIT License
 
@@ -25,7 +27,7 @@ import type { TarFileItem } from "nanotar";
 
 export async function parseTar(
   readable_stream: ReadableStream<Uint8Array>,
-  callback: (file: TarFileItem) => void,
+  callback: (file: ParsedTarFile) => void,
 ) {
   const reader = readable_stream.getReader();
 
@@ -84,11 +86,12 @@ export async function parseTar(
 
     // File type (offset: 156 - length: 1)
     const _type = String.fromCharCode(buffer[offset + 156] ?? 0);
-    const type = _type === "\0" || _type === "0"
-      ? "file"
-      : _type === "5"
-      ? "directory"
-      : _type; // prettier-ignore
+    const type =
+      _type === "\0" || _type === "0"
+        ? "file"
+        : _type === "5"
+          ? "directory"
+          : _type; // prettier-ignore
 
     // Ustar prefix (offset: 345 - length: 155)
     const prefix = _readString(buffer, offset + 345, 155);

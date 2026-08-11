@@ -1,0 +1,169 @@
+# Development Rust-Source Asset Design
+
+## Goal
+
+Make `bun run --cwd page dev` and `bun run --cwd page start` serve the same
+validated `rust-src.tar.vfsbr` asset shape as production, and prevent an HTML
+fallback response from poisoning the compressed-asset cache or reaching the
+Brotli decoder.
+
+## Root Cause
+
+Production and browser acceptance generate `page/dist/rust-src.tar.vfsbr`
+before previewing the built site. Vite development mode serves `page/public`,
+but no rust-src asset is prepared there. A request for
+`/rust-src.tar.vfsbr?v=development&build=0` therefore falls through to Vite's
+SPA fallback and returns `index.html` with status 200 and content type
+`text/html`. The Brotli decoder reads the leading `<!DOCTYPE html>` bytes as a
+reserved Brotli format marker and throws error `-2`.
+
+Because the optional cache currently stores every successful HTTP response,
+the 200 HTML fallback can remain under the compressed-asset URL even after a
+valid asset becomes available.
+
+## Development Asset Lifecycle
+
+Add a root `rust-src:prepare-dev-asset` script that invokes the existing
+validated archive preparation, computes SHA-256 directly from the returned
+bytes, atomically writes the content-addressed development copy to
+`.rubrc-cache/dev/rust-src-<sha256>.tar.vfsbr`, and atomically updates an active
+SHA-256 sidecar. Add `predev` and `prestart` lifecycle scripts to
+`page/package.json`; Bun runs these before `dev` and `start` and does not launch
+Vite if preparation fails.
+
+A small Vite `configureServer` plugin reads the sidecar at server startup,
+selects the matching immutable content-addressed file, and serves only the
+`/rust-src.tar.vfsbr` development request from that ignored cache path with
+`Content-Type: application/octet-stream`. Vite uses the same
+SHA-256 as the development `SOURCE_REVISION` define. The middleware requires
+the request's `v` query parameter to equal that hash before serving the file;
+an identity mismatch returns an explicit conflict error rather than caching
+the wrong toolchain under a new key. Missing or unreadable files call
+`next(error)` instead of falling through to the SPA HTML fallback.
+
+The generated asset stays outside `page/public`, Vite's production static-copy
+path, and Vite's watched source tree. The existing toolchain-identity cache
+under `.rubrc-cache/sysroot` keeps repeated development starts cheap. A branch
+switch with the same toolchain remains valid because the archive contains the
+installed toolchain's standard-library source, not repository source. A
+toolchain change is detected by the existing archive identity validation on the
+next dev/start lifecycle, produces a new content hash, immutable file, and
+browser cache key. Concurrent preparation never overwrites bytes selected by an
+already-running server. Changing the active Rust toolchain while a dev server is
+already running requires restarting that server, matching other Vite config
+changes.
+
+After publishing the active sidecar, preparation keeps the active archive plus
+the two newest prior content-addressed archives and removes older variants,
+ignoring only concurrent `NotFound` races. This bounds disk growth while
+allowing overlapping server restart/preparation windows to retain their
+selected immutable file. Re-preparing the same hash may atomically replace the
+same regular file on POSIX; if the destination already exists, preparation
+validates that it is a regular file rather than assuming `rename` reports
+`AlreadyExists`.
+Preparation also removes abandoned temporary files older than one hour. It
+ignores only concurrent `NotFound` races; permission and other filesystem
+errors remain visible and prevent Vite startup.
+
+## Cache And Response Validation
+
+Extend `fetchWithOptionalCache` with an optional response-acceptance predicate
+and cache deletion boundary.
+
+- A valid cache hit is returned unchanged.
+- An invalid cache hit is deleted, then the network is tried.
+- A valid successful network response is cached.
+- An invalid network response is returned by the generic cache helper but is
+  not cached; `fetch_compressed_stream` then rejects it before exposing a body.
+- Cache open, match, delete, and put failures remain optional-cache failures and
+  never replace the network response.
+- CacheStorage is used only for GET requests. Requests with methods or bodies
+  unsupported by CacheStorage bypass it without cloning their body stream. The
+  effective method includes a `RequestInit.method` override, and accepted GET
+  requests use `new Request(input, init)` as the cache key so the effective
+  request metadata is represented consistently in match, delete, and put.
+- A response clone created for `cache.put` is canceled if the put fails, so its
+  unread tee branch cannot stall the response returned to the caller.
+- Invalid cached bodies are canceled before deletion. If the acceptance
+  predicate throws for a cached or network response, that response body is
+  canceled before the same error is rethrown.
+
+The application has one rust-src archive loader. Cache recovery therefore does
+not introduce a global fetch-coalescing layer: doing so would have to reconcile
+different abort signals and clone streaming response bodies. If duplicate
+callers are added later, CacheStorage deletion and replacement for the same URL
+remain idempotent, while request coalescing can be designed at that new owner
+boundary.
+
+`fetch_compressed_stream` supplies a strict predicate accepting only the known
+binary Brotli types `application/octet-stream`, `application/brotli`, and
+`application/x-brotli`. A missing content type is rejected. It checks the network result
+before reading the body and throws a descriptive compressed-asset response
+error containing the URL and content type. HTML, JSON, image, and other invalid
+payloads never enter CacheStorage or reach `BrotliDecStream`.
+
+## Error Handling
+
+- Missing `rust-src` or `rust-src-preview` components fail the pre-lifecycle
+  script with the existing archive-generation error; Vite does not start.
+- A stale HTML cache entry is deleted and retried from the network.
+- A still-missing network asset produces a clear invalid-content-type error,
+  not Brotli error `-2`.
+- A non-OK response retains the existing HTTP failure path.
+- Corrupt non-text compressed bytes still reach the decoder and retain its
+  detailed Brotli error.
+- Non-OK responses, invalid or missing Content-Type responses, and accepted
+  responses whose Brotli transform cannot initialize cancel their owned body
+  branch before propagating the original error.
+
+## Development HTTP Boundary
+
+The Vite development middleware handles only `GET` and `HEAD` requests for the
+revision-matched rust-src path. Both methods return the same status,
+`Content-Type`, `Content-Length`, and
+`Cache-Control: public, max-age=31536000, immutable`; `HEAD` sends no body.
+Other methods continue through Vite without opening the archive. Client aborts
+before or after headers close the selected file/stream without calling Vite's
+error middleware or producing expected-abort noise. Genuine missing or
+unreadable-file failures before headers still call `next(error)`.
+
+## Browser Acceptance Server
+
+The browser diagnostics command runs its ESM/TypeScript-importing harness with
+Bun rather than Node 22. The harness uses a test-only static server for
+`page/dist` instead of Vite preview. That server provides COOP/COEP, SPA
+fallback, safe root-confined path resolution, only `GET`/`HEAD` serving,
+header-only `HEAD` responses, normal JavaScript/CSS/Wasm/HTML types, and
+`application/octet-stream` specifically for `.vfsbr`. Production Vite config
+and deployment behavior remain unchanged while strict compressed MIME is
+exercised in acceptance.
+
+## Test Strategy
+
+1. Add cache tests proving an invalid hit is deleted and replaced by a valid
+   network response, and that invalid network HTML/JSON is not cached.
+2. Add compressed-stream tests proving HTML, JSON, malformed, and missing
+   Content-Type responses are canceled and rejected before body decompression,
+   while the three accepted binary types remain valid.
+3. Add script tests requiring `predev` and `prestart`, exact retention and stale
+   temporary pruning, `NotFound`-only race handling, regular-file destination
+   validation, content-hash Vite identity, GET/HEAD middleware behavior, and the
+   Git ignore rule.
+4. Run the development preparation command, start Vite dev, and verify the
+   revisioned rust-src URL returns `application/octet-stream` bytes that native
+   Brotli decompression accepts.
+5. Directly test the root-confined `page/dist` static server's methods, SPA
+   fallback, isolation headers, and MIME map, then run exact browser diagnostics
+   acceptance through that server under Bun.
+6. Re-run focused cache/archive tests and exact browser diagnostics acceptance.
+
+## Rejected Alternatives
+
+- On-demand generation inside Vite middleware couples Node/Vite request
+  handling to the Deno archive generator and makes first-request failure
+  handling more complex. The selected middleware only streams a file prepared
+  before Vite starts.
+- A remote development asset can mismatch the local toolchain, breaks offline
+  development, and hides local archive-generation failures.
+- Merely improving the decoder error leaves development unusable and preserves
+  a poisoned CacheStorage entry.
