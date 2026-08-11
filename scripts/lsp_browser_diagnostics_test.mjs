@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import puppeteer from "puppeteer";
 import {
@@ -8,6 +7,10 @@ import {
   waitForDiagnosticsQuiescence,
 } from "./lsp_browser_quiescence.mjs";
 import { safeFailureState } from "./lsp_browser_failure_state.mjs";
+import {
+  closeBrowserStaticServer,
+  startBrowserStaticServer,
+} from "./lsp_browser_static_server.mjs";
 import { VfsDebugTraceCollector } from "../page/src/vfs_debug_trace.ts";
 
 const url = "http://127.0.0.1:4173";
@@ -16,7 +19,7 @@ const validMain = "fn main() {}\n";
 const invalidSecondary = "pub fn secondary() { let value = ; }\n";
 const DEFAULT_API_NOT_READY = "Default api is not ready yet";
 let browser;
-let preview;
+let staticServer;
 
 async function assertSingleDefaultApiBundle() {
   const assets = new URL("../page/dist/assets/", import.meta.url);
@@ -43,22 +46,19 @@ async function waitForServer() {
       const response = await fetch(url);
       if (response.ok) return;
     } catch {
-      // Preview is still starting.
+      // The in-process static server is still binding.
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error("Vite preview did not start within 30 seconds");
+  throw new Error("browser static server did not start within 30 seconds");
 }
 
 try {
   await assertSingleDefaultApiBundle();
-  preview = spawn(
-    "bun",
-    ["run", "--cwd", "page", "serve", "--host", "127.0.0.1", "--port", "4173"],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  preview.stdout.resume();
-  preview.stderr.resume();
+  staticServer = await startBrowserStaticServer({
+    hostname: "127.0.0.1",
+    port: 4173,
+  });
   await waitForServer();
 
   browser = await puppeteer.launch({
@@ -371,17 +371,5 @@ try {
   console.log("browser displayed and cleared rust-analyzer markers");
 } finally {
   await browser?.close();
-  if (preview && preview.exitCode === null) {
-    preview.kill("SIGTERM");
-    await new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        preview.kill("SIGKILL");
-        resolve();
-      }, 2_000);
-      preview.once("exit", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
-  }
+  await closeBrowserStaticServer(staticServer);
 }

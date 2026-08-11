@@ -40,23 +40,27 @@ function developmentRustSrcPlugin(asset: DevelopmentRustSrcAsset): Plugin {
     apply: "serve",
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
-        void serveDevelopmentRustSrcAsset(
-          request.url,
-          response,
-          next,
-          asset,
-        ).catch(next);
+        void serveDevelopmentRustSrcAsset(request, response, next, asset).catch(
+          (error) => {
+            if (!response.destroyed) next(error);
+          },
+        );
       });
     },
   };
 }
 
 async function serveDevelopmentRustSrcAsset(
-  rawUrl: string | undefined,
+  request: import("node:http").IncomingMessage,
   response: import("node:http").ServerResponse,
   next: (error?: unknown) => void,
   asset: DevelopmentRustSrcAsset,
 ): Promise<void> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    next();
+    return;
+  }
+  const rawUrl = request.url;
   if (!rawUrl?.startsWith("/") || rawUrl.startsWith("//")) {
     next();
     return;
@@ -69,27 +73,57 @@ async function serveDevelopmentRustSrcAsset(
   if (requestUrl.searchParams.get("v") !== asset.sha256) {
     response.statusCode = 409;
     response.setHeader("Content-Type", "text/plain; charset=utf-8");
-    response.end(
-      `rust-src development asset revision mismatch; expected ${asset.sha256}\n`,
-    );
+    const message = `rust-src development asset revision mismatch; expected ${asset.sha256}\n`;
+    response.end(request.method === "HEAD" ? undefined : message);
     return;
   }
 
   const file = await open(asset.path, "r");
   try {
     const stat = await file.stat();
+    if (!stat.isFile()) {
+      throw new Error(
+        `development rust-src asset is not a regular file: ${asset.path}`,
+      );
+    }
+    if (response.destroyed) {
+      await file.close();
+      return;
+    }
     response.statusCode = 200;
     response.setHeader("Content-Type", "application/octet-stream");
     response.setHeader("Content-Length", String(stat.size));
+    response.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    if (request.method === "HEAD") {
+      await file.close();
+      if (!response.destroyed) response.end();
+      return;
+    }
+  } catch (error) {
+    await file.close();
+    throw error;
+  }
+  let stream: ReturnType<typeof file.createReadStream>;
+  try {
+    stream = file.createReadStream();
   } catch (error) {
     await file.close();
     throw error;
   }
   try {
-    await pipeline(file.createReadStream(), response);
+    await pipeline(stream, response);
   } catch (error) {
+    if (
+      response.destroyed ||
+      (error instanceof Error &&
+        "code" in error &&
+        (error.code === "ECONNRESET" ||
+          error.code === "ERR_STREAM_PREMATURE_CLOSE"))
+    ) {
+      return;
+    }
     if (response.headersSent) {
-      response.destroy();
+      response.destroy(error instanceof Error ? error : undefined);
       return;
     }
     throw error;

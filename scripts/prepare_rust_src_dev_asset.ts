@@ -3,33 +3,92 @@ import { prepareInstalledRustSrcArchive } from "./rust_src_archive.ts";
 export const DEV_RUST_SRC_DIRECTORY = ".rubrc-cache/dev";
 export const DEV_RUST_SRC_SIDECAR = `${DEV_RUST_SRC_DIRECTORY}/rust-src.sha256`;
 export const DEV_RUST_SRC_RETAINED_ASSETS = 3;
+export const DEV_RUST_SRC_TMP_MAX_AGE_MS = 60 * 60 * 1_000;
 
-async function pruneDevelopmentRustSrcAssets(
+export type DevelopmentRustSrcPruneDependencies = {
+  readDir(path: string): AsyncIterable<Deno.DirEntry>;
+  stat(path: string): Promise<Deno.FileInfo>;
+  remove(path: string): Promise<void>;
+  now(): number;
+};
+
+const defaultPruneDependencies: DevelopmentRustSrcPruneDependencies = {
+  readDir: (path) => Deno.readDir(path),
+  stat: (path) => Deno.stat(path),
+  remove: (path) => Deno.remove(path),
+  now: () => Date.now(),
+};
+
+async function statIfPresent(
+  path: string,
+  dependencies: DevelopmentRustSrcPruneDependencies,
+): Promise<Deno.FileInfo | null> {
+  try {
+    return await dependencies.stat(path);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return null;
+    throw error;
+  }
+}
+
+async function removeIfPresent(
+  path: string,
+  remove: (path: string) => Promise<void>,
+): Promise<void> {
+  try {
+    await remove(path);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return;
+    throw error;
+  }
+}
+
+export async function pruneDevelopmentRustSrcAssets(
   directory: string,
   activeSha256: string,
+  dependencies: DevelopmentRustSrcPruneDependencies = defaultPruneDependencies,
 ): Promise<void> {
-  const candidates: Array<{ path: string; active: boolean; mtime: number }> =
-    [];
-  for await (const entry of Deno.readDir(directory)) {
-    const match = /^rust-src-([a-f0-9]{64})\.tar\.vfsbr$/.exec(entry.name);
-    if (!entry.isFile || !match) continue;
+  const priorArchives: Array<{ path: string; mtime: number }> = [];
+  for await (const entry of dependencies.readDir(directory)) {
+    if (!entry.isFile) continue;
     const path = `${directory}/${entry.name}`;
-    const stat = await Deno.stat(path);
-    candidates.push({
-      path,
-      active: match[1] === activeSha256,
-      mtime: stat.mtime?.getTime() ?? 0,
-    });
+    if (entry.name.endsWith(".tmp")) {
+      const stat = await statIfPresent(path, dependencies);
+      const mtime = stat?.mtime?.getTime() ?? stat?.birthtime?.getTime();
+      if (
+        mtime !== undefined &&
+        dependencies.now() - mtime > DEV_RUST_SRC_TMP_MAX_AGE_MS
+      ) {
+        await removeIfPresent(path, dependencies.remove);
+      }
+      continue;
+    }
+
+    const match = /^rust-src-([a-f0-9]{64})\.tar\.vfsbr$/.exec(entry.name);
+    if (!match || match[1] === activeSha256) continue;
+    const stat = await statIfPresent(path, dependencies);
+    if (stat === null) continue;
+    priorArchives.push({ path, mtime: stat.mtime?.getTime() ?? 0 });
   }
-  candidates.sort(
+
+  priorArchives.sort(
     (left, right) =>
-      Number(right.active) - Number(left.active) || right.mtime - left.mtime,
+      right.mtime - left.mtime || right.path.localeCompare(left.path),
   );
-  await Promise.all(
-    candidates
-      .slice(DEV_RUST_SRC_RETAINED_ASSETS)
-      .map((candidate) => Deno.remove(candidate.path).catch(() => undefined)),
-  );
+  for (const candidate of priorArchives.slice(
+    DEV_RUST_SRC_RETAINED_ASSETS - 1,
+  )) {
+    await removeIfPresent(candidate.path, dependencies.remove);
+  }
+}
+
+async function validateAssetDestination(path: string): Promise<void> {
+  const stat = await statIfPresent(path, defaultPruneDependencies);
+  if (stat !== null && !stat.isFile) {
+    throw new Error(
+      `development rust-src destination is not a regular file: ${path}`,
+    );
+  }
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -53,18 +112,25 @@ export async function writeRustSrcDevAsset(
   await Deno.mkdir(directory, { recursive: true });
   try {
     await Deno.writeFile(temporaryAsset, archive);
-    await Deno.rename(temporaryAsset, assetPath).catch(async (error) => {
-      if (!(error instanceof Deno.errors.AlreadyExists)) throw error;
-      await Deno.remove(temporaryAsset);
-    });
+    await validateAssetDestination(assetPath);
+    await Deno.rename(temporaryAsset, assetPath);
     await Deno.writeTextFile(temporarySidecar, `${sha256}\n`);
     await Deno.rename(temporarySidecar, sidecarPath);
     await pruneDevelopmentRustSrcAssets(directory, sha256);
   } catch (error) {
-    await Promise.all([
-      Deno.remove(temporaryAsset).catch(() => undefined),
-      Deno.remove(temporarySidecar).catch(() => undefined),
+    const cleanup = await Promise.allSettled([
+      removeIfPresent(temporaryAsset, Deno.remove),
+      removeIfPresent(temporarySidecar, Deno.remove),
     ]);
+    const cleanupErrors = cleanup.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        "development rust-src preparation and cleanup failed",
+      );
+    }
     throw error;
   }
 

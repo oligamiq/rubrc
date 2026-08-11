@@ -1,6 +1,9 @@
 /// <reference lib="deno.ns" />
 
-import { writeRustSrcDevAsset } from "./prepare_rust_src_dev_asset.ts";
+import {
+  pruneDevelopmentRustSrcAssets,
+  writeRustSrcDevAsset,
+} from "./prepare_rust_src_dev_asset.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -71,6 +74,132 @@ Deno.test("development rust-src writer retains only three immutable versions", a
   }
 });
 
+Deno.test("development pruning removes only temporary files older than one hour", async () => {
+  const directory = await Deno.makeTempDir();
+  const oldTemporary = `${directory}/rust-src-old.tmp`;
+  const recentTemporary = `${directory}/rust-src-recent.tmp`;
+  try {
+    await Deno.writeFile(oldTemporary, new Uint8Array([1]));
+    await Deno.writeFile(recentTemporary, new Uint8Array([2]));
+    const now = Date.now();
+    await Deno.utime(
+      oldTemporary,
+      new Date(now - 3_600_001),
+      new Date(now - 3_600_001),
+    );
+    await Deno.utime(
+      recentTemporary,
+      new Date(now - 3_599_999),
+      new Date(now - 3_599_999),
+    );
+
+    await pruneDevelopmentRustSrcAssets(directory, "a".repeat(64), undefined);
+
+    let oldExists = true;
+    try {
+      await Deno.stat(oldTemporary);
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+      oldExists = false;
+    }
+    assert(!oldExists, "temporary file older than one hour was retained");
+    assert(
+      (await Deno.stat(recentTemporary)).isFile,
+      "temporary file younger than one hour was removed",
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("development pruning ignores only NotFound stat and remove races", async () => {
+  const entry: Deno.DirEntry = {
+    name: "abandoned.tmp",
+    isFile: true,
+    isDirectory: false,
+    isSymlink: false,
+  };
+  const entries = async function* () {
+    yield entry;
+  };
+
+  for (const operation of ["stat", "remove"] as const) {
+    for (const error of [
+      new Deno.errors.NotFound("concurrent removal"),
+      new Deno.errors.PermissionDenied("permission denied"),
+    ]) {
+      let rejection: unknown;
+      try {
+        await pruneDevelopmentRustSrcAssets("/virtual/dev", "a".repeat(64), {
+          readDir: entries,
+          async stat() {
+            if (operation === "stat") throw error;
+            return { mtime: new Date(0) } as Deno.FileInfo;
+          },
+          async remove() {
+            if (operation === "remove") throw error;
+          },
+          now: () => 3_600_001,
+        });
+      } catch (caught) {
+        rejection = caught;
+      }
+
+      if (error instanceof Deno.errors.NotFound) {
+        assert(rejection === undefined, `${operation} NotFound was propagated`);
+      } else {
+        assert(rejection === error, `${operation} filesystem error was hidden`);
+      }
+    }
+  }
+});
+
+Deno.test("same-hash replacement requires a regular destination", async () => {
+  const directory = await Deno.makeTempDir();
+  const outputDirectory = `${directory}/dev`;
+  const archive = new Uint8Array([4, 5, 6]);
+  const prepare = async () => ({
+    archive,
+    cacheArchive: ".rubrc-cache/sysroot/rust-src.tar.vfsbr",
+    source: "cache" as const,
+  });
+  try {
+    const sha256 = await writeRustSrcDevAsset(outputDirectory, prepare);
+    const repeatedSha256 = await writeRustSrcDevAsset(outputDirectory, prepare);
+    assert(
+      repeatedSha256 === sha256,
+      "same-hash POSIX replacement changed identity",
+    );
+    assert(
+      (await Deno.stat(`${outputDirectory}/rust-src-${sha256}.tar.vfsbr`))
+        .isFile,
+      "same-hash destination stopped being a regular file",
+    );
+
+    const emptySha256 =
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    const blockingDirectory = `${outputDirectory}/rust-src-${emptySha256}.tar.vfsbr`;
+    await Deno.mkdir(blockingDirectory);
+    let rejection: unknown;
+    try {
+      await writeRustSrcDevAsset(outputDirectory, async () => ({
+        archive: new Uint8Array(),
+        cacheArchive: ".rubrc-cache/sysroot/rust-src.tar.vfsbr",
+        source: "cache",
+      }));
+    } catch (error) {
+      rejection = error;
+    }
+    assert(rejection instanceof Error, "non-file destination was accepted");
+    assert(
+      rejection.message.includes("not a regular file"),
+      "non-file destination error was unclear",
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("development rust-src lifecycle stays ignored and outside production", async () => {
   const rootPackage = JSON.parse(await Deno.readTextFile("package.json"));
   const pagePackage = JSON.parse(await Deno.readTextFile("page/package.json"));
@@ -104,10 +233,12 @@ Deno.test("development rust-src lifecycle stays ignored and outside production",
       prepareSource.includes(
         "await pruneDevelopmentRustSrcAssets(directory, sha256)",
       ) &&
+      prepareSource.includes("DEV_RUST_SRC_TMP_MAX_AGE_MS = 60 * 60 * 1_000") &&
       prepareSource.includes("await Deno.rename(temporaryAsset, assetPath)") &&
       prepareSource.includes(
         "await Deno.rename(temporarySidecar, sidecarPath)",
-      ),
+      ) &&
+      !prepareSource.includes("Deno.errors.AlreadyExists"),
     "development writer does not use validated output and atomic sidecar publication",
   );
   assert(
@@ -139,6 +270,7 @@ Deno.test("Vite development identity and middleware are hash-bound", async () =>
   );
   assert(
     vite.includes('requestUrl.pathname !== "/rust-src.tar.vfsbr"') &&
+      vite.includes('request.method !== "GET" && request.method !== "HEAD"') &&
       vite.includes('requestUrl.searchParams.get("v") !== asset.sha256') &&
       vite.includes("response.statusCode = 409") &&
       vite.includes(
@@ -147,11 +279,14 @@ Deno.test("Vite development identity and middleware are hash-bound", async () =>
       vite.includes(
         'response.setHeader("Content-Length", String(stat.size))',
       ) &&
-      vite.includes("await pipeline(file.createReadStream(), response)") &&
-      vite.includes("if (response.headersSent)") &&
-      vite.includes("response.destroy()") &&
+      vite.includes('"Cache-Control"') &&
+      vite.includes('"public, max-age=31536000, immutable"') &&
+      vite.includes('request.method === "HEAD"') &&
+      vite.includes("stream = file.createReadStream()") &&
+      vite.includes("await pipeline(stream, response)") &&
+      vite.includes("if (response.destroyed)") &&
       vite.includes("void serveDevelopmentRustSrcAsset(") &&
-      vite.includes(".catch(next)"),
+      vite.includes("if (!response.destroyed) next(error)"),
     "Vite middleware is not path-, hash-, MIME-, and error-bound",
   );
   assert(
