@@ -18,14 +18,6 @@ export function createRustAnalyzerProjectSettings(): {
   linkedProjects: Array<{
     sysroot: "/sysroot";
     sysroot_src: "/sysroot/lib/rustlib/src/rust/library";
-    sysroot_project: {
-      crates: Array<{
-        display_name: "core";
-        root_module: "/sysroot/lib/rustlib/src/rust/library/core/src/unit.rs";
-        edition: "2021";
-        deps: [];
-      }>;
-    };
     crates: Array<{
       display_name: "rubrc-main";
       root_module: "/src/main.rs";
@@ -47,17 +39,6 @@ export function createRustAnalyzerProjectSettings(): {
       {
         sysroot: "/sysroot",
         sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
-        sysroot_project: {
-          crates: [
-            {
-              display_name: "core",
-              root_module:
-                "/sysroot/lib/rustlib/src/rust/library/core/src/unit.rs",
-              edition: "2021",
-              deps: [],
-            },
-          ],
-        },
         crates: [
           {
             display_name: "rubrc-main",

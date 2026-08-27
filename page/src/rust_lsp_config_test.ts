@@ -36,17 +36,6 @@ Deno.test("full rust-analyzer settings preserve the validated project shape", ()
         {
           sysroot: "/sysroot",
           sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
-          sysroot_project: {
-            crates: [
-              {
-                display_name: "core",
-                root_module:
-                  "/sysroot/lib/rustlib/src/rust/library/core/src/unit.rs",
-                edition: "2021",
-                deps: [],
-              },
-            ],
-          },
           crates: [
             {
               display_name: "rubrc-main",
@@ -68,6 +57,18 @@ Deno.test("full rust-analyzer settings preserve the validated project shape", ()
     },
     "full project settings differ from the validated integration",
   );
+
+  const project = createRustAnalyzerProjectSettings().linkedProjects[0] as
+    & Record<string, unknown>
+    & { sysroot_src: string };
+  if ("sysroot_project" in project) {
+    throw new Error(
+      "full project still overrides rust-analyzer sysroot discovery",
+    );
+  }
+  if (project.sysroot_src !== "/sysroot/lib/rustlib/src/rust/library") {
+    throw new Error("full project lost the installed rust-src root");
+  }
 });
 
 Deno.test("rust-analyzer configuration builders return fresh objects", () => {
