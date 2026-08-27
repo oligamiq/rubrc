@@ -1,6 +1,10 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@std/assert@*": "1.0.19",
+    "jsr:@std/internal@^1.0.12": "1.0.14",
+    "jsr:@std/internal@^1.0.14": "1.0.14",
+    "jsr:@std/path@*": "1.1.6",
     "npm:@bjorn3/browser_wasi_shim@~0.4.2": "0.4.2",
     "npm:@oligami/shared-object@0.1.1": "0.1.1",
     "npm:@thisbeyond/solid-select@~0.15.1": "0.15.1_solid-js@1.9.12",
@@ -17,6 +21,23 @@
     "npm:unplugin-swc@^1.5.9": "1.5.9_@swc+core@1.15.33",
     "npm:uuid@^13.0.2": "13.0.2",
     "npm:vite-plugin-solid@^2.11.12": "2.11.12_solid-js@1.9.12_vite@7.3.2"
+  },
+  "jsr": {
+    "@std/assert@1.0.19": {
+      "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.12"
+      ]
+    },
+    "@std/internal@1.0.14": {
+      "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
+    },
+    "@std/path@1.1.6": {
+      "integrity": "c68485c2a4dfbb5ae3cc74fae4e8c4e5d874cf8a8ed12927917235c758b46cbe",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.14"
+      ]
+    }
   },
   "npm": {
     "@babel/code-frame@7.29.0": {
@@ -2843,13 +2864,14 @@
     "packageJson": {
       "dependencies": [
         "npm:@biomejs/biome@2.5.2",
-        "npm:@oligami/browser_wasi_shim-threads@~0.4.1",
+        "npm:@oligami/browser_wasi_shim-threads@0.4.1",
         "npm:@swc/cli@~0.8.1",
         "npm:@swc/core@^1.15.43",
         "npm:@types/tar-stream@^3.1.4",
         "npm:autoprefixer@^10.5.2",
         "npm:better-typescript-lib@^2.12.0",
         "npm:npm-watch@0.13",
+        "npm:puppeteer@25.3.0",
         "npm:solid-devtools@~0.34.5",
         "npm:tailwindcss@^4.3.2",
         "npm:tsx@^4.23.0",
@@ -2865,7 +2887,7 @@
         "packageJson": {
           "dependencies": [
             "npm:@bjorn3/browser_wasi_shim@~0.4.2",
-            "npm:@oligami/browser_wasi_shim-threads@~0.4.1",
+            "npm:@oligami/browser_wasi_shim-threads@0.4.1",
             "npm:brotli-dec-wasm@^2.3.0"
           ]
         }
@@ -2885,7 +2907,7 @@
             "npm:@codingame/monaco-vscode-languages-service-override@^25.1.2",
             "npm:@codingame/monaco-vscode-model-service-override@^25.1.2",
             "npm:@codingame/monaco-vscode-theme-defaults-default-extension@^25.1.2",
-            "npm:@oligami/browser_wasi_shim-threads@~0.4.1",
+            "npm:@oligami/browser_wasi_shim-threads@0.4.1",
             "npm:@oligami/shared-object@0.1.1",
             "npm:@tailwindcss/vite@^4.3.0",
             "npm:@thisbeyond/solid-select@~0.15.1",

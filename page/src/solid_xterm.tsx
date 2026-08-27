@@ -10,6 +10,7 @@ import {
 } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { installMobileTerminalGestures } from "./mobile_terminal_gestures";
+import { retainAsyncCleanup } from "./solid_xterm_lifecycle";
 
 export type OnMountCleanup = () => void | (() => Promise<void>) | undefined;
 
@@ -178,11 +179,10 @@ const XTerm = ({
   const handleRef = (terminalContainerRef: HTMLDivElement) => {
     const newTerminal = new Terminal(options);
 
-    disposeMobileTerminalGestures =
-      installMobileTerminalGestures(
-        terminalContainerRef,
-        newTerminal,
-      );
+    disposeMobileTerminalGestures = installMobileTerminalGestures(
+      terminalContainerRef,
+      newTerminal,
+    );
 
     newTerminal.open(terminalContainerRef);
 
@@ -207,13 +207,13 @@ const XTerm = ({
     setTerminal(undefined);
   });
 
-  createEffect(async () => {
+  createEffect(() => {
     const currentTerminal = terminal();
     if (!currentTerminal || !onMount) return;
-    const onMountCleanup = await onMount(currentTerminal);
-    onCleanup(() => {
-      onMountCleanup();
-    });
+    const retained = retainAsyncCleanup(
+      Promise.resolve(onMount(currentTerminal)),
+    );
+    onCleanup(retained.dispose);
   });
 
   createEffect(() => {

@@ -5,7 +5,7 @@
     "": {
       "dependencies": {
         "@bjorn3/browser_wasi_shim": "^0.4",
-        "@oligami/browser_wasi_shim-threads": "^0.4.1",
+        "@oligami/browser_wasi_shim-threads": "0.4.1",
         "@xterm/xterm": "^5.5",
         "xterm-addon-fit": "^0.8.0",
       },
@@ -14,6 +14,9 @@
         "vite": "^8.0",
       },
     },
+  },
+  "patchedDependencies": {
+    "@oligami/browser_wasi_shim-threads@0.4.1": "../../../../patches/@oligami%2Fbrowser_wasi_shim-threads@0.4.1.patch",
   },
   "packages": {
     "@bjorn3/browser_wasi_shim": ["@bjorn3/browser_wasi_shim@0.4.2", "", {}, "sha512-/iHkCVUG3VbcbmEHn5iIUpIrh7a7WPiwZ3sHy4HZKZzBdSadwdddYDZAII2zBvQYV0Lfi8naZngPCN7WPHI/hA=="],

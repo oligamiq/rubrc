@@ -25,7 +25,13 @@ unsafe extern "C" {
 
     /// Dispatch an event to vfs-shell
     pub fn vfs_shell_dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32);
-    pub fn vfs_shell_rust_src_load_state() -> u32;
+    pub fn vfs_shell_startup_sysroot_load_state(kind: u32) -> u32;
+    pub fn vfs_shell_startup_sysroot_error_code(kind: u32) -> u32;
+    pub fn vfs_shell_additional_sysroot_register() -> u32;
+    pub fn vfs_shell_additional_sysroot_state(request_id: u32) -> u32;
+    pub fn vfs_shell_additional_sysroot_error_code(request_id: u32) -> u32;
+    pub fn vfs_shell_additional_sysroot_cancel(request_id: u32) -> u32;
+    pub fn vfs_shell_additional_sysroot_release(request_id: u32) -> u32;
 }
 
 thread_local! {

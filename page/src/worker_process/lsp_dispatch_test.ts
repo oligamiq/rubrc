@@ -139,3 +139,21 @@ Deno.test("dispatch failure still frees and propagates", () => {
   }
   assert(threw && freed, "failure was swallowed or leaked buffer");
 });
+
+Deno.test("worker terminal forwarding observes rejected channel calls", async () => {
+  const source = await Deno.readTextFile(
+    new URL("./util_cmd.ts", import.meta.url),
+  );
+  assert(
+    source.includes(
+      "observeAsyncFailure(lsp({ data: data as any }), console.error)",
+    ),
+    "LSP forwarding rejection is not observed",
+  );
+  assert(
+    /observeAsyncFailure\(\s*terminal\(\{\s*sessionId,\s*data: data as any\s*\}\),\s*console\.error,?\s*\)/.test(
+      source,
+    ),
+    "terminal forwarding rejection is not observed",
+  );
+});

@@ -1,16 +1,15 @@
-export type SysrootMetaResponse = {
-  has_file: boolean | number;
-  name_len?: number;
+export type SysrootArchiveMetaResponse = {
+  has_archive: boolean | number;
   data_len?: number;
 };
 
-export function sysrootMetaStatus(
-  response: SysrootMetaResponse | null | undefined,
+export function sysrootArchiveMetaStatus(
+  response: SysrootArchiveMetaResponse | null | undefined,
 ): number {
   if (!response) return 0;
-  if (response.has_file === true) return 1;
-  if (response.has_file === false) return 0;
-  return response.has_file;
+  if (response.has_archive === true) return 1;
+  if (response.has_archive === false) return 0;
+  return response.has_archive;
 }
 
 export function validateSysrootChunkLength(value: unknown): number {
@@ -38,4 +37,17 @@ export function takeExactSysrootChunk(
     chunk: data.subarray(0, length),
     remaining: length === 0 ? data : data.subarray(length),
   };
+}
+
+export function validateExactSysrootChunk(
+  data: Uint8Array,
+  requestedLength: unknown,
+): Uint8Array {
+  const length = validateSysrootChunkLength(requestedLength);
+  if (data.byteLength !== length) {
+    throw new Error(
+      `sysroot chunk returned ${data.byteLength} bytes for a ${length}-byte request`,
+    );
+  }
+  return data;
 }

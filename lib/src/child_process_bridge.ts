@@ -26,6 +26,46 @@ export interface ChildProcessMessage {
   args: Record<string, unknown>;
 }
 
+export interface ChildProcessStateMetadata {
+  state: number;
+  status: number;
+  error_len: number;
+}
+
+export interface ChildProcessRequestMetadata
+  extends ChildProcessStateMetadata {
+  request_id: number;
+}
+
+export interface ChildProcessErrorChunk {
+  chunk: number[];
+}
+
+export type ChildProcessBridgeResponse =
+  | ChildProcessRequestMetadata
+  | ChildProcessStateMetadata
+  | ChildProcessErrorChunk
+  | Record<string, never>
+  | undefined;
+
+export interface ChildProcessBridge {
+  (
+    message: ChildProcessMessage & {
+      name: "childProcessStart" | "childProcessWrite" | "childProcessRecover";
+    },
+  ): Promise<ChildProcessRequestMetadata>;
+  (
+    message: ChildProcessMessage & { name: "childProcessRun" },
+  ): Promise<ChildProcessStateMetadata>;
+  (
+    message: ChildProcessMessage & { name: "childProcessReadError" },
+  ): Promise<ChildProcessErrorChunk>;
+  (
+    message: ChildProcessMessage & { name: "childProcessEnd" },
+  ): Promise<Record<string, never> | undefined>;
+  (message: ChildProcessMessage): Promise<ChildProcessBridgeResponse>;
+}
+
 interface ChildWorker {
   onmessage: ((event: MessageEvent<WorkerResult>) => void) | null;
   onerror: ((event: ErrorEvent) => void) | null;
@@ -49,6 +89,14 @@ export interface ChildProcessBridgeOptions {
   executionTimeoutMs: number;
   createWorker?: (url: string | URL, options: WorkerOptions) => ChildWorker;
   timers?: ChildProcessTimers;
+  signal?: AbortSignal;
+}
+
+export interface ChildProcessBridgeOwner {
+  handle: ChildProcessBridge;
+  abort(reason?: unknown): void;
+  settle(): Promise<void>;
+  dispose(): Promise<void>;
 }
 
 interface FileSnapshot {
@@ -86,20 +134,21 @@ interface RequestState {
   module: Uint8Array<ArrayBuffer>;
   uploadedModuleBytes: number;
   baseline: DirectorySnapshot;
-  timer: TimerHandle;
+  timer?: TimerHandle;
   worker?: ChildWorker;
   result?: WorkerResult;
   errorBytes?: Uint8Array;
   errorOffset: number;
   resolveRun?: (metadata: StateMetadata) => void;
+  rejectRun?: (reason: unknown) => void;
   recovery?: StateMetadata;
+  restored?: boolean;
+  restoreRequired?: boolean;
+  workerSetup?: boolean;
+  workerTerminated?: boolean;
 }
 
-interface StateMetadata {
-  state: number;
-  status: number;
-  error_len: number;
-}
+type StateMetadata = ChildProcessStateMetadata;
 
 export function isChildProcessMessage(
   value: unknown,
@@ -278,7 +327,24 @@ function normalizeWorkerResult(value: unknown): WorkerResult {
   };
 }
 
-export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    try {
+      if (typeof error.message === "string") return error.message;
+    } catch {
+      // Fall through to guarded string conversion.
+    }
+  }
+  try {
+    return String(error);
+  } catch {
+    return "Unknown child process error";
+  }
+}
+
+export function createChildProcessBridgeOwner(
+  options: ChildProcessBridgeOptions,
+): ChildProcessBridgeOwner {
   validDuration(options.uploadTimeoutMs, "uploadTimeoutMs");
   validDuration(options.executionTimeoutMs, "executionTimeoutMs");
   const timers: ChildProcessTimers = options.timers ?? {
@@ -289,8 +355,22 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
   const createWorker = options.createWorker ??
     ((url: string | URL, workerOptions: WorkerOptions) =>
       new Worker(url, workerOptions));
+  const active = new Set<Promise<unknown>>();
+  const childRequests = new Map<number, RequestState>();
+  const controller = new AbortController();
   let request: RequestState | undefined;
   let nextRequestId = 1;
+  let disposePromise: Promise<void> | undefined;
+
+  const track = <T>(operation: Promise<T>): Promise<T> => {
+    active.add(operation);
+    void operation.catch(() => undefined).finally(() => active.delete(operation));
+    return operation;
+  };
+
+  const settle = async () => {
+    await Promise.allSettled([...active]);
+  };
 
   const requestFor = (args: Record<string, unknown>) => {
     const id = u32Arg(args, "request_id");
@@ -301,26 +381,192 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
   };
 
   const restore = (current: RequestState) => {
+    current.restoreRequired = true;
+    if (current.restored) return;
     restoreFilesystem(options.filesystemRoot, current.baseline);
+    current.restored = true;
   };
 
+  const attemptCleanup = (
+    errors: unknown[],
+    cleanup: () => void,
+  ): boolean => {
+    try {
+      cleanup();
+      return true;
+    } catch (error) {
+      errors.push(error);
+      return false;
+    }
+  };
+
+  const reportCleanupErrors = (errors: unknown[]) => {
+    if (errors.length === 0) return;
+    try {
+      console.error(
+        "child process cleanup failed",
+        new AggregateError(errors, "child process cleanup failed"),
+      );
+    } catch {
+      // Reporting must not interrupt the primary abort or setup outcome.
+    }
+  };
+
+  const clearTimer = (current: RequestState) => {
+    if (current.timer === undefined) return;
+    const timer = current.timer;
+    timers.clearTimeout(timer);
+    current.timer = undefined;
+  };
+
+  const cleanupResources = (
+    current: RequestState,
+    errors: unknown[],
+    acquiredWorker?: ChildWorker,
+  ) => {
+    if (acquiredWorker) current.worker = acquiredWorker;
+    attemptCleanup(errors, () => clearTimer(current));
+
+    const worker = current.worker;
+    if (!worker) return;
+    let listenersCleared = true;
+    listenersCleared = attemptCleanup(errors, () => worker.onmessage = null) &&
+      listenersCleared;
+    listenersCleared = attemptCleanup(errors, () => worker.onerror = null) &&
+      listenersCleared;
+    listenersCleared = attemptCleanup(
+      errors,
+      () => worker.onmessageerror = null,
+    ) && listenersCleared;
+    if (!current.workerTerminated) {
+      current.workerTerminated = attemptCleanup(
+        errors,
+        () => worker.terminate(),
+      );
+    }
+    if (
+      listenersCleared && current.workerTerminated && !current.workerSetup
+    ) {
+      current.worker = undefined;
+    }
+  };
+
+  const cleanupComplete = (current: RequestState) => {
+    return current.timer === undefined && current.worker === undefined &&
+      (!current.restoreRequired || current.restored);
+  };
+
+  const finalizeTerminalRequest = (
+    current: RequestState,
+    acquiredWorker?: ChildWorker,
+  ) => {
+    const errors: unknown[] = [];
+    cleanupResources(current, errors, acquiredWorker);
+    if (current.restoreRequired && !current.restored) {
+      attemptCleanup(errors, () => restore(current));
+    }
+    if (cleanupComplete(current)) childRequests.delete(current.id);
+    reportCleanupErrors(errors);
+  };
+
+  const finishWorkerSetup = (
+    current: RequestState,
+    worker: ChildWorker,
+    setupSucceeded: boolean,
+  ) => {
+    current.workerSetup = false;
+    if (current.state === 3) {
+      finalizeTerminalRequest(current, worker);
+      return;
+    }
+    if (setupSucceeded) return;
+    const errors: unknown[] = [];
+    cleanupResources(current, errors, worker);
+    if (cleanupComplete(current) && request !== current) {
+      childRequests.delete(current.id);
+    }
+    reportCleanupErrors(errors);
+  };
+
+  const abortRequest = (
+    current: RequestState,
+    reason: unknown,
+    acquiredWorker?: ChildWorker,
+  ) => {
+    if (current.state === 3) {
+      finalizeTerminalRequest(current, acquiredWorker);
+      return;
+    }
+    const errors: unknown[] = [];
+    cleanupResources(current, errors, acquiredWorker);
+    attemptCleanup(errors, () => restore(current));
+    if (request === current) request = undefined;
+    const reject = current.rejectRun;
+    current.resolveRun = undefined;
+    current.rejectRun = undefined;
+    if (reject) attemptCleanup(errors, () => reject(reason));
+    if (!reject && cleanupComplete(current)) childRequests.delete(current.id);
+    reportCleanupErrors(errors);
+  };
+
+  const throwIfAborted = (
+    current: RequestState,
+    acquiredWorker?: ChildWorker,
+  ) => {
+    if (!controller.signal.aborted) return;
+    abortRequest(current, controller.signal.reason, acquiredWorker);
+    if (current.state === 3) return;
+    throw controller.signal.reason;
+  };
+
+  const abort = (
+    reason: unknown = new DOMException("runtime disposed", "AbortError"),
+  ) => {
+    if (!controller.signal.aborted) controller.abort(reason);
+    const primary = controller.signal.reason;
+    for (const current of childRequests.values()) {
+      abortRequest(current, primary);
+    }
+  };
+
+  const abortFromSignal = () => abort(options.signal?.reason);
+  if (options.signal?.aborted) {
+    abort(options.signal.reason);
+  } else {
+    options.signal?.addEventListener("abort", abortFromSignal, { once: true });
+  }
+
   const refreshUploadTimer = (current: RequestState) => {
-    timers.clearTimeout(current.timer);
-    current.timer = timers.setTimeout(() => {
-      if (
-        request !== current || current.state !== 1 || current.recovery
-      ) return;
-      restore(current);
-      request = undefined;
-    }, options.uploadTimeoutMs);
+    try {
+      clearTimer(current);
+      throwIfAborted(current);
+      const timer = timers.setTimeout(() => {
+        current.timer = undefined;
+        if (
+          request !== current || current.state !== 1 || current.recovery
+        ) return;
+        const errors: unknown[] = [];
+        attemptCleanup(errors, () => restore(current));
+        request = undefined;
+        if (cleanupComplete(current)) childRequests.delete(current.id);
+        reportCleanupErrors(errors);
+      }, options.uploadTimeoutMs);
+      current.timer = timer;
+      throwIfAborted(current);
+    } catch (error) {
+      abortRequest(
+        current,
+        controller.signal.aborted ? controller.signal.reason : error,
+      );
+      throw controller.signal.aborted ? controller.signal.reason : error;
+    }
   };
 
   const complete = (current: RequestState, result: WorkerResult) => {
     if (request !== current || current.state !== 2 || current.recovery) return;
-    timers.clearTimeout(current.timer);
-    current.worker?.terminate();
-    current.worker = undefined;
-    if (!result.graceful) restore(current);
+    const errors: unknown[] = [];
+    cleanupResources(current, errors);
+    if (!result.graceful) attemptCleanup(errors, () => restore(current));
     current.result = { status: result.status, graceful: result.graceful };
     const errorBytes = result.error === undefined
       ? new Uint8Array()
@@ -332,37 +578,53 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
     current.state = 3;
     const resolve = current.resolveRun;
     current.resolveRun = undefined;
-    resolve?.(stateMetadata(current));
+    current.rejectRun = undefined;
+    if (resolve) {
+      attemptCleanup(errors, () => resolve(stateMetadata(current)));
+    }
+    reportCleanupErrors(errors);
   };
 
   const abortActive = (current: RequestState) => {
-    timers.clearTimeout(current.timer);
-    current.worker?.terminate();
-    current.worker = undefined;
-    restore(current);
+    const errors: unknown[] = [];
+    cleanupResources(current, errors);
+    attemptCleanup(errors, () => restore(current));
     request = undefined;
-    if (current.resolveRun) {
-      const resolve = current.resolveRun;
-      current.resolveRun = undefined;
-      resolve({ state: 3, status: 126, error_len: 0 });
+    const resolve = current.resolveRun;
+    current.resolveRun = undefined;
+    current.rejectRun = undefined;
+    if (resolve) {
+      attemptCleanup(
+        errors,
+        () => resolve({ state: 3, status: 126, error_len: 0 }),
+      );
     }
+    if (!resolve && cleanupComplete(current)) childRequests.delete(current.id);
+    reportCleanupErrors(errors);
   };
 
   const retainActiveRecovery = (current: RequestState) => {
     if (current.recovery) return;
     current.recovery = stateMetadata(current);
-    timers.clearTimeout(current.timer);
-    current.worker?.terminate();
-    current.worker = undefined;
-    restore(current);
-    if (current.resolveRun) {
-      const resolve = current.resolveRun;
-      current.resolveRun = undefined;
-      resolve({ state: 3, status: 126, error_len: 0 });
+    const errors: unknown[] = [];
+    cleanupResources(current, errors);
+    attemptCleanup(errors, () => restore(current));
+    const resolve = current.resolveRun;
+    current.resolveRun = undefined;
+    current.rejectRun = undefined;
+    if (resolve) {
+      attemptCleanup(
+        errors,
+        () => resolve({ state: 3, status: 126, error_len: 0 }),
+      );
     }
+    if (!resolve && cleanupComplete(current)) childRequests.delete(current.id);
+    reportCleanupErrors(errors);
   };
 
-  return async (message: ChildProcessMessage): Promise<unknown> => {
+  const dispatch = async (
+    message: ChildProcessMessage,
+  ): Promise<ChildProcessBridgeResponse> => {
     const { args } = message;
     if (message.name === "childProcessStart") {
       if (request) {
@@ -388,10 +650,10 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
         module: new Uint8Array(expectedModuleBytes),
         uploadedModuleBytes: 0,
         baseline,
-        timer: 0,
         errorOffset: 0,
       };
       request = current;
+      childRequests.set(id, current);
       refreshUploadTimer(current);
       return { request_id: id, ...stateMetadata(current) };
     }
@@ -439,27 +701,37 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
         abortActive(current);
         throw error;
       }
-      timers.clearTimeout(current.timer);
+      clearTimer(current);
+      throwIfAborted(current);
       const module = current.module;
       current.module = new Uint8Array();
       current.state = 2;
-      const runResult = new Promise<StateMetadata>((resolve) => {
+      const runResult = new Promise<StateMetadata>((resolve, reject) => {
         current.resolveRun = resolve;
+        current.rejectRun = reject;
       });
+      void runResult.catch(() => undefined);
+      let acquiredWorker: ChildWorker | undefined;
+      let setupSucceeded = false;
       try {
         const worker = createWorker(options.workerUrl, { type: "module" });
+        acquiredWorker = worker;
         current.worker = worker;
+        current.workerSetup = true;
+        current.workerTerminated = false;
+        throwIfAborted(current, worker);
         worker.onmessage = (event) => {
           try {
             complete(current, normalizeWorkerResult(event.data));
           } catch (error) {
             complete(current, {
               status: 126,
-              error: String(error),
+              error: errorMessage(error),
               graceful: false,
             });
           }
         };
+        throwIfAborted(current, worker);
         worker.onerror = (event) => {
           event.preventDefault?.();
           complete(current, {
@@ -468,6 +740,7 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
             graceful: false,
           });
         };
+        throwIfAborted(current, worker);
         worker.onmessageerror = () => {
           complete(current, {
             status: 126,
@@ -475,30 +748,50 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
             graceful: false,
           });
         };
-        current.timer = timers.setTimeout(() => {
+        throwIfAborted(current, worker);
+        const timer = timers.setTimeout(() => {
+          current.timer = undefined;
           complete(current, {
             status: 124,
             error: `child execution exceeded ${options.executionTimeoutMs} ms`,
             graceful: false,
           });
         }, options.executionTimeoutMs);
+        current.timer = timer;
+        throwIfAborted(current, worker);
+        const wasiRef = options.getWasiRef();
+        throwIfAborted(current, worker);
         worker.postMessage(
           {
             module: module.buffer,
-            wasiRef: options.getWasiRef(),
+            wasiRef,
             args: current.args,
             env: current.env,
           },
           [module.buffer],
         );
+        throwIfAborted(current, worker);
+        setupSucceeded = true;
       } catch (error) {
-        complete(current, {
-          status: 126,
-          error: String(error),
-          graceful: false,
-        });
+        if ((current.state as number) === 3) {
+          finalizeTerminalRequest(current, acquiredWorker);
+        } else if (controller.signal.aborted) {
+          abortRequest(current, controller.signal.reason, acquiredWorker);
+        } else {
+          abortRequest(current, error, acquiredWorker);
+        }
+      } finally {
+        if (acquiredWorker) {
+          finishWorkerSetup(current, acquiredWorker, setupSucceeded);
+        } else {
+          current.workerSetup = false;
+        }
       }
-      return await runResult;
+      try {
+        return await runResult;
+      } finally {
+        if (cleanupComplete(current)) childRequests.delete(current.id);
+      }
     }
 
     if (message.name === "childProcessReadError") {
@@ -545,9 +838,11 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
       if (current.recovery) {
         request = undefined;
       } else if (current.state === 3) {
-        timers.clearTimeout(current.timer);
-        current.worker?.terminate();
+        const errors: unknown[] = [];
+        cleanupResources(current, errors);
         request = undefined;
+        if (cleanupComplete(current)) childRequests.delete(current.id);
+        reportCleanupErrors(errors);
       } else {
         abortActive(current);
       }
@@ -560,4 +855,33 @@ export function createChildProcessBridge(options: ChildProcessBridgeOptions) {
       }`,
     );
   };
+
+  const handle = ((message: ChildProcessMessage) => {
+    controller.signal.throwIfAborted();
+    return track(dispatch(message));
+  }) as ChildProcessBridge;
+
+  const dispose = () => {
+    if (!disposePromise) {
+      disposePromise = (async () => {
+        abort();
+        await settle();
+        abort();
+        options.signal?.removeEventListener("abort", abortFromSignal);
+        for (const [id, current] of childRequests) {
+          if (cleanupComplete(current)) childRequests.delete(id);
+        }
+        request = undefined;
+      })();
+    }
+    return disposePromise;
+  };
+
+  return { handle, abort, settle, dispose };
+}
+
+export function createChildProcessBridge(
+  options: ChildProcessBridgeOptions,
+): ChildProcessBridge {
+  return createChildProcessBridgeOwner(options).handle;
 }

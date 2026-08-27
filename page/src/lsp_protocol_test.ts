@@ -3,6 +3,7 @@ import {
   isLspSession,
   LSP_SESSION_ID,
   LspFrameDecoder,
+  observeAndDeliverLspMessage,
   OrderedLspSender,
   toLspBytes,
 } from "./lsp_protocol.ts";
@@ -96,7 +97,67 @@ Deno.test("ordered sender serializes writes and recovers after rejection", async
   assert(sent.join(",") === "1", `second write overtook first: ${sent}`);
   releaseFirst();
   await Promise.all([first, second]);
-  await sender.write({ jsonrpc: "2.0", id: 3, result: null }).catch(() => undefined);
+  await sender.write({ jsonrpc: "2.0", id: 3, result: null }).catch(() =>
+    undefined
+  );
   await sender.write({ jsonrpc: "2.0", id: 4, result: null });
   assert(sent.join(",") === "1,2,3,4", `wrong send order: ${sent}`);
+});
+
+Deno.test("decoded messages are observed before delivery and observer errors do not consume them", () => {
+  const message = {
+    jsonrpc: "2.0",
+    method: "ready",
+    params: { nested: { value: "original" } },
+  };
+  const events: string[] = [];
+  const expected = new Error("observer failed");
+  let reported: unknown;
+
+  observeAndDeliverLspMessage(
+    message,
+    (observed) => {
+      events.push("observer");
+      observed.params.nested.value = "mutated";
+      throw expected;
+    },
+    (value) => {
+      assert(value === message, "client did not receive the decoded object");
+      assert(
+        value.params.nested.value === "original",
+        "observer mutation reached client delivery",
+      );
+      events.push("client");
+    },
+    (error) => {
+      reported = error;
+      events.push("error");
+    },
+  );
+
+  assert(
+    events.join(",") === "observer,error,client",
+    `wrong order: ${events}`,
+  );
+  assert(reported === expected, "observer error was not reported to its owner");
+});
+
+Deno.test("a throwing observer error reporter still cannot consume a message", () => {
+  const message = { jsonrpc: "2.0", id: 1, result: null };
+  let delivered = false;
+
+  observeAndDeliverLspMessage(
+    message,
+    () => {
+      throw new Error("observer failed");
+    },
+    () => {
+      delivered = true;
+    },
+    () => {
+      throw new Error("error listener failed");
+    },
+  );
+
+  assert(delivered, "throwing error reporter consumed the decoded message");
 });

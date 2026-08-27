@@ -49,9 +49,8 @@ async function runTest() {
                     return new Uint8Array();
                 },
                 Downloader: {
-                    sysrootGetNextFileMeta: () => [0, 0, 0],
-                    sysrootReadFileChunk: () => {},
-                    sysrootReadFileName: () => "",
+                    sysrootGetArchiveMeta: () => 0,
+                    sysrootReadArchiveChunk: () => {},
                     sysrootStartFetch: () => {},
                     downloadFileStart: () => {},
                     downloadFileChunk: () => {},

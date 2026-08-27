@@ -1,5 +1,7 @@
 import {
   loadSysrootArchive,
+  loadSysrootArchiveBytes,
+  parseSysrootArchiveEntriesFromBytes,
   validateSysrootArchiveEntryName,
 } from "./sysroot_archive.ts";
 import * as sysrootArchive from "./sysroot_archive.ts";
@@ -73,8 +75,9 @@ Deno.test("sysroot archive rejects at the bounded timeout", async () => {
       fetchStream: (_url, currentSignal) => {
         signal = currentSignal;
         return new Promise<ReadableStream<Uint8Array>>((_resolve, reject) => {
-          currentSignal.addEventListener("abort", () =>
-            reject(currentSignal.reason),
+          currentSignal.addEventListener(
+            "abort",
+            () => reject(currentSignal.reason),
           );
         });
       },
@@ -85,6 +88,55 @@ Deno.test("sysroot archive rejects at the bounded timeout", async () => {
   }
   assert(rejected, "timeout did not reject");
   assert(signal?.aborted, "timed-out fetch was not aborted");
+});
+
+Deno.test("external abort cancels the byte stream", async () => {
+  const controller = new AbortController();
+  const abortReason = new Error("startup generation replaced");
+  let streamCancelReason: unknown;
+  const loading = loadSysrootArchiveBytes("rust-src", {
+    signal: controller.signal,
+    fetchStream: async () =>
+      new ReadableStream<Uint8Array>({
+        cancel(reason) {
+          streamCancelReason = reason;
+        },
+      }),
+  });
+
+  await Promise.resolve();
+  controller.abort(abortReason);
+  const rejected = await loading.then(() => undefined, (error) => error);
+
+  assert(rejected === abortReason, "external abort reason was replaced");
+  assert(
+    streamCancelReason === abortReason,
+    "archive stream was not cancelled",
+  );
+});
+
+Deno.test("byte archive parsing streams the original archive buffer", async () => {
+  const archiveBytes = new Uint8Array([1, 2, 3]);
+  let parsedChunk: Uint8Array | undefined;
+
+  await parseSysrootArchiveEntriesFromBytes(archiveBytes, {
+    parse: async (stream) => {
+      parsedChunk = (await stream.getReader().read()).value;
+    },
+  });
+
+  assert(
+    parsedChunk?.buffer === archiveBytes.buffer,
+    "parser copied the archive",
+  );
+  assert(
+    parsedChunk?.byteOffset === archiveBytes.byteOffset,
+    "parser moved bytes",
+  );
+  assert(
+    parsedChunk?.byteLength === archiveBytes.byteLength,
+    "parser resized bytes",
+  );
 });
 
 Deno.test("sysroot archive rejects unsafe production entry paths", async () => {

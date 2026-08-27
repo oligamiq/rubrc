@@ -29,10 +29,21 @@ const LSP_SESSION_ID: u32 = 0xFFFFFFFF;
 const EVENT_TYPE_LSP: u32 = 6;
 const EVENT_TYPE_WRITE_FILE: u32 = 7;
 const EVENT_TYPE_BOOTSTRAP_RUST_SRC: u32 = 8;
+const EVENT_TYPE_BOOTSTRAP_TARGET: u32 = 9;
 const SHELL_EVENT_BOOTSTRAP_RUST_SRC: u32 = 6;
+const SHELL_EVENT_BOOTSTRAP_TARGET: u32 = 7;
 const EVENT_TYPE_DEBUG_FIXED_RUSTC: u32 = 1007;
 const EVENT_TYPE_DEBUG_RESERVE_SELF: u32 = 1008;
 const EVENT_TYPE_DEBUG_RESERVE_RUSTC: u32 = 1009;
+
+fn startup_sysroot_shell_event(event_type: u32) -> Option<u32> {
+    match event_type {
+        EVENT_TYPE_BOOTSTRAP_RUST_SRC => Some(SHELL_EVENT_BOOTSTRAP_RUST_SRC),
+        EVENT_TYPE_BOOTSTRAP_TARGET => Some(SHELL_EVENT_BOOTSTRAP_TARGET),
+        _ => None,
+    }
+}
+
 pub static THREAD_SESSIONS: std::sync::LazyLock<dashmap::DashMap<std::thread::ThreadId, u32>> =
     std::sync::LazyLock::new(|| dashmap::DashMap::new());
 
@@ -665,8 +676,32 @@ impl Guest for Wit {
         }
     }
 
-    fn rust_src_load_state() -> u32 {
-        unsafe { crate::shell::vfs_shell_rust_src_load_state() }
+    fn startup_sysroot_load_state(kind: u32) -> u32 {
+        unsafe { crate::shell::vfs_shell_startup_sysroot_load_state(kind) }
+    }
+
+    fn startup_sysroot_error_code(kind: u32) -> u32 {
+        unsafe { crate::shell::vfs_shell_startup_sysroot_error_code(kind) }
+    }
+
+    fn additional_sysroot_register() -> u32 {
+        unsafe { crate::shell::vfs_shell_additional_sysroot_register() }
+    }
+
+    fn additional_sysroot_state(request_id: u32) -> u32 {
+        unsafe { crate::shell::vfs_shell_additional_sysroot_state(request_id) }
+    }
+
+    fn additional_sysroot_error_code(request_id: u32) -> u32 {
+        unsafe { crate::shell::vfs_shell_additional_sysroot_error_code(request_id) }
+    }
+
+    fn additional_sysroot_cancel(request_id: u32) -> u32 {
+        unsafe { crate::shell::vfs_shell_additional_sysroot_cancel(request_id) }
+    }
+
+    fn additional_sysroot_release(request_id: u32) -> u32 {
+        unsafe { crate::shell::vfs_shell_additional_sysroot_release(request_id) }
     }
 
     fn dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
@@ -765,9 +800,9 @@ impl Guest for Wit {
                 }
             }
             return;
-        } else if event_type == EVENT_TYPE_BOOTSTRAP_RUST_SRC {
+        } else if let Some(shell_event_type) = startup_sysroot_shell_event(event_type) {
             unsafe {
-                crate::shell::vfs_shell_dispatch(session_id, SHELL_EVENT_BOOTSTRAP_RUST_SRC, 0, 0);
+                crate::shell::vfs_shell_dispatch(session_id, shell_event_type, 0, 0);
             }
             return;
         } else if event_type == EVENT_TYPE_DEBUG_FIXED_RUSTC {
@@ -2767,34 +2802,20 @@ pub extern "C" fn sysroot_start_fetch(vfs_shell_triple_ptr: i32, triple_len: i32
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sysroot_get_next_file_meta(
-    vfs_shell_name_len_ptr: i32,
-    vfs_shell_data_len_ptr: i32,
-) -> i32 {
-    let mut name_len = 0i32;
+pub extern "C" fn sysroot_get_archive_meta(vfs_shell_data_len_ptr: i32) -> i32 {
     let mut data_len = 0i32;
-    let has_next = crate::vfs::host::bridge::Downloader::sysroot_get_next_file_meta(
-        &mut name_len as *mut _ as i32,
+    let has_archive = crate::vfs::host::bridge::Downloader::sysroot_get_archive_meta(
         &mut data_len as *mut _ as i32,
     );
-
-    vfs_shell::memcpy(vfs_shell_name_len_ptr as *mut u8, &name_len.to_ne_bytes());
     vfs_shell::memcpy(vfs_shell_data_len_ptr as *mut u8, &data_len.to_ne_bytes());
 
-    has_next
+    has_archive
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sysroot_read_file_name(vfs_shell_name_ptr: i32, name_len: i32) {
-    let mut local_buf = vec![0u8; name_len as usize];
-    crate::vfs::host::bridge::Downloader::sysroot_read_file_name(local_buf.as_mut_ptr() as i32);
-    vfs_shell::memcpy(vfs_shell_name_ptr as *mut u8, local_buf.as_slice());
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sysroot_read_file_chunk(vfs_shell_data_ptr: i32, chunk_len: i32) {
+pub extern "C" fn sysroot_read_archive_chunk(vfs_shell_data_ptr: i32, chunk_len: i32) {
     let mut local_buf = vec![0u8; chunk_len as usize];
-    crate::vfs::host::bridge::Downloader::sysroot_read_file_chunk(
+    crate::vfs::host::bridge::Downloader::sysroot_read_archive_chunk(
         local_buf.as_mut_ptr() as i32,
         chunk_len,
     );
@@ -5443,5 +5464,28 @@ mod lsp_cargo_result_tests {
         )
         .unwrap();
         assert_eq!(reused_pointer, high_pointer);
+    }
+}
+
+#[cfg(test)]
+mod startup_sysroot_event_tests {
+    use super::{
+        EVENT_TYPE_BOOTSTRAP_RUST_SRC, EVENT_TYPE_BOOTSTRAP_TARGET, EVENT_TYPE_LSP,
+        SHELL_EVENT_BOOTSTRAP_RUST_SRC, SHELL_EVENT_BOOTSTRAP_TARGET, startup_sysroot_shell_event,
+    };
+
+    #[test]
+    fn startup_sysroot_events_map_to_their_shell_events_only() {
+        assert_eq!(
+            startup_sysroot_shell_event(EVENT_TYPE_BOOTSTRAP_RUST_SRC),
+            Some(SHELL_EVENT_BOOTSTRAP_RUST_SRC)
+        );
+        assert_eq!(
+            startup_sysroot_shell_event(EVENT_TYPE_BOOTSTRAP_TARGET),
+            Some(SHELL_EVENT_BOOTSTRAP_TARGET)
+        );
+        assert_eq!(startup_sysroot_shell_event(EVENT_TYPE_LSP), None);
+        assert_eq!(startup_sysroot_shell_event(0), None);
+        assert_eq!(startup_sysroot_shell_event(u32::MAX), None);
     }
 }

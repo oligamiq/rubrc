@@ -1,5 +1,6 @@
 import {
   createHttpBridge,
+  createHttpBridgeOwner,
   type HttpBridgeMessage,
   isHttpBridgeMessage,
 } from "../lib/src/http_bridge.ts";
@@ -68,6 +69,140 @@ Deno.test("HTTP bridge guard rejects messages without arguments", () => {
     !isHttpBridgeMessage({ name: "httpRequestStart" }),
     "HTTP messages require an args object",
   );
+});
+
+Deno.test("HTTP owner disposal aborts Fetch, cancels its reader, and rejects its callback", async () => {
+  const generation = new AbortController();
+  let seenSignal: AbortSignal | undefined;
+  let cancelledWith: unknown;
+  let cancellationCalls = 0;
+  const body = new ReadableStream<Uint8Array>({
+    cancel(reason) {
+      cancellationCalls++;
+      cancelledWith = reason;
+    },
+  });
+  const fetchImpl: typeof fetch = (_input, init) => {
+    seenSignal = init?.signal ?? undefined;
+    return Promise.resolve(new Response(body));
+  };
+  const owner = createHttpBridgeOwner(fetchImpl, {
+    signal: generation.signal,
+  });
+  const pending = owner.handle(message("httpRequestStart", requestArgs()));
+  void pending.catch(() => undefined);
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const firstDispose = owner.dispose();
+  const secondDispose = owner.dispose();
+  assert(firstDispose === secondDispose, "HTTP disposal Promise changed");
+  await firstDispose;
+
+  assert(
+    seenSignal !== generation.signal,
+    "Fetch received the generation signal directly",
+  );
+  assertEquals(seenSignal?.aborted, true, "Fetch signal was not aborted");
+  assertEquals(cancellationCalls, 1, "response reader cancellation count");
+  assert(
+    cancelledWith instanceof DOMException &&
+      cancelledWith.message === "runtime disposed",
+    "active response reader was not cancelled with the disposal reason",
+  );
+  try {
+    await pending;
+  } catch (error) {
+    assert(
+      error instanceof DOMException,
+      "disposal rejection was not a DOMException",
+    );
+    assertEquals(error.name, "AbortError", "disposal rejection name");
+    assertEquals(error.message, "runtime disposed", "disposal rejection message");
+    return;
+  }
+  throw new Error("disposed HTTP callback synthesized a successful response");
+});
+
+for (const outcome of ["resolve", "reject"] as const) {
+  Deno.test(`HTTP owner settles a Fetch ${outcome} concurrent with disposal`, async () => {
+    let resolveFetch!: (response: Response) => void;
+    let rejectFetch!: (reason: unknown) => void;
+    let seenSignal: AbortSignal | undefined;
+    const owner = createHttpBridgeOwner((_input, init) => {
+      seenSignal = init?.signal ?? undefined;
+      return new Promise<Response>((resolve, reject) => {
+        resolveFetch = resolve;
+        rejectFetch = reject;
+      });
+    });
+    const pending = owner.handle(message("httpRequestStart", requestArgs()));
+    void pending.catch(() => undefined);
+    const disposing = owner.dispose();
+    const disposalReason = seenSignal?.reason;
+
+    if (outcome === "resolve") {
+      resolveFetch(new Response(new Uint8Array([1])));
+    } else {
+      rejectFetch(new Error("network lost during disposal"));
+    }
+    await disposing;
+
+    let rejectedWith: unknown;
+    try {
+      await pending;
+    } catch (error) {
+      rejectedWith = error;
+    }
+    assert(
+      rejectedWith === disposalReason,
+      `${outcome} concurrent with disposal changed the abort reason`,
+    );
+  });
+}
+
+Deno.test("legacy HTTP bridge callable remains usable", async () => {
+  const bridge = createHttpBridge(() =>
+    Promise.resolve(new Response(new Uint8Array([7]), { status: 201 }))
+  );
+  const started = await bridge({
+    name: "httpRequestStart",
+    args: requestArgs(),
+  });
+  const requestId: number = started.request_id;
+  const status: number = started.status;
+
+  assertEquals(requestId, 1, "legacy HTTP request ID");
+  assertEquals(status, 201, "legacy HTTP status");
+});
+
+Deno.test("HTTP owner follows external abort and settles the rejected callback", async () => {
+  const generation = new AbortController();
+  const reason = new DOMException("generation replaced", "AbortError");
+  const fetchImpl: typeof fetch = (_input, init) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener(
+        "abort",
+        () => reject(init.signal?.reason),
+        { once: true },
+      );
+    });
+  const owner = createHttpBridgeOwner(fetchImpl, {
+    signal: generation.signal,
+  });
+  const pending = owner.handle(message("httpRequestStart", requestArgs()));
+  void pending.catch(() => undefined);
+
+  generation.abort(reason);
+  await owner.settle();
+
+  try {
+    await pending;
+  } catch (error) {
+    assert(error === reason, "external abort reason was not preserved");
+    return;
+  }
+  throw new Error("externally aborted HTTP callback resolved");
 });
 
 Deno.test("HTTP bridge preserves request and normalized response data", async () => {

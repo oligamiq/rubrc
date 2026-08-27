@@ -56,9 +56,17 @@ interface ResponseState {
   errorOffset: number;
 }
 
-interface HttpBridgeOptions {
+export interface HttpBridgeOptions {
   maxResponseBytes?: number;
   maxRetainedResponses?: number;
+  signal?: AbortSignal;
+}
+
+export interface HttpBridgeOwner {
+  handle: HttpBridge;
+  abort(reason?: unknown): void;
+  settle(): Promise<void>;
+  dispose(): Promise<void>;
 }
 
 export function isHttpBridgeMessage(
@@ -116,7 +124,12 @@ async function cancelBody(
   }
 }
 
-async function responseBody(response: Response, maxBytes: number) {
+async function responseBody(
+  response: Response,
+  maxBytes: number,
+  readers: Set<ReadableStreamDefaultReader<Uint8Array>>,
+  signal: AbortSignal,
+) {
   const contentLength = response.headers.get("content-length");
   if (
     contentLength !== null && /^\d+$/.test(contentLength) &&
@@ -129,6 +142,7 @@ async function responseBody(response: Response, maxBytes: number) {
   if (!response.body) return new Uint8Array();
 
   const reader = response.body.getReader();
+  readers.add(reader);
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
@@ -156,7 +170,10 @@ async function responseBody(response: Response, maxBytes: number) {
     throw error;
   } finally {
     reader.releaseLock();
+    readers.delete(reader);
   }
+
+  signal.throwIfAborted();
 
   const body = new Uint8Array(total);
   let offset = 0;
@@ -175,10 +192,10 @@ function integerArg(args: Record<string, unknown>, name: string): number {
   return value as number;
 }
 
-export function createHttpBridge(
+export function createHttpBridgeOwner(
   fetchImpl: typeof fetch = fetch,
   options: HttpBridgeOptions = {},
-): HttpBridge {
+): HttpBridgeOwner {
   const maxResponseBytes = options.maxResponseBytes ?? MAX_RESPONSE_BYTES;
   const maxRetainedResponses = options.maxRetainedResponses ??
     MAX_RETAINED_RESPONSES;
@@ -193,8 +210,39 @@ export function createHttpBridge(
     );
   }
   const responses = new Map<number, ResponseState>();
+  const readers = new Set<ReadableStreamDefaultReader<Uint8Array>>();
+  const active = new Set<Promise<unknown>>();
+  const controller = new AbortController();
   let nextRequestId = 1;
   let pendingRequests = 0;
+  let disposePromise: Promise<void> | undefined;
+
+  const track = <T>(operation: Promise<T>): Promise<T> => {
+    active.add(operation);
+    void operation.catch(() => undefined).finally(() => active.delete(operation));
+    return operation;
+  };
+
+  const settle = async () => {
+    await Promise.allSettled([...active]);
+  };
+
+  const abort = (
+    reason: unknown = new DOMException("runtime disposed", "AbortError"),
+  ) => {
+    if (controller.signal.aborted) return;
+    controller.abort(reason);
+    for (const reader of readers) {
+      void reader.cancel(reason).catch(() => undefined);
+    }
+  };
+
+  const abortFromSignal = () => abort(options.signal?.reason);
+  if (options.signal?.aborted) {
+    abort(options.signal.reason);
+  } else {
+    options.signal?.addEventListener("abort", abortFromSignal, { once: true });
+  }
 
   const stateFor = (requestId: number) => {
     const state = responses.get(requestId);
@@ -221,7 +269,7 @@ export function createHttpBridge(
     return { chunk: Array.from(state[field].subarray(start, end)) };
   };
 
-  return (async (message: HttpBridgeMessage) => {
+  const dispatch = async (message: HttpBridgeMessage) => {
     const { args } = message;
     if (message.name === "httpRequestStart") {
       if (pendingRequests + responses.size >= maxRetainedResponses) {
@@ -258,12 +306,17 @@ export function createHttpBridge(
             method,
             headers: requestHeaders(args.headers),
             body: body.length === 0 ? undefined : body as unknown as BodyInit,
+            signal: controller.signal,
           });
+          controller.signal.throwIfAborted();
           const headers = responseHeaders(response.headers);
           const responseBodyBytes = await responseBody(
             response,
             maxResponseBytes,
+            readers,
+            controller.signal,
           );
+          controller.signal.throwIfAborted();
           responses.set(requestId, {
             headers,
             body: responseBodyBytes,
@@ -280,6 +333,9 @@ export function createHttpBridge(
             error_len: 0,
           };
         } catch (error) {
+          if (controller.signal.aborted) {
+            throw controller.signal.reason;
+          }
           const encodedError = encoder.encode(
             error instanceof Error ? error.message : String(error),
           );
@@ -321,5 +377,32 @@ export function createHttpBridge(
     throw new Error(
       `Unknown HTTP bridge message: ${(message as { name: string }).name}`,
     );
+  };
+
+  const handle = ((message: HttpBridgeMessage) => {
+    controller.signal.throwIfAborted();
+    return track(dispatch(message));
   }) as HttpBridge;
+
+  const dispose = () => {
+    if (!disposePromise) {
+      disposePromise = (async () => {
+        abort();
+        await settle();
+        options.signal?.removeEventListener("abort", abortFromSignal);
+        readers.clear();
+        responses.clear();
+      })();
+    }
+    return disposePromise;
+  };
+
+  return { handle, abort, settle, dispose };
+}
+
+export function createHttpBridge(
+  fetchImpl: typeof fetch = fetch,
+  options: HttpBridgeOptions = {},
+): HttpBridge {
+  return createHttpBridgeOwner(fetchImpl, options).handle;
 }

@@ -13,3 +13,4 @@ dashmap = "6.1.0"
 wasibox-core = { path = "../../../sl-rust/crates/wasibox-core" }
 strum = { version = "0.28.0", features = ["derive"] }
 unicode-width = "0.2"
+tar = { version = "0.4", default-features = false }

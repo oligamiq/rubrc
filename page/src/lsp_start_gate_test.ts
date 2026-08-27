@@ -1,469 +1,406 @@
-import { LspStartGate } from "./lsp_start_gate.ts";
-
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
 };
 
-Deno.test("gate starts exactly once after both readiness states", async () => {
-  for (const order of ["monaco-first", "vfs-first"] as const) {
-    let starts = 0;
-    let disposals = 0;
-    const gate = new LspStartGate<object>(async () => {
-      starts++;
-      return {
-        async flush() {},
-        async dispose() {
-          disposals++;
-        },
-      };
-    });
-    if (order === "monaco-first") {
-      gate.setMonaco({});
-      gate.setVfsResult({ ok: true });
-    } else {
-      gate.setVfsResult({ ok: true });
-      gate.setMonaco({});
-    }
-    gate.setVfsResult({ ok: true });
-    gate.setMonaco({});
-    await gate.started();
-    assert(starts === 1, `${order} started ${starts} times`);
-    await gate.dispose();
-    assert(disposals === 1, `${order} disposed ${disposals} times`);
-  }
-});
+const readSource = (path: string) => Deno.readTextFile(path);
 
-Deno.test("gate waits for session startup and flush before the run callback", async () => {
-  const order: string[] = [];
-  let resolveStart!: (session: {
-    flush(): Promise<void>;
-    dispose(): Promise<void>;
-  }) => void;
-  let completeFlush!: () => void;
-  const flushCompletion = new Promise<void>((resolve) => {
-    completeFlush = resolve;
-  });
-  const gate = new LspStartGate<object>(
-    () =>
-      new Promise((resolve) => {
-        resolveStart = resolve;
-      }),
-  );
-  gate.setMonaco({});
-  gate.setVfsResult({ ok: true });
-
-  const run = gate.flush().then(() => order.push("run"));
-  resolveStart({
-    async flush() {
-      order.push("flush-start");
-      await flushCompletion;
-      order.push("flush-complete");
-    },
-    async dispose() {},
-  });
-  await Promise.resolve();
-  await Promise.resolve();
-  assert(!order.includes("run"), `run started during session flush: ${order}`);
-
-  completeFlush();
-  await run;
-  assert(
-    order.join(",") === "flush-start,flush-complete,run",
-    `session flush did not precede run: ${order}`,
-  );
-  await gate.dispose();
-});
-
-Deno.test("gate never starts after disposal", async () => {
-  let starts = 0;
-  const gate = new LspStartGate<object>(async () => {
-    starts++;
-    return { async flush() {}, async dispose() {} };
-  });
-  await gate.dispose();
-  gate.setMonaco({});
-  gate.setVfsResult({ ok: true });
-  assert(starts === 0, "disposed gate started");
-});
-
-Deno.test("failed startup is not retried within the same mount", async () => {
-  let starts = 0;
-  const gate = new LspStartGate<object>(async () => {
-    starts++;
-    throw new Error("start failed");
-  });
-  gate.setMonaco({});
-  gate.setVfsResult({ ok: true });
-  await gate.started()?.catch(() => undefined);
-  gate.setMonaco({});
-  gate.setVfsResult({ ok: true });
-  await gate.started()?.catch(() => undefined);
-  assert(starts === 1, `failed startup retried ${starts} times`);
-});
-
-Deno.test("flush does not suppress run after failed LSP startup", async () => {
-  const gate = new LspStartGate<object>(async () => {
-    throw new Error("start failed after sync cleanup");
-  });
-  gate.setMonaco({});
-  gate.setVfsResult({ ok: true });
-
-  let ran = false;
-  await gate.flush().then(() => {
-    ran = true;
-  });
-
-  assert(ran, "failed LSP startup suppressed run");
-});
-
-Deno.test("flush rejects after gate disposal before or during startup", async () => {
-  const beforeStart = new LspStartGate<object>(async () => ({
-    async flush() {},
-    async dispose() {},
-  }));
-  await beforeStart.dispose();
-  let beforeStartError: unknown;
-  await beforeStart.flush().catch((error) => {
-    beforeStartError = error;
-  });
-  assert(
-    beforeStartError instanceof DOMException &&
-      beforeStartError.name === "AbortError",
-    "flush resolved after disposal before startup",
-  );
-
-  let startupSignal!: AbortSignal;
-  const duringStart = new LspStartGate<object>((_monaco, signal) => {
-    startupSignal = signal;
-    return new Promise<never>((_resolve, reject) => {
-      signal.addEventListener("abort", () => reject(signal.reason), {
-        once: true,
-      });
-    });
-  });
-  duringStart.setMonaco({});
-  duringStart.setVfsResult({ ok: true });
-  let ran = false;
-  let duringStartError: unknown;
-  const run = duringStart
-    .flush()
-    .then(() => {
-      ran = true;
-    })
-    .catch((error) => {
-      duringStartError = error;
-    });
-
-  await duringStart.dispose();
-  await run;
-  assert(
-    duringStartError === startupSignal.reason,
-    "cancellation was replaced",
-  );
-  assert(!ran, "run continued after gate disposal during startup");
-});
-
-Deno.test("gate disposal promptly cancels an in-flight session flush", async () => {
-  let startupSignal!: AbortSignal;
-  let completeFlush!: () => void;
-  const flushCompletion = new Promise<void>((resolve) => {
-    completeFlush = resolve;
-  });
-  const gate = new LspStartGate<object>(async (_monaco, signal) => {
-    startupSignal = signal;
-    return {
-      async flush() {
-        await flushCompletion;
-      },
-      async dispose() {},
-    };
-  });
-  gate.setMonaco({});
-  gate.setVfsResult({ ok: true });
-  await gate.started();
-
-  let settled = false;
-  let caught: unknown;
-  const barrier = gate
-    .flush()
-    .catch((error) => {
-      caught = error;
-    })
-    .finally(() => {
-      settled = true;
-    });
-  await Promise.resolve();
-  await gate.dispose();
-  await Promise.resolve();
-  const settledAfterDisposal = settled;
-  completeFlush();
-  await barrier;
-
-  assert(settledAfterDisposal, "session flush ignored gate disposal");
-  assert(caught === startupSignal.reason, "session cancellation was replaced");
-});
-
-Deno.test("failed VFS readiness settles without starting LSP", () => {
-  let starts = 0;
-  const gate = new LspStartGate<object>(async () => {
-    starts++;
-    return { async flush() {}, async dispose() {} };
-  });
-  gate.setMonaco({});
-  gate.setVfsResult({ ok: false, error: "rust-src failed" });
-  gate.setVfsResult({ ok: true });
-  assert(starts === 0, "failed VFS bootstrap started LSP");
-});
-
-Deno.test("gate disposal aborts and settles an in-progress starter", async () => {
-  let starts = 0;
-  let observedSignal: AbortSignal | undefined;
-  const gate = new LspStartGate<object>((_monaco, signal) => {
-    starts++;
-    observedSignal = signal;
-    return new Promise<never>((_resolve, reject) => {
-      signal.addEventListener("abort", () => reject(signal.reason), {
-        once: true,
-      });
-    });
-  });
-  gate.setMonaco({});
-  gate.setVfsResult({ ok: true });
-
-  await gate.dispose();
-
-  assert(starts === 1, `starter called ${starts} times`);
-  assert(observedSignal?.aborted, "gate disposal did not abort startup");
-});
-
-Deno.test("gate disposal reports rejecting late-session cleanup", async () => {
-  let resolveStart!: (session: {
-    flush(): Promise<void>;
-    dispose(): Promise<void>;
-  }) => void;
-  const cleanupError = new Error("late session cleanup failed");
-  const gate = new LspStartGate<object>(
-    () =>
-      new Promise((resolve) => {
-        resolveStart = resolve;
-      }),
-  );
-  gate.setMonaco({});
-  gate.setVfsResult({ ok: true });
-
-  const disposal = gate.dispose();
-  resolveStart({
-    async flush() {},
-    dispose: async () => {
-      throw cleanupError;
-    },
-  });
-
-  let caught: unknown;
-  try {
-    await disposal;
-  } catch (error) {
-    caught = error;
-  }
-  assert(caught === cleanupError, "late cleanup rejection was swallowed");
-});
-
-Deno.test("App mounts the editor before LSP startup but defers the main model", async () => {
-  const source = await Deno.readTextFile("page/src/App.tsx");
-  const indexSource = await Deno.readTextFile("page/src/index.tsx");
-  const viteSource = await Deno.readTextFile("page/vite.config.ts");
-  const rustLspStaticImport =
-    /(?:\bimport\s*|\bfrom\s*)["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']/;
-  const rustLspDynamicImport =
-    /\bimport\s*\(\s*["']\.\/rust_lsp_client(?:\.(?:ts|js))?["']\s*\)/;
-
-  assert(
-    rustLspStaticImport.test('import "./rust_lsp_client";'),
-    "static-import matcher must reject side-effect imports",
-  );
-  assert(
-    rustLspDynamicImport.test('await import("./rust_lsp_client")'),
-    "dynamic-import matcher must detect direct module ownership",
-  );
-
-  assert(
-    !rustLspStaticImport.test(indexSource),
-    "index.tsx must not statically import rust_lsp_client",
-  );
-  assert(
-    /startLspClient\s*=/.test(indexSource) &&
-      rustLspDynamicImport.test(indexSource),
-    "index.tsx must inject an entry-owned dynamic LSP starter",
-  );
-  assert(
-    !rustLspStaticImport.test(source) && !rustLspDynamicImport.test(source),
-    "App must not import rust_lsp_client",
-  );
-  assert(
-    /startLspClient\s*:/.test(source) &&
-      source.includes("Promise<DisposableLspSession>"),
-    "App must accept the typed injected LSP starter",
-  );
-  assert(
-    source.includes("signal: AbortSignal"),
-    "App starter lacks AbortSignal",
-  );
-  assert(
-    /new\s+LspStartGate[\s\S]*?\(\s*(?:props\.)?startLspClient\s*,?\s*\)/.test(
-      source,
-    ),
-    "App must give the injected starter to LspStartGate",
-  );
-  const dedupeBlock =
-    viteSource.match(/dedupe\s*:\s*\[([\s\S]*?)\]/)?.[1] ?? "";
-  for (const dependency of [
-    "vscode",
-    "@codingame/monaco-vscode-api",
-    "@codingame/monaco-vscode-extension-api",
-    "@codingame/monaco-vscode-extensions-service-override",
-  ]) {
-    assert(
-      dedupeBlock.includes(`"${dependency}"`) ||
-        dedupeBlock.includes(`'${dependency}'`),
-      `Vite does not dedupe ${dependency}`,
-    );
-  }
+Deno.test("App creates and attaches the editable named model at mount", async () => {
+  const source = await readSource("page/src/App.tsx");
   const mountIndex = source.indexOf("const handleMount");
-  const mountedMonacoIndex = source.indexOf(
-    "lspGate.setMonaco(mountedMonaco)",
+  const uriIndex = source.indexOf(
+    'mountedMonaco.Uri.parse("file:///src/main.rs")',
     mountIndex,
   );
-  const startedIndex = source.indexOf("const started = lspGate.started()");
-  const readyIndex = source.indexOf(
-    "started.then(() => setIsLspReady(true))",
-    startedIndex,
+  const getModelIndex = source.indexOf(
+    "mountedMonaco.editor.getModel(uri)",
+    uriIndex,
   );
+  const readWorkspaceIndex = source.indexOf(
+    'workspaceFileSystem.readFile("/src/main.rs")',
+    getModelIndex,
+  );
+  const createModelIndex = source.indexOf(
+    'mountedMonaco.editor.createModel(initialText, "rust", uri)',
+    readWorkspaceIndex,
+  );
+  const attachIndex = source.indexOf("mountedEditor.setModel(model)", uriIndex);
+  const disposeTemporaryIndex = source.indexOf(
+    "temporaryModel.dispose()",
+    attachIndex,
+  );
+  const editableIndex = source.indexOf(
+    "mountedEditor.updateOptions({ readOnly: false })",
+    attachIndex,
+  );
+  const prepareIndex = source.indexOf(
+    "props.registerRemountPreparation?.(async () => {",
+    editableIndex,
+  );
+  const freezeIndex = source.indexOf(
+    "mountedEditor.updateOptions({ readOnly: true })",
+    prepareIndex,
+  );
+  const persistIndex = source.indexOf(
+    "workspaceFileSystem.writeFile(",
+    freezeIndex,
+  );
+  const flushIndex = source.indexOf("await runtime.flushWorkspace()", persistIndex);
 
   assert(mountIndex >= 0, "Monaco mount handler is missing");
+  assert(uriIndex > mountIndex, "named model URI is not created during mount");
+  assert(getModelIndex > uriIndex, "mount does not reuse the named model");
   assert(
-    mountedMonacoIndex > mountIndex,
-    "mounted Monaco does not satisfy the LSP startup gate",
+    readWorkspaceIndex > getModelIndex,
+    "mount does not restore main.rs from the persistent workspace",
   );
   assert(
-    !source.includes("lspGate.setMonaco(monaco);"),
-    "module-level Monaco satisfies the gate before editor mount",
-  );
-  assert(
-    !source.includes("when={isLspReady()}"),
-    "editor rendering is blocked on successful LSP startup",
-  );
-  assert(
-    readyIndex > startedIndex,
-    "LSP readiness is not set from the resolved startup promise",
-  );
-  assert(
-    !source.includes('path={isLspReady() ? "file:///src/main.rs" : undefined}'),
-    "Monaco wrapper competes with the explicit model handoff",
-  );
-  assert(
-    !source.includes("value={isLspReady() ? default_value : undefined}"),
-    "Monaco wrapper overwrites the LSP-owned model value",
-  );
-  assert(
-    !source.includes('path="file:///src/main.rs"'),
-    "main Rust path remains unconditional",
-  );
-  assert(
-    /(?:const|let)\s+\[isEditorReady,\s*setIsEditorReady\]\s*=\s*createSignal\(false\)/.test(
-      source,
-    ),
-    "App lacks editor-specific readiness",
+    createModelIndex > readWorkspaceIndex,
+    "mount does not create a rust named model from persistent text",
   );
   assert(
     source.includes('language="plaintext"'),
-    "Monaco wrapper language changes after the Rust model is attached",
+    "Monaco wrapper creates a competing temporary Rust model",
   );
   assert(
-    source.includes("readOnly: !isEditorReady()"),
-    "temporary Monaco model is not reactively read-only",
+    attachIndex > createModelIndex,
+    "named model is not attached immediately",
   );
   assert(
-    /(?:(?:const|let)\s+)?temporaryModel\s*=\s*mountedEditor\.getModel\(\)/.test(
+    disposeTemporaryIndex > attachIndex,
+    "wrapper-created temporary model is not disposed after named model attachment",
+  );
+  assert(
+    editableIndex > attachIndex,
+    "named model is not editable on attachment",
+  );
+  assert(
+    prepareIndex > editableIndex && freezeIndex > prepareIndex &&
+      persistIndex > freezeIndex && flushIndex > persistIndex,
+    "remount preparation does not freeze, persist, then flush the named model",
+  );
+  assert(
+    !source.includes("modelSwitchDisposable") &&
+      !source.includes("setModel(null)") &&
+      !source.includes("model.dispose()"),
+    "App retains temporary-model recreation or disposal code",
+  );
+  assert(
+    !source.slice(0, prepareIndex).includes("readOnly: !") &&
+      !source.slice(0, prepareIndex).includes("readOnly: true"),
+    "App can attach the editor read-only during startup",
+  );
+});
+
+Deno.test("remount preparation persists every file-backed Monaco model", async () => {
+  const source = await readSource("page/src/App.tsx");
+  const prepareIndex = source.indexOf(
+    "props.registerRemountPreparation?.(async () => {",
+  );
+  const modelsIndex = source.indexOf(
+    "mountedMonaco.editor.getModels()",
+    prepareIndex,
+  );
+  const fileIndex = source.indexOf(
+    'workspaceModel.uri.scheme !== "file"',
+    modelsIndex,
+  );
+  const persistIndex = source.indexOf(
+    "workspaceFileSystem.writeFile(",
+    fileIndex,
+  );
+
+  assert(
+    prepareIndex >= 0 && modelsIndex > prepareIndex && fileIndex > modelsIndex &&
+      persistIndex > fileIndex,
+    "startup remount can drop pending edits from secondary file models",
+  );
+});
+
+Deno.test("App wires the runtime-owned archive store into staged startup", async () => {
+  const source = await readSource("page/src/App.tsx");
+  const xtermSource = await readSource("page/src/xterm.tsx");
+  const coordinatorIndex = source.indexOf("new StartupCoordinator(");
+
+  assert(coordinatorIndex >= 0, "App does not construct a startup coordinator");
+  assert(
+    !source.includes("new SysrootArchiveStore()"),
+    "App creates a second archive store outside runtime ownership",
+  );
+  assert(
+    source.includes("runtime.archiveStore.prefetch(") &&
+      source.includes('["rust-src", "wasm32-wasip1"]'),
+    "coordinator does not prefetch startup sysroots from the runtime store",
+  );
+  assert(
+    source.includes("runtime.ctx.install_startup_sysroots_id") &&
+      source.includes("awaitStartupSysrootsSettlement"),
+    "coordinator does not use the startup-sysroot installation endpoint",
+  );
+  assert(
+    /props\.startLspClient\(\s*mountedMonaco,\s*model as monaco\.editor\.ITextModel,?\s*\)/.test(
       source,
-    ) && source.includes("mountedEditor.onDidChangeModel("),
-    "App does not observe the temporary-to-named model switch",
+    ),
+    "coordinator does not initialize the analyzer with Monaco and named model",
   );
   assert(
-    /\[mountedMonacoRef,\s*setMountedMonacoRef\]\s*=\s*createSignal</.test(
-      source,
-    ) &&
-      /\[mountedEditorRef,\s*setMountedEditorRef\]\s*=\s*createSignal</.test(
+    source.includes("flush: () => session.flush()") &&
+      source.includes("dispose: () => session.dispose()"),
+    "coordinator wrapper does not preserve class-backed session methods",
+  );
+  assert(
+    !source.includes("archiveStore.dispose()"),
+    "App duplicates runtime archive-store disposal",
+  );
+  assert(
+    !xtermSource.includes("SysrootArchiveStore") &&
+      !xtermSource.includes("archiveStore"),
+    "terminal receives an archive store outside runtime ownership",
+  );
+});
+
+Deno.test("entrypoint creates one page supervisor beside the persistent workspace", async () => {
+  const source = await readSource("page/src/index.tsx");
+
+  assert(
+    source.includes("new RuntimeSupervisor("),
+    "entrypoint does not create a RuntimeSupervisor",
+  );
+  assert(
+    source.includes("runtimeSupervisor.create()"),
+    "entrypoint does not obtain one runtime from the supervisor",
+  );
+  assert(
+    /<App\s+runtime=\{runtime\}/.test(source),
+    "entrypoint does not pass the runtime to App",
+  );
+  assert(
+    source.includes("workspaceFileSystem") &&
+      source.indexOf("workspaceFileSystem") < source.indexOf("new RuntimeSupervisor("),
+    "persistent workspace is not page-level supervisor input",
+  );
+  assert(
+    !source.includes("worker_process/worker") &&
+      !source.includes("terminateWorker") &&
+      !source.includes("WASIFarmRefObject"),
+    "entrypoint retains the forwarding-worker owner",
+  );
+});
+
+Deno.test("App exposes startup state and gates run and target changes", async () => {
+  const source = await readSource("page/src/App.tsx");
+
+  assert(
+    source.includes("coordinator.subscribe(setStartup)") ||
+      /coordinator\.subscribe\(\(snapshot\)\s*=>\s*\{[\s\S]*?setStartup\(snapshot\)/.test(
         source,
       ),
-    "mounted Monaco and editor refs are not reactive signals",
-  );
-  const monacoRefIndex = source.indexOf("setMountedMonacoRef(mountedMonaco)");
-  const editorRefIndex = source.indexOf("setMountedEditorRef(mountedEditor)");
-  assert(
-    monacoRefIndex >= 0 &&
-      editorRefIndex > monacoRefIndex &&
-      mountedMonacoIndex > editorRefIndex,
-    "mounted refs must be assigned before Monaco can start the LSP gate",
-  );
-  const targetCheck = source.indexOf(
-    'currentModel?.uri.toString() !== "file:///src/main.rs"',
-  );
-  const detachTemporary = source.indexOf("mountedEditor.setModel(null)");
-  const temporaryDispose = source.indexOf(
-    "temporaryModel?.dispose()",
-    detachTemporary,
-  );
-  const namedModelSwitch = source.indexOf(
-    "mountedEditor.setModel(mainModel)",
-    temporaryDispose,
-  );
-  const editorReady = source.indexOf(
-    "setIsEditorReady(true)",
-    temporaryDispose,
-  );
-  const listenerDispose = source.indexOf(
-    "modelSwitchDisposable?.dispose()",
-    editorReady,
+    "App does not subscribe its Solid startup signal to the coordinator",
   );
   assert(
-    targetCheck >= 0,
-    "model listener does not require the named Rust URI",
+    source.includes("unsubscribeStartup()"),
+    "App cleanup does not unsubscribe from coordinator snapshots",
   );
   assert(
-    detachTemporary >= 0 &&
-      temporaryDispose > detachTemporary &&
-      namedModelSwitch > temporaryDispose,
-    "model handoff must detach, dispose the temporary model, then attach the named model",
+    source.includes("runtime.dispose()") &&
+      !source.includes("coordinator.dispose()"),
+    "App cleanup bypasses canonical runtime disposal",
   );
   assert(
-    editorReady > targetCheck && listenerDispose > editorReady,
-    "named-model listener must mark ready, then self-dispose",
+    /<StartupOverlay\s+state=\{startup\(\)\}/.test(source),
+    "App does not render the coordinator snapshot in StartupOverlay",
   );
   assert(
-    !source.includes("setModelLanguage("),
-    "model handoff mutates the named model language",
+    /<RunButton[\s\S]*?run=\{\(triple\) => runtime\.run\(triple\)\}/.test(source),
+    "RunButton does not dispatch through the runtime",
   );
   assert(
-    !source.includes("setIsEditorReady(isLspReady())"),
-    "LSP readiness incorrectly controls editor mutability",
-  );
-  const cleanupIndex = source.indexOf("onCleanup(() => {");
-  const cleanupEnd = source.indexOf("sharedReady.bc.close()", cleanupIndex);
-  const cleanupBlock = source.slice(cleanupIndex, cleanupEnd);
-  assert(
-    cleanupIndex >= 0 && cleanupEnd > cleanupIndex,
-    "App cleanup is missing",
+    source.includes('runtimeState().operation !== "idle"'),
+    "RunButton is not gated by runtime operation state",
   );
   assert(
-    cleanupBlock.includes("modelSwitchDisposable?.dispose()"),
-    "App cleanup does not dispose the model switch listener",
+    source.includes("targetErrors.load(triple") &&
+      source.includes("runtime.loadTarget(triple)"),
+    "target selector does not load through the runtime",
   );
   assert(
-    cleanupBlock.includes("temporaryModel?.dispose()"),
-    "App cleanup does not dispose the temporary model",
+    !source.includes("LspStartGate") && !source.includes("lspGate"),
+    "App still uses the old LSP gate",
+  );
+});
+
+Deno.test("entrypoint starts LSP from canonical runtime dependencies", async () => {
+  const source = await readSource("page/src/index.tsx");
+
+  assert(
+    /startLspClient=\{\(monaco, model\) =>/.test(source),
+    "entrypoint starter does not accept the named model",
   );
   assert(
-    source.includes('console.error("LSP gate cleanup failed:", error)'),
-    "App does not observe asynchronous gate cleanup failures",
+    source.includes(
+      "startRustLspClient(runtime.lspDependencies, monaco, model)",
+    ),
+    "entrypoint does not use runtime-owned LSP dependencies",
+  );
+});
+
+Deno.test("App adopts startup and attaches the model before runtime startup", async () => {
+  const source = await readSource("page/src/App.tsx");
+  const coordinatorIndex = source.indexOf("new StartupCoordinator(");
+  const adoptIndex = source.indexOf("runtime.adoptCoordinator(coordinator)");
+  const mountIndex = source.indexOf("const handleMount");
+  const attachIndex = source.indexOf("mountedEditor.setModel(model)", mountIndex);
+  const editableIndex = source.indexOf(
+    "mountedEditor.updateOptions({ readOnly: false })",
+    attachIndex,
+  );
+  const runtimeStartIndex = source.indexOf("runtime.start()", editableIndex);
+  const stagedStartIndex = source.indexOf("coordinator.start(model)", runtimeStartIndex);
+
+  assert(coordinatorIndex >= 0, "startup coordinator is missing");
+  assert(
+    adoptIndex > coordinatorIndex && adoptIndex < mountIndex,
+    "coordinator is not synchronously adopted before mount startup",
+  );
+  assert(attachIndex > mountIndex, "named model is not attached at mount");
+  assert(editableIndex > attachIndex, "named model is not made editable");
+  assert(
+    runtimeStartIndex > editableIndex,
+    "runtime starts before the named editable model is attached",
+  );
+  assert(
+    stagedStartIndex > runtimeStartIndex,
+    "language activation can start before runtime startup",
+  );
+  assert(
+    !source.includes("disposeAppStartup({") &&
+      !source.includes("coordinator.dispose()"),
+    "App duplicates adopted coordinator disposal",
+  );
+  assert(
+    source.includes("runtime.dispose()"),
+    "App cleanup does not use canonical runtime disposal",
+  );
+});
+
+Deno.test("adopted coordinator preserves the runtime abort reason", async () => {
+  const source = await readSource("page/src/startup_coordinator.ts");
+  assert(
+    source.includes("abort(reason") && source.includes("this.#controller.abort(reason)"),
+    "StartupCoordinator cannot be aborted with the runtime failure",
+  );
+});
+
+Deno.test("overlay preserves the editor and renders determinate, indeterminate, and failure states", async () => {
+  const source = await readSource("page/src/StartupOverlay.tsx");
+  const appSource = await readSource("page/src/App.tsx");
+
+  assert(
+    source.includes("{task.label}"),
+    "overlay does not render task labels",
+  );
+  assert(
+    source.includes("task.progress === undefined") &&
+      source.includes("animate-pulse") &&
+      !source.includes("0%"),
+    "tasks without totals do not render an indeterminate marker",
+  );
+  assert(
+    source.includes("state().error") && source.includes("{state().error}"),
+    "overlay does not show the exact originating failure message",
+  );
+  assert(
+    source.includes("pointer-events-none") &&
+      source.includes("absolute") &&
+      source.includes("inset-0"),
+    "overlay is not editor-local and click-through",
+  );
+  assert(
+    appSource.includes('class="relative h-[30vh]"') &&
+      /<MonacoEditor[\s\S]*?<StartupOverlay/.test(appSource),
+    "overlay does not retain the Monaco code container beneath it",
+  );
+});
+
+Deno.test("test API exposes the named model immediately", async () => {
+  const source = await readSource("page/src/lsp_test_api.ts");
+  const appSource = await readSource("page/src/App.tsx");
+
+  assert(
+    source.includes("model?: Monaco.editor.ITextModel"),
+    "test API lacks model",
+  );
+  assert(
+    /exposeEditor\([\s\S]*?model: Monaco\.editor\.ITextModel/.test(source),
+    "test API exposure does not receive the named model",
+  );
+  assert(
+    source.includes("beginLspTestGeneration("),
+    "test API does not start a generation",
+  );
+  assert(
+    /exposeEditor\(\s*mountedMonaco,\s*mountedEditor,\s*model,\s*runtime,?\s*\)/.test(
+      appSource,
+    ),
+    "App does not expose the model at mount",
+  );
+});
+
+Deno.test("test entrypoint remounts only after canonical runtime disposal", async () => {
+  const source = await readSource("page/src/index.tsx");
+  const appSource = await readSource("page/src/App.tsx");
+  const mountIndex = source.indexOf("const mountGeneration");
+  const remountIndex = source.indexOf("const remountRuntime", mountIndex);
+  const flushRaceIndex = source.indexOf("await Promise.race([", remountIndex);
+  const flushDeadlineIndex = source.indexOf(
+    "REMOUNT_FLUSH_TIMEOUT_MS",
+    remountIndex,
+  );
+  const prepareIndex = source.indexOf("prepareAppForRemount()", remountIndex);
+  const unmountIndex = source.indexOf("disposeApp?.()", remountIndex);
+  const disposeIndex = source.indexOf("await runtime.dispose()", remountIndex);
+  const nextMountIndex = source.indexOf("await mountGeneration()", disposeIndex);
+
+  assert(mountIndex >= 0, "entrypoint lacks a reusable generation mount");
+  assert(remountIndex > mountIndex, "test remount control is not page-level");
+  assert(
+    flushRaceIndex > remountIndex && prepareIndex > flushRaceIndex &&
+      flushDeadlineIndex > prepareIndex,
+    "pre-remount workspace flush has no teardown deadline",
+  );
+  assert(
+    prepareIndex > remountIndex && prepareIndex < unmountIndex,
+    "ready workspace edits are not flushed before editor unmount",
+  );
+  assert(
+    unmountIndex > prepareIndex && disposeIndex > unmountIndex &&
+      nextMountIndex > disposeIndex,
+    "remount does not await AppRuntime.dispose before supervisor admission",
+  );
+  assert(
+    source.includes("installRuntimeRemountTestControl(remountRuntime)"),
+    "browser test API cannot request a supervisor-owned remount",
+  );
+  for (const phase of ["disposing", "mounting", "mounted", "failed"]) {
+    assert(
+      source.includes(`recordRuntimeRemountPhase("${phase}"`),
+      `browser test API cannot observe remount phase ${phase}`,
+    );
+  }
+  assert(
+    source.includes("recordRuntimeRemountDisposalFailure(error)"),
+    "browser test API cannot observe the canonical disposal rejection",
+  );
+  assert(
+    source.includes("renderRuntimeFailure({") &&
+      source.includes("reloadRequired: runtime?.phase === \"reload-required\"") &&
+      source.includes("if (flushError !== undefined)"),
+    "flush failure does not render a post-disposal runtime failure",
+  );
+  const cleanupIndex = appSource.indexOf("onCleanup(() => {");
+  const runtimeDisposeIndex = appSource.indexOf("runtime.dispose()", cleanupIndex);
+  const generationDisposeIndex = appSource.indexOf("generation?.dispose()", cleanupIndex);
+  assert(
+    runtimeDisposeIndex > cleanupIndex && generationDisposeIndex > runtimeDisposeIndex,
+    "App drops lifecycle recording before canonical disposal settles",
   );
 });

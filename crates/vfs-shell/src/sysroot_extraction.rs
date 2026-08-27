@@ -5,6 +5,47 @@ static SYSROOT_LOAD_LOCK: Mutex<()> = Mutex::new(());
 
 // Rust archive paths are far shorter than 4 KiB; cap host-controlled allocation accordingly.
 const MAX_SYSROOT_ENTRY_NAME_LEN: usize = 4096;
+const MAX_SYSROOT_ARCHIVE_READ_LEN: usize = 512 * 1024;
+
+pub(crate) struct SysrootArchiveReader<C, F> {
+    remaining: usize,
+    is_cancelled: C,
+    read_chunk: F,
+}
+
+impl<C, F> SysrootArchiveReader<C, F> {
+    pub(crate) fn new(archive_len: usize, is_cancelled: C, read_chunk: F) -> Self {
+        Self {
+            remaining: archive_len,
+            is_cancelled,
+            read_chunk,
+        }
+    }
+}
+
+impl<C, F> std::io::Read for SysrootArchiveReader<C, F>
+where
+    C: FnMut() -> bool,
+    F: FnMut(&mut [u8]) -> std::io::Result<()>,
+{
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let to_read = std::cmp::min(
+            self.remaining,
+            std::cmp::min(buffer.len(), MAX_SYSROOT_ARCHIVE_READ_LEN),
+        );
+        if to_read == 0 {
+            return Ok(0);
+        }
+        if (self.is_cancelled)() {
+            return Err(std::io::Error::other(
+                "additional sysroot request cancelled",
+            ));
+        }
+        (self.read_chunk)(&mut buffer[..to_read])?;
+        self.remaining -= to_read;
+        Ok(to_read)
+    }
+}
 
 pub(crate) fn with_sysroot_load_lock<T>(
     operation: impl FnOnce() -> Result<T, String>,
@@ -80,13 +121,73 @@ pub(crate) fn write_sysroot_entry(
     }
 }
 
+pub(crate) fn extract_sysroot_archive<R: std::io::Read>(
+    base_dir: &Path,
+    archive_reader: R,
+) -> Result<(usize, usize), String> {
+    let mut archive = tar::Archive::new(archive_reader);
+    let mut files_loaded = 0usize;
+    let mut total_bytes = 0usize;
+
+    let entries = archive
+        .entries()
+        .map_err(|error| format!("failed to read sysroot archive entries: {error}"))?;
+    for entry in entries {
+        let mut entry =
+            entry.map_err(|error| format!("failed to decode sysroot archive entry: {error}"))?;
+        let entry_type = entry.header().entry_type();
+        let entry_path = entry
+            .path()
+            .map_err(|error| format!("failed to read sysroot archive path: {error}"))?;
+        let entry_name = entry_path.to_string_lossy().to_string();
+        let file_path = sysroot_entry_path(base_dir, entry_name.as_ref())?;
+
+        if entry_type.is_dir() {
+            std::fs::create_dir_all(&file_path).map_err(|error| {
+                format!(
+                    "failed to create sysroot directory '{}': {error}",
+                    entry_name
+                )
+            })?;
+            continue;
+        }
+        if !entry_type.is_file() {
+            return Err(format!(
+                "unsupported sysroot archive entry type for '{}': {:?}",
+                entry_name, entry_type
+            ));
+        }
+
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "failed to create parent directory for sysroot file '{}': {error}",
+                    entry_name
+                )
+            })?;
+        }
+        let mut output = std::fs::File::create(&file_path)
+            .map_err(|error| format!("failed to create sysroot file '{}': {error}", entry_name))?;
+        let copied = std::io::copy(&mut entry, &mut output)
+            .map_err(|error| format!("failed to extract sysroot file '{}': {error}", entry_name))?
+            as usize;
+        files_loaded += 1;
+        total_bytes += copied;
+    }
+    let mut archive_reader = archive.into_inner();
+    std::io::copy(&mut archive_reader, &mut std::io::sink())
+        .map_err(|error| format!("failed to finish reading sysroot archive: {error}"))?;
+    Ok((files_loaded, total_bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        sysroot_entry_name_len, sysroot_entry_path, sysroot_meta_has_file, with_sysroot_load_lock,
-        write_sysroot_entry,
+        SysrootArchiveReader, extract_sysroot_archive, sysroot_entry_name_len, sysroot_entry_path,
+        sysroot_meta_has_file, with_sysroot_load_lock, write_sysroot_entry,
     };
     use std::fs;
+    use std::io::Read;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier};
@@ -112,6 +213,56 @@ mod tests {
         let error = sysroot_entry_name_len(4097).unwrap_err();
         assert!(error.contains("4097"), "unexpected error: {error}");
         assert!(error.contains("4096"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn archive_reader_streams_only_the_reported_bytes() {
+        let source = b"streamed archive";
+        let mut source_offset = 0usize;
+        let mut requested_lengths = Vec::new();
+        let mut output = Vec::new();
+        {
+            let mut reader = SysrootArchiveReader::new(
+                source.len(),
+                || false,
+                |buffer: &mut [u8]| {
+                    requested_lengths.push(buffer.len());
+                    let end = source_offset + buffer.len();
+                    buffer.copy_from_slice(&source[source_offset..end]);
+                    source_offset = end;
+                    Ok(())
+                },
+            );
+            let mut buffer = [0u8; 3];
+            reader.read_to_end(&mut output).unwrap();
+            assert_eq!(reader.read(&mut buffer).unwrap(), 0);
+        }
+
+        assert_eq!(output, source);
+        assert_eq!(source_offset, source.len());
+        assert!(
+            requested_lengths
+                .iter()
+                .all(|length| *length <= source.len())
+        );
+    }
+
+    #[test]
+    fn archive_reader_stops_before_archive_eof_when_chunk_callback_cancels() {
+        use std::cell::Cell;
+
+        let chunks = Cell::new(0);
+        let mut reader = SysrootArchiveReader::new(
+            1024 * 1024,
+            || chunks.get() == 1,
+            |_buffer: &mut [u8]| {
+                chunks.set(chunks.get() + 1);
+                Ok(())
+            },
+        );
+        let error = std::io::copy(&mut reader, &mut std::io::sink()).unwrap_err();
+        assert_eq!(error.to_string(), "additional sysroot request cancelled");
+        assert_eq!(chunks.get(), 1);
     }
 
     #[test]
@@ -196,5 +347,55 @@ mod tests {
         assert!(!sysroot_meta_has_file(0, "rust-src").unwrap());
         let error = sysroot_meta_has_file(-1, "rust-src").unwrap_err();
         assert!(error.contains("rust-src"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn extracts_safe_tar_entries_into_the_sysroot_base() {
+        let base = temp_path("extract-archive");
+        fs::create_dir_all(&base).unwrap();
+
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        let file_data = b"fn main() {}\n";
+        header.set_size(file_data.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        archive
+            .append_data(&mut header, "core/src/lib.rs", &file_data[..])
+            .unwrap();
+        let archive_data = archive.into_inner().unwrap();
+
+        let (files_loaded, total_bytes) =
+            extract_sysroot_archive(&base, archive_data.as_slice()).unwrap();
+        assert_eq!(files_loaded, 1);
+        assert_eq!(total_bytes, file_data.len());
+        assert_eq!(
+            fs::read(base.join("core/src/lib.rs")).unwrap(),
+            file_data.to_vec()
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn rejects_unsafe_tar_entry_paths() {
+        let base = temp_path("extract-unsafe");
+        fs::create_dir_all(&base).unwrap();
+
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        let file_data = b"unsafe";
+        header.set_size(file_data.len() as u64);
+        header.set_mode(0o644);
+        let path = b"../escape.rs";
+        header.as_mut_bytes()[..path.len()].copy_from_slice(path);
+        header.set_cksum();
+        archive.append(&header, &file_data[..]).unwrap();
+        let archive_data = archive.into_inner().unwrap();
+
+        let error = extract_sysroot_archive(&base, archive_data.as_slice()).unwrap_err();
+        assert!(error.contains("unsafe"), "unexpected error: {error}");
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

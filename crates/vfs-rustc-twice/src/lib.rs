@@ -46,6 +46,14 @@ pub(crate) static CARGO_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
 static RUSTC_STARTED: AtomicBool = AtomicBool::new(false);
 pub(crate) static RUSTC_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
 
+const STARTUP_SYSROOT_TARGET_KIND: u32 = 1;
+const STARTUP_SYSROOT_READY: u32 = 2;
+const STARTUP_SYSROOT_FAILED: u32 = 3;
+const STARTUP_SYSROOT_NO_ERROR: u32 = 0;
+const STARTUP_SYSROOT_INVALID_KIND: u32 = 4;
+const ADDITIONAL_SYSROOT_FAILED: u32 = 3;
+const ADDITIONAL_SYSROOT_INVALID_REQUEST: u32 = 3;
+
 pub(crate) fn run_cargo() {
     CARGO_EXIT_STATUS.store(0, Ordering::SeqCst);
     MEMORY_MANAGER.ensure::<cargo_opt>(CARGO_CONFIG);
@@ -192,6 +200,45 @@ impl Guest for Wit {
 
         walk_vfs(root, PathBuf::from("."));
     }
+
+    // This compatibility runner uses host-prepopulated sysroots and has no async bootstrap state.
+    fn startup_sysroot_load_state(kind: u32) -> u32 {
+        if kind <= STARTUP_SYSROOT_TARGET_KIND {
+            STARTUP_SYSROOT_READY
+        } else {
+            STARTUP_SYSROOT_FAILED
+        }
+    }
+
+    fn startup_sysroot_error_code(kind: u32) -> u32 {
+        if kind <= STARTUP_SYSROOT_TARGET_KIND {
+            STARTUP_SYSROOT_NO_ERROR
+        } else {
+            STARTUP_SYSROOT_INVALID_KIND
+        }
+    }
+
+    fn additional_sysroot_register() -> u32 {
+        0
+    }
+
+    fn additional_sysroot_state(_request_id: u32) -> u32 {
+        ADDITIONAL_SYSROOT_FAILED
+    }
+
+    fn additional_sysroot_error_code(_request_id: u32) -> u32 {
+        ADDITIONAL_SYSROOT_INVALID_REQUEST
+    }
+
+    fn additional_sysroot_cancel(_request_id: u32) -> u32 {
+        0
+    }
+
+    fn additional_sysroot_release(_request_id: u32) -> u32 {
+        0
+    }
+
+    fn debug_capture_wait_snapshot() {}
 
     fn dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
         if session_id == LSP_SESSION_ID {
@@ -776,34 +823,20 @@ pub extern "C" fn sysroot_start_fetch(vfs_shell_triple_ptr: i32, triple_len: i32
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sysroot_get_next_file_meta(
-    vfs_shell_name_len_ptr: i32,
-    vfs_shell_data_len_ptr: i32,
-) -> i32 {
-    let mut name_len = 0i32;
+pub extern "C" fn sysroot_get_archive_meta(vfs_shell_data_len_ptr: i32) -> i32 {
     let mut data_len = 0i32;
-    let has_next = crate::vfs::host::bridge::Downloader::sysroot_get_next_file_meta(
-        &mut name_len as *mut _ as i32,
+    let has_archive = crate::vfs::host::bridge::Downloader::sysroot_get_archive_meta(
         &mut data_len as *mut _ as i32,
     );
-
-    vfs_shell::memcpy(vfs_shell_name_len_ptr as *mut u8, &name_len.to_ne_bytes());
     vfs_shell::memcpy(vfs_shell_data_len_ptr as *mut u8, &data_len.to_ne_bytes());
 
-    has_next
+    has_archive
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sysroot_read_file_name(vfs_shell_name_ptr: i32, name_len: i32) {
-    let mut local_buf = vec![0u8; name_len as usize];
-    crate::vfs::host::bridge::Downloader::sysroot_read_file_name(local_buf.as_mut_ptr() as i32);
-    vfs_shell::memcpy(vfs_shell_name_ptr as *mut u8, local_buf.as_slice());
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sysroot_read_file_chunk(vfs_shell_data_ptr: i32, chunk_len: i32) {
+pub extern "C" fn sysroot_read_archive_chunk(vfs_shell_data_ptr: i32, chunk_len: i32) {
     let mut local_buf = vec![0u8; chunk_len as usize];
-    crate::vfs::host::bridge::Downloader::sysroot_read_file_chunk(
+    crate::vfs::host::bridge::Downloader::sysroot_read_archive_chunk(
         local_buf.as_mut_ptr() as i32,
         chunk_len,
     );
@@ -954,4 +987,67 @@ fn write_cargo_result(
     lsp_opt::memcpy(out_stderr_ptr as *mut u8, &stderr_ptr.to_ne_bytes());
     lsp_opt::memcpy(out_stderr_len as *mut u8, &stderr_len.to_ne_bytes());
     lsp_opt::memcpy(out_status as *mut u8, &status.to_ne_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ADDITIONAL_SYSROOT_FAILED, ADDITIONAL_SYSROOT_INVALID_REQUEST, Guest,
+        STARTUP_SYSROOT_FAILED, STARTUP_SYSROOT_INVALID_KIND, STARTUP_SYSROOT_NO_ERROR,
+        STARTUP_SYSROOT_READY, Wit,
+    };
+
+    #[test]
+    fn additional_sysroot_requests_are_unavailable_in_compatibility_runner() {
+        assert_eq!(<Wit as Guest>::additional_sysroot_register(), 0);
+        assert_eq!(
+            <Wit as Guest>::additional_sysroot_state(1),
+            ADDITIONAL_SYSROOT_FAILED
+        );
+        assert_eq!(
+            <Wit as Guest>::additional_sysroot_error_code(1),
+            ADDITIONAL_SYSROOT_INVALID_REQUEST
+        );
+        assert_eq!(<Wit as Guest>::additional_sysroot_release(1), 0);
+    }
+
+    #[test]
+    fn startup_sysroot_state_reports_ready_for_supported_kinds() {
+        assert_eq!(
+            <Wit as Guest>::startup_sysroot_load_state(0),
+            STARTUP_SYSROOT_READY
+        );
+        assert_eq!(
+            <Wit as Guest>::startup_sysroot_error_code(0),
+            STARTUP_SYSROOT_NO_ERROR
+        );
+        assert_eq!(
+            <Wit as Guest>::startup_sysroot_load_state(1),
+            STARTUP_SYSROOT_READY
+        );
+        assert_eq!(
+            <Wit as Guest>::startup_sysroot_error_code(1),
+            STARTUP_SYSROOT_NO_ERROR
+        );
+    }
+
+    #[test]
+    fn startup_sysroot_state_rejects_unknown_kinds() {
+        assert_eq!(
+            <Wit as Guest>::startup_sysroot_load_state(2),
+            STARTUP_SYSROOT_FAILED
+        );
+        assert_eq!(
+            <Wit as Guest>::startup_sysroot_error_code(2),
+            STARTUP_SYSROOT_INVALID_KIND
+        );
+        assert_eq!(
+            <Wit as Guest>::startup_sysroot_load_state(u32::MAX),
+            STARTUP_SYSROOT_FAILED
+        );
+        assert_eq!(
+            <Wit as Guest>::startup_sysroot_error_code(u32::MAX),
+            STARTUP_SYSROOT_INVALID_KIND
+        );
+    }
 }

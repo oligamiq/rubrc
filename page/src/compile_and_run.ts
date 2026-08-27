@@ -1,68 +1,40 @@
-import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
-import type { Ctx } from "./ctx";
-
-let ctx: Ctx;
-type TerminalProxy = (
-  args: {
-    sessionId: number;
-    data: Uint8Array;
-  },
-) => Promise<void>;
-
-let terminal: TerminalProxy;
-let input_string: (args: {
+export type InputStringEndpoint = (args: {
   sessionId: number;
   data: string;
 }) => Promise<void>;
-let waiter: any;
 
-const run_command = async (args: string[]) => {
-  const line = args.join(" ");
-  await input_string({
-    sessionId: 0,
-    data: `${line}\r`,
-  });
-};
+export type TerminalWriteEndpoint = (args: {
+  sessionId: number;
+  data: Uint8Array;
+}) => Promise<void>;
 
-export const compile_and_run_setup = (_ctx: Ctx) => {
-  ctx = _ctx;
+export interface RuntimeCommandAdapter {
+  run(triple?: string): Promise<void>;
+  download(file: string): Promise<void>;
+}
 
-  waiter = new SharedObjectRef(ctx.waiter_id).proxy();
+export const compile_and_run = (
+  service: RuntimeCommandAdapter,
+  triple?: string,
+): Promise<void> => service.run(triple);
 
-  input_string = new SharedObjectRef(ctx.input_string_id).proxy();
-};
+export const download = (
+  service: RuntimeCommandAdapter,
+  file: string,
+): Promise<void> => service.download(file);
 
-let can_setup = false;
+export const commandText = (args: readonly string[]): string =>
+  `${args.join(" ")}\r`;
 
-export const compile_and_run = async (triple?: string) => {
-  if (!can_setup) {
-    if (await waiter.is_all_done()) {
-      terminal = new SharedObjectRef(ctx.terminal_id).proxy();
-      can_setup = true;
-    } else {
-      terminal = new SharedObjectRef(ctx.terminal_id).proxy();
-      await terminal({
-        sessionId: 0,
-        data: new TextEncoder().encode("this is not done yet\r\n"),
-      });
-    }
-  }
+export const cargoRunArgs = (triple?: string): readonly string[] =>
+  triple === undefined
+    ? ["cargo", "run"]
+    : ["cargo", "run", "--target", triple];
 
-  if (can_setup) {
-    if (triple === undefined) {
-      await run_command(["cargo", "run"]);
-    } else {
-      await run_command([
-        "cargo",
-        "run",
-        "--target",
-        triple,
-      ]);
-    }
-  }
-};
+export const downloadArgs = (file: string): readonly string[] => [
+  "download",
+  file,
+];
 
-export const download = async (file: string) => {
-  console.log("download");
-  await run_command(["download", file]);
-};
+export const notReadyOutput = (): Uint8Array =>
+  new TextEncoder().encode("this is not done yet\r\n");

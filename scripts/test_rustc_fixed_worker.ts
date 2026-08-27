@@ -57,11 +57,9 @@ globalThis.onmessage = async (event) => {
       (_index, unknown: { name?: string; args?: any }) => {
         if (unknown.name === "sysrootStartFetch") {
           return {};
-        } else if (unknown.name === "sysrootGetNextFileMeta") {
-          return { has_file: false, name_len: 0, data_len: 0 };
-        } else if (unknown.name === "sysrootReadFileName") {
-          return { name: [] };
-        } else if (unknown.name === "sysrootReadFileChunk") {
+        } else if (unknown.name === "sysrootArchiveGetMeta") {
+          return { has_archive: false, data_len: 0 };
+        } else if (unknown.name === "sysrootReadArchiveChunk") {
           return { chunk: [] };
         } else if (unknown.name === "terminalWrite") {
           return {};

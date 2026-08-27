@@ -3,6 +3,7 @@ import { set_fake_worker } from "../page/src/worker_process/vfs_bindings/common.
 import { custom_instantiate } from "../page/src/worker_process/vfs_bindings/inst.ts";
 import { dispatchSpecialInput } from "../page/src/worker_process/lsp_dispatch.ts";
 import { prebindWasiMemory } from "../page/src/worker_process/prebind_wasi_memory.ts";
+import { createRustAnalyzerConfigurationState } from "../page/src/rust_lsp_config.ts";
 import {
   encodeLspMessage,
   isLspSession,
@@ -11,8 +12,8 @@ import {
   toLspBytes,
 } from "../page/src/lsp_protocol.ts";
 import {
-  RUST_SRC_BOOTSTRAP_TIMEOUT_MS,
-  waitForRustSrcBootstrap,
+  STARTUP_SYSROOT_TIMEOUT_MS,
+  waitForStartupSysroots,
 } from "../page/src/vfs_readiness.ts";
 import {
   startVfsDebugTracePump,
@@ -36,6 +37,7 @@ globalThis.onmessage = async (event) => {
     ok: false,
     detail: "diagnostics worker did not produce a result",
   };
+  let cargoCallsBeforeInit: number | undefined;
   try {
     const wasm = await WebAssembly.compile(
       await Deno.readFile(new URL("vfs.core.wasm", bindingsDir)),
@@ -113,13 +115,7 @@ globalThis.onmessage = async (event) => {
 
     root.dispatch(0, 3, 0, 0);
     root.dispatch(0, 1, 100, 100);
-    const rustSrcResult = await waitForRustSrcBootstrap(root, {
-      timeoutMs: RUST_SRC_BOOTSTRAP_TIMEOUT_MS,
-      sleep: async () => {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      },
-    });
-    if (!rustSrcResult.ok) throw new Error(rustSrcResult.error);
+    const analyzerConfiguration = createRustAnalyzerConfigurationState();
 
     const send = (message: unknown) => {
       const bytes = encodeLspMessage(message);
@@ -141,6 +137,20 @@ globalThis.onmessage = async (event) => {
     ): Promise<any> => {
       const deadline = Date.now() + 90_000;
       while (Date.now() < deadline) {
+        for (let index = messages.length - 1; index >= 0; index--) {
+          const message = messages[index];
+          if (
+            message.method === "workspace/configuration" &&
+            message.id !== undefined
+          ) {
+            messages.splice(index, 1);
+            send({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: analyzerConfiguration.response(message.params.items),
+            });
+          }
+        }
         const index = messages.findIndex(predicate);
         if (index >= 0) return messages.splice(index, 1)[0];
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -156,26 +166,7 @@ globalThis.onmessage = async (event) => {
         processId: null,
         rootUri: "file:///",
         capabilities: { textDocument: { publishDiagnostics: {} } },
-        initializationOptions: {
-          cargo: { sysroot: "/sysroot", buildScripts: { enable: false } },
-          linkedProjects: [
-            {
-              sysroot: "/sysroot",
-              sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
-              sysroot_project: { crates: [] },
-              crates: [
-                {
-                  root_module: "/src/main.rs",
-                  edition: "2021",
-                  deps: [],
-                },
-              ],
-            },
-          ],
-          procMacro: { enable: false },
-          checkOnSave: { enable: false },
-          cachePriming: { enable: false },
-        },
+        initializationOptions: analyzerConfiguration.initializationOptions(),
       },
     });
     await waitForMessage(
@@ -183,6 +174,52 @@ globalThis.onmessage = async (event) => {
       "initialize response",
     );
     send({ jsonrpc: "2.0", method: "initialized", params: {} });
+
+    cargoCallsBeforeInit = hostCallId;
+    const rustSrcResult = await waitForStartupSysroots(root, {
+      timeoutMs: STARTUP_SYSROOT_TIMEOUT_MS,
+      sleep: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      },
+    });
+    if (!rustSrcResult.ok) throw new Error(rustSrcResult.error);
+
+    analyzerConfiguration.activateProject();
+    send({
+      jsonrpc: "2.0",
+      method: "workspace/didChangeConfiguration",
+      params: {
+        settings: analyzerConfiguration.response([
+          { section: "rust-analyzer" },
+        ])[0],
+      },
+    });
+    const graphDeadline = Date.now() + 90_000;
+    let crateGraph = "";
+    let graphRequestId = 2;
+    const graphHasNode = (label: string) =>
+      new RegExp(`\\blabel\\s*=\\s*"${label}"`).test(crateGraph);
+    while (Date.now() < graphDeadline) {
+      const requestId = graphRequestId++;
+      send({
+        jsonrpc: "2.0",
+        id: requestId,
+        method: "rust-analyzer/viewCrateGraph",
+        params: { full: true },
+      });
+      const response = await waitForMessage(
+        (message) => message.id === requestId,
+        "full crate graph",
+      );
+      crateGraph = typeof response.result === "string" ? response.result : "";
+      if (graphHasNode("rubrc_main") && graphHasNode("core")) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (!graphHasNode("rubrc_main") || !graphHasNode("core")) {
+      throw new Error(`incomplete crate graph: ${crateGraph}`);
+    }
 
     const uri = "file:///src/main.rs";
     send({
@@ -270,12 +307,14 @@ globalThis.onmessage = async (event) => {
     result = {
       ok: true,
       detail: "rust-analyzer published and cleared diagnostics",
+      cargoCallsBeforeInit,
     };
   } catch (error) {
     result = {
       ok: false,
       detail:
         error instanceof Error ? (error.stack ?? error.message) : String(error),
+      cargoCallsBeforeInit,
     };
   } finally {
     try {

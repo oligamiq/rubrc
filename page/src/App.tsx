@@ -1,27 +1,35 @@
-import {
-  createEffect,
-  createSignal,
-  For,
-  lazy,
-  onCleanup,
-  Suspense,
-} from "solid-js";
+import { createSignal, For, lazy, onCleanup, Suspense } from "solid-js";
 import * as monaco from "monaco-editor";
 import { SetupMyTerminal } from "./xterm";
-import type { WASIFarmRef } from "@oligami/browser_wasi_shim-threads";
-import type { Ctx } from "./ctx";
-import { default_value } from "./config";
 import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
-import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
-import { type DisposableLspSession, LspStartGate } from "./lsp_start_gate";
-import type { VfsReadyResult } from "./vfs_readiness";
-import { exposeEditor, markLspReady } from "./lsp_test_api";
-
+import { workspaceFileSystem } from "./workspace_fs";
+import {
+  type StartupSysrootStatus,
+  type VfsReadyResult,
+  awaitStartupSysrootsSettlement,
+  nextVisibleTerminalSessionId,
+} from "./vfs_readiness";
+import {
+  exposeEditor,
+  type LspTestGenerationRecorder,
+  markLspReady,
+  recordRuntimeTestState,
+  recordStartupTestState,
+} from "./lsp_test_api";
+import {
+  type StagedAnalyzerSession,
+  StartupCoordinator,
+} from "./startup_coordinator";
+import type { SysrootArchiveStore } from "./sysroot_archive_store";
+import { retainArchiveProgress } from "./app_startup_lifecycle";
+import { StartupOverlay } from "./StartupOverlay";
 import { TargetSelector } from "./TargetSelector";
+import type { AppRuntime } from "./app_runtime.ts";
+import { createTargetErrorState } from "./target_error_state.ts";
 
 const MonacoEditor = lazy(() =>
-  import("solid-monaco").then((mod) => ({ default: mod.MonacoEditor })),
+  import("solid-monaco").then((module) => ({ default: module.MonacoEditor })),
 );
 
 type Pane = {
@@ -30,82 +38,193 @@ type Pane = {
   activeTab: number;
 };
 
+const yieldAnimationFrame = (signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const onAbort = () => {
+      cancelAnimationFrame(frame);
+      reject(signal.reason);
+    };
+    const frame = requestAnimationFrame(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    });
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+
+const waitForResult = <T,>(promise: Promise<T>, signal: AbortSignal) =>
+  new Promise<T>((resolve, reject) => {
+    signal.throwIfAborted();
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", onAbort));
+  });
+
 const App = (props: {
-  ctx: Ctx;
-  callback: (wasi_ref: WASIFarmRef) => void;
+  runtime: AppRuntime<SysrootArchiveStore>;
   startLspClient: (
     monaco: typeof import("monaco-editor"),
-    signal: AbortSignal,
-  ) => Promise<DisposableLspSession>;
+    model: monaco.editor.ITextModel,
+  ) => Promise<StagedAnalyzerSession>;
+  registerRemountPreparation?: (
+    prepare: (() => Promise<void>) | undefined,
+  ) => void;
 }) => {
-  const lspGate = new LspStartGate<typeof import("monaco-editor")>(
-    props.startLspClient,
+  const runtime = props.runtime;
+  let mountedMonacoRef: typeof import("monaco-editor") | undefined;
+  let testApiGeneration:
+    | (LspTestGenerationRecorder & { dispose(): void })
+    | undefined;
+  let resolveVfsReady!: (result: VfsReadyResult) => void;
+  const vfsReady = new Promise<VfsReadyResult>((resolve) => {
+    resolveVfsReady = resolve;
+  });
+  runtime.lspDependencies.factories.createSharedObject(
+    (result: VfsReadyResult) => resolveVfsReady(result),
+    runtime.ctx.vfs_ready_id,
   );
-  const [isLspReady, setIsLspReady] = createSignal(false);
-  const [isEditorReady, setIsEditorReady] = createSignal(false);
-  let temporaryModel: monaco.editor.ITextModel | null | undefined;
-  let modelSwitchDisposable: { dispose(): void } | undefined;
-  const [mountedMonacoRef, setMountedMonacoRef] = createSignal<
-    typeof import("monaco-editor") | undefined
-  >();
-  const [mountedEditorRef, setMountedEditorRef] = createSignal<
-    monaco.editor.IStandaloneCodeEditor | undefined
-  >();
-  createEffect(() => {
-    const mountedMonaco = mountedMonacoRef();
-    const mountedEditor = mountedEditorRef();
-    if (!isLspReady() || !mountedMonaco || !mountedEditor) return;
-    const mainModel = mountedMonaco.editor.getModel(
-      mountedMonaco.Uri.parse("file:///src/main.rs"),
-    );
-    if (mainModel && mountedEditor.getModel() !== mainModel) {
-      mountedEditor.setModel(null);
-      temporaryModel?.dispose();
-      temporaryModel = undefined;
-      mountedEditor.setModel(mainModel);
+  const installStartupSysroots = runtime.lspDependencies.factories
+    .createSharedObjectRef(runtime.ctx.install_startup_sysroots_id)
+    .proxy<() => Promise<StartupSysrootStatus>>();
+  let reportStartupProgress:
+    | ((id: "rust-src" | "target-sysroot", progress?: number) => void)
+    | undefined;
+  const archiveProgress = retainArchiveProgress(
+    runtime.archiveStore,
+    (progress) => {
+      const id = progress.triple === "rust-src"
+        ? "rust-src"
+        : progress.triple === "wasm32-wasip1"
+        ? "target-sysroot"
+        : undefined;
+      if (id === undefined) return;
+      const percent = progress.loaded === undefined ||
+          progress.total === undefined || progress.total === 0
+        ? undefined
+        : (progress.loaded / progress.total) * 100;
+      reportStartupProgress?.(id, percent);
+    },
+  );
+
+  const coordinator = new StartupCoordinator({
+    waitForVfsRuntime: async (signal) => {
+      const result = await waitForResult(vfsReady, signal);
+      if (result.ok === false) throw new Error(result.error);
+    },
+    prefetchSysroots: async (report, signal) => {
+      await yieldAnimationFrame(signal);
+      reportStartupProgress = report;
+      await runtime.archiveStore.prefetch(
+        ["rust-src", "wasm32-wasip1"],
+        signal,
+      );
+    },
+    initializeAnalyzer: async (model) => {
+      await yieldAnimationFrame(runtime.signal);
+      const mountedMonaco = mountedMonacoRef;
+      if (mountedMonaco === undefined) {
+        throw new Error("Monaco is unavailable during analyzer startup");
+      }
+      const session = await props.startLspClient(
+        mountedMonaco,
+        model as monaco.editor.ITextModel,
+      );
+      return {
+        activateProject: async (activationModel, activationSignal, warming) => {
+          await yieldAnimationFrame(activationSignal);
+          await session.activateProject(
+            activationModel,
+            activationSignal,
+            warming,
+          );
+        },
+        flush: () => session.flush(),
+        dispose: () => session.dispose(),
+      };
+    },
+    installSysroots: async (signal) => {
+      await yieldAnimationFrame(signal);
+      const result = await awaitStartupSysrootsSettlement(
+        installStartupSysroots,
+        signal,
+      );
+      if (result.ok === false) throw new Error(result.error);
+    },
+  });
+  runtime.adoptCoordinator(coordinator);
+
+  const [startup, setStartup] = createSignal(coordinator.snapshot());
+  const [runtimeState, setRuntimeState] = createSignal(runtime.state);
+  const unsubscribeStartup = coordinator.subscribe((snapshot) => {
+    setStartup(snapshot);
+    const generation = testApiGeneration;
+    if (generation === undefined) return;
+    recordStartupTestState(generation, snapshot);
+    if (snapshot.phase === "ready") markLspReady(generation);
+  });
+  const unsubscribeRuntime = runtime.subscribe((state) => {
+    setRuntimeState(state);
+    const generation = testApiGeneration;
+    if (generation !== undefined) {
+      recordRuntimeTestState(generation, runtime, state);
     }
   });
-  createEffect(() => {
-    const mountedEditor = mountedEditorRef();
-    const readOnly = !isEditorReady();
-    mountedEditor?.updateOptions({ readOnly });
-  });
-  let lspStartObserved = false;
-  const observeLspStart = () => {
-    const started = lspGate.started();
-    if (!started || lspStartObserved) return;
-    lspStartObserved = true;
-    void started.then(() => setIsLspReady(true)).catch(console.error);
-  };
 
   const handleMount = (
     mountedMonaco: typeof import("monaco-editor"),
     mountedEditor: monaco.editor.IStandaloneCodeEditor,
   ) => {
-    setMountedMonacoRef(mountedMonaco);
-    setMountedEditorRef(mountedEditor);
-    temporaryModel = mountedEditor.getModel();
-    modelSwitchDisposable = mountedEditor.onDidChangeModel(() => {
-      const currentModel = mountedEditor.getModel();
-      if (currentModel?.uri.toString() !== "file:///src/main.rs") return;
-      setIsEditorReady(true);
-      modelSwitchDisposable?.dispose();
-      modelSwitchDisposable = undefined;
+    mountedMonacoRef = mountedMonaco;
+    const uri = mountedMonaco.Uri.parse("file:///src/main.rs");
+    const temporaryModel = mountedEditor.getModel();
+    const existingModel = mountedMonaco.editor.getModel(uri);
+    const initialText = existingModel === null
+      ? new TextDecoder().decode(workspaceFileSystem.readFile("/src/main.rs"))
+      : "";
+    const model = existingModel ??
+      mountedMonaco.editor.createModel(initialText, "rust", uri);
+    mountedEditor.setModel(model);
+    if (temporaryModel !== null && temporaryModel !== model) {
+      temporaryModel.dispose();
+    }
+    mountedEditor.updateOptions({ readOnly: false });
+    props.registerRemountPreparation?.(async () => {
+      mountedEditor.updateOptions({ readOnly: true });
+      for (const workspaceModel of mountedMonaco.editor.getModels()) {
+        if (
+          workspaceModel.uri.scheme !== "file" ||
+          workspaceModel.uri.authority !== "" ||
+          !workspaceModel.uri.path.startsWith("/")
+        ) continue;
+        workspaceFileSystem.writeFile(
+          workspaceModel.uri.path,
+          new TextEncoder().encode(workspaceModel.getValue()),
+          { create: true, overwrite: true, notify: false },
+        );
+      }
+      if (runtime.phase === "ready") await runtime.flushWorkspace();
     });
-    exposeEditor(mountedMonaco, mountedEditor);
-    lspGate.setMonaco(mountedMonaco);
-    observeLspStart();
-    markLspReady();
+    testApiGeneration = exposeEditor(
+      mountedMonaco,
+      mountedEditor,
+      model,
+      runtime,
+    );
+    recordRuntimeTestState(testApiGeneration, runtime, runtime.state);
+    recordStartupTestState(testApiGeneration, coordinator.snapshot());
+    const runtimeStartup = runtime.start();
+    void runtimeStartup.catch((error) =>
+      console.error("Runtime startup failed:", error)
+    );
+    void coordinator.start(model).catch((error) =>
+      console.error("Staged startup failed:", error)
+    );
   };
-  let load_additional_sysroot: ((triple: string) => Promise<void>) | undefined;
 
-  const [triple, setTriple] = createSignal<string | undefined>(undefined);
   const [panes, setPanes] = createSignal<Pane[]>([
-    {
-      id: 1,
-      tabs: [0],
-      activeTab: 0,
-    },
+    { id: 1, tabs: [0], activeTab: 0 },
   ]);
   const [nextPaneId, setNextPaneId] = createSignal(2);
   const [nextSessionId, setNextSessionId] = createSignal(1);
@@ -113,191 +232,173 @@ const App = (props: {
     paneId: number;
     sessionId: number;
   } | null>(null);
-  const [isReady, setIsReady] = createSignal(false);
-  const sharedReady = new SharedObject((result: VfsReadyResult) => {
-    setIsReady(true);
-    lspGate.setVfsResult(result);
-    observeLspStart();
-    if (!result.ok) console.error(result.error);
-  }, props.ctx.vfs_ready_id);
-
-  onCleanup(() => {
-    modelSwitchDisposable?.dispose();
-    modelSwitchDisposable = undefined;
-    temporaryModel?.dispose();
-    temporaryModel = undefined;
-    setMountedMonacoRef(undefined);
-    setMountedEditorRef(undefined);
-    sharedReady.bc.close();
-    void lspGate
-      .dispose()
-      .catch((error) => console.error("LSP gate cleanup failed:", error));
+  const [targetError, setTargetError] = createSignal<string | undefined>();
+  const targetErrors = createTargetErrorState({
+    signal: runtime.signal,
+    publish: setTargetError,
   });
 
-  const close_session_fn = new SharedObjectRef(
-    props.ctx.close_session_id,
-  ).proxy<(args: { sessionId: number }) => Promise<void>>();
+  onCleanup(() => {
+    props.registerRemountPreparation?.(undefined);
+    unsubscribeStartup();
+    unsubscribeRuntime();
+    archiveProgress.dispose();
+    mountedMonacoRef = undefined;
+    const generation = testApiGeneration;
+    testApiGeneration = undefined;
+    void runtime.dispose()
+      .catch((error) => console.error("Runtime cleanup failed:", error))
+      .finally(() => generation?.dispose());
+  });
 
   const addTerminalToPane = (paneId: number) => {
-    const newSessionId = nextSessionId();
-    setNextSessionId(newSessionId + 1);
+    const sessionId = nextVisibleTerminalSessionId(nextSessionId());
+    setNextSessionId(sessionId + 1);
     setPanes(
-      panes().map((p) => {
-        if (p.id === paneId) {
-          return {
-            ...p,
-            tabs: [...p.tabs, newSessionId],
-            activeTab: newSessionId,
-          };
-        }
-        return p;
-      }),
+      panes().map((pane) =>
+        pane.id === paneId
+          ? {
+            ...pane,
+            tabs: [...pane.tabs, sessionId],
+            activeTab: sessionId,
+          }
+          : pane
+      ),
     );
   };
 
   const splitPane = (paneId: number) => {
-    const newSessionId = nextSessionId();
-    setNextSessionId(newSessionId + 1);
+    const sessionId = nextVisibleTerminalSessionId(nextSessionId());
+    setNextSessionId(sessionId + 1);
     const newPaneId = nextPaneId();
     setNextPaneId(newPaneId + 1);
-
-    const currentPanes = panes();
-    const paneIndex = currentPanes.findIndex((p) => p.id === paneId);
-    if (paneIndex === -1) return;
-
-    const newPanes = [...currentPanes];
-    newPanes.splice(paneIndex + 1, 0, {
+    const current = panes();
+    const index = current.findIndex((pane) => pane.id === paneId);
+    if (index === -1) return;
+    const updated = [...current];
+    updated.splice(index + 1, 0, {
       id: newPaneId,
-      tabs: [newSessionId],
-      activeTab: newSessionId,
+      tabs: [sessionId],
+      activeTab: sessionId,
     });
-    setPanes(newPanes);
+    setPanes(updated);
   };
 
-  const removeTerminal = (e: Event, paneId: number, sessionId: number) => {
-    e.stopPropagation();
-    if (sessionId === 0) return; // Cannot close main session
-
-    close_session_fn({ sessionId }).catch(console.error);
-
+  const removeTerminal = (event: Event, paneId: number, sessionId: number) => {
+    event.stopPropagation();
+    if (sessionId === 0) return;
+    void runtime.closeTerminal(sessionId).catch(console.error);
     setPanes(
       panes()
-        .map((p) => {
-          if (p.id === paneId) {
-            const newTabs = p.tabs.filter((t) => t !== sessionId);
-            const newActive =
-              p.activeTab === sessionId
-                ? newTabs.length > 0
-                  ? newTabs[newTabs.length - 1]
-                  : -1
-                : p.activeTab;
-            return { ...p, tabs: newTabs, activeTab: newActive };
-          }
-          return p;
+        .map((pane) => {
+          if (pane.id !== paneId) return pane;
+          const tabs = pane.tabs.filter((tab) => tab !== sessionId);
+          const activeTab = pane.activeTab === sessionId
+            ? tabs.at(-1) ?? -1
+            : pane.activeTab;
+          return { ...pane, tabs, activeTab };
         })
-        .filter((p) => p.tabs.length > 0 || p.id === panes()[0].id),
+        .filter((pane) => pane.tabs.length > 0 || pane.id === panes()[0].id),
     );
   };
 
   const setActiveTab = (paneId: number, sessionId: number) => {
     setPanes(
-      panes().map((p) =>
-        p.id === paneId ? { ...p, activeTab: sessionId } : p,
+      panes().map((pane) =>
+        pane.id === paneId ? { ...pane, activeTab: sessionId } : pane
       ),
     );
   };
 
-  const onDragStart = (e: DragEvent, paneId: number, sessionId: number) => {
+  const onDragStart = (event: DragEvent, paneId: number, sessionId: number) => {
     setDraggedTab({ paneId, sessionId });
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-    }
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
   };
 
-  const onDrop = (e: DragEvent, targetPaneId: number) => {
-    e.preventDefault();
+  const onDrop = (event: DragEvent, targetPaneId: number) => {
+    event.preventDefault();
     const dragged = draggedTab();
-    if (!dragged) return;
-    if (dragged.paneId === targetPaneId) return;
-
+    if (!dragged || dragged.paneId === targetPaneId) return;
     setPanes(
       panes()
-        .map((p) => {
-          if (p.id === dragged.paneId) {
-            const newTabs = p.tabs.filter((t) => t !== dragged.sessionId);
-            const newActive =
-              p.activeTab === dragged.sessionId
-                ? newTabs.length > 0
-                  ? newTabs[newTabs.length - 1]
-                  : -1
-                : p.activeTab;
-            return { ...p, tabs: newTabs, activeTab: newActive };
+        .map((pane) => {
+          if (pane.id === dragged.paneId) {
+            const tabs = pane.tabs.filter((tab) => tab !== dragged.sessionId);
+            const activeTab = pane.activeTab === dragged.sessionId
+              ? tabs.at(-1) ?? -1
+              : pane.activeTab;
+            return { ...pane, tabs, activeTab };
           }
-          if (p.id === targetPaneId) {
+          if (pane.id === targetPaneId) {
             return {
-              ...p,
-              tabs: [...p.tabs, dragged.sessionId],
+              ...pane,
+              tabs: [...pane.tabs, dragged.sessionId],
               activeTab: dragged.sessionId,
             };
           }
-          return p;
+          return pane;
         })
-        .filter((p) => p.tabs.length > 0 || p.id === panes()[0].id),
+        .filter((pane) => pane.tabs.length > 0 || pane.id === panes()[0].id),
     );
-
     setDraggedTab(null);
-  };
-
-  const onDragOver = (e: DragEvent) => {
-    e.preventDefault();
   };
 
   const allSessionIds = () => {
     const ids: number[] = [];
-    for (const p of panes()) {
-      for (const t of p.tabs) {
-        if (!ids.includes(t)) ids.push(t);
+    for (const pane of panes()) {
+      for (const sessionId of pane.tabs) {
+        if (!ids.includes(sessionId)) ids.push(sessionId);
       }
     }
     return ids;
   };
 
+  const controlsDisabled = () =>
+    startup().phase !== "ready" || runtimeState().phase !== "ready";
+
   return (
     <div class="h-[100dvh] w-full flex flex-col overflow-hidden overscroll-none">
-      <Suspense
-        fallback={
-          <div
-            class="p-4 text-white"
-            style={{ width: "100vw", height: "30vh" }}
-          >
-            <p class="text-4xl text-green-700 text-center">Loading editor...</p>
-          </div>
-        }
-      >
-        <MonacoEditor
-          language="plaintext"
-          options={{ readOnly: !isEditorReady() }}
-          height="30vh"
-          onMount={handleMount}
-        />
-      </Suspense>
+      <div class="relative h-[30vh]">
+        <Suspense
+          fallback={
+            <div class="h-full w-full p-4 text-white">
+              <p class="text-4xl text-green-700 text-center">
+                Loading editor...
+              </p>
+            </div>
+          }
+        >
+          <MonacoEditor
+            language="plaintext"
+            options={{ readOnly: false }}
+            height="100%"
+            onMount={(mountedMonaco, mountedEditor) =>
+              handleMount(
+                mountedMonaco as unknown as typeof import("monaco-editor"),
+                mountedEditor as unknown as monaco.editor.IStandaloneCodeEditor,
+              )}
+          />
+        </Suspense>
+        {startup().phase !== "ready" && <StartupOverlay state={startup()} />}
+      </div>
 
       <div class="flex-1 flex flex-col min-h-0 bg-black border-t border-gray-700">
         <div class="flex">
           <For each={panes()}>
-            {(pane, pIndex) => (
+            {(pane, paneIndex) => (
               <div
                 class={`flex-1 flex bg-gray-800 overflow-x-auto min-w-0 ${
-                  pIndex() > 0 ? "border-l border-gray-700" : ""
+                  paneIndex() > 0 ? "border-l border-gray-700" : ""
                 }`}
-                onDragOver={onDragOver}
-                onDrop={(e) => onDrop(e, pane.id)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => onDrop(event, pane.id)}
               >
                 <For each={pane.tabs}>
                   {(sessionId) => (
                     <div
                       draggable={true}
-                      onDragStart={(e) => onDragStart(e, pane.id, sessionId)}
+                      onDragStart={(event) =>
+                        onDragStart(event, pane.id, sessionId)}
                       class={`flex items-center transition-colors border-r border-gray-700 whitespace-nowrap cursor-pointer ${
                         pane.activeTab === sessionId
                           ? "bg-gray-900 border-b-2 border-b-green-500"
@@ -306,6 +407,7 @@ const App = (props: {
                       onClick={() => setActiveTab(pane.id, sessionId)}
                     >
                       <button
+                        type="button"
                         class={`px-4 py-2 text-sm focus:outline-none ${
                           pane.activeTab === sessionId
                             ? "text-green-400"
@@ -316,8 +418,10 @@ const App = (props: {
                       </button>
                       {sessionId !== 0 && (
                         <button
+                          type="button"
                           class="pr-3 text-gray-500 hover:text-red-400 focus:outline-none"
-                          onClick={(e) => removeTerminal(e, pane.id, sessionId)}
+                          onClick={(event) =>
+                            removeTerminal(event, pane.id, sessionId)}
                           title="Close Tab"
                         >
                           ✕
@@ -327,26 +431,28 @@ const App = (props: {
                   )}
                 </For>
                 <button
+                  type="button"
                   class={`px-3 py-2 text-sm transition-colors whitespace-nowrap focus:outline-none ${
-                    isReady()
-                      ? "text-gray-400 hover:text-white hover:bg-gray-700"
-                      : "text-gray-600 cursor-not-allowed"
+                    controlsDisabled()
+                      ? "text-gray-600 cursor-not-allowed"
+                      : "text-gray-400 hover:text-white hover:bg-gray-700"
                   }`}
                   onClick={() => addTerminalToPane(pane.id)}
-                  disabled={!isReady()}
+                  disabled={controlsDisabled()}
                   title="New Tab"
                 >
                   +
                 </button>
                 <div class="flex-1 min-w-[20px]"></div>
                 <button
+                  type="button"
                   class={`px-3 py-2 text-sm transition-colors whitespace-nowrap focus:outline-none border-l border-gray-700 ${
-                    isReady()
-                      ? "text-gray-400 hover:text-white hover:bg-gray-700"
-                      : "text-gray-600 cursor-not-allowed"
+                    controlsDisabled()
+                      ? "text-gray-600 cursor-not-allowed"
+                      : "text-gray-400 hover:text-white hover:bg-gray-700"
                   }`}
                   onClick={() => splitPane(pane.id)}
-                  disabled={!isReady()}
+                  disabled={controlsDisabled()}
                   title="Split Pane Horizontally"
                 >
                   ◫
@@ -365,13 +471,11 @@ const App = (props: {
           <For each={allSessionIds()}>
             {(sessionId) => {
               const paneIndex = () =>
-                panes().findIndex((p) => p.tabs.includes(sessionId));
+                panes().findIndex((pane) => pane.tabs.includes(sessionId));
               const isActive = () => {
-                const pIdx = paneIndex();
-                if (pIdx === -1) return false;
-                return panes()[pIdx].activeTab === sessionId;
+                const index = paneIndex();
+                return index !== -1 && panes()[index].activeTab === sessionId;
               };
-
               return (
                 <div
                   class="relative w-full h-full min-w-0 min-h-0 overflow-hidden"
@@ -382,11 +486,9 @@ const App = (props: {
                   }}
                 >
                   <SetupMyTerminal
-                    ctx={props.ctx}
+                    runtime={runtime}
                     sessionId={sessionId}
-                    isMain={sessionId === 0}
                     isActive={isActive()}
-                    callback={sessionId === 0 ? props.callback : undefined}
                   />
                 </div>
               );
@@ -397,31 +499,31 @@ const App = (props: {
 
       <div class="flex flex-nowrap items-center justify-between gap-2 sm:gap-4 bg-gray-950 border-t border-gray-800 p-2 sm:px-6 sm:py-3 shadow-lg z-10 relative">
         <div class="flex-none">
-          <RunButton triple={triple()} flush={() => lspGate.flush()} />
+          <RunButton
+            triple={runtimeState().selectedTarget}
+            run={(triple) => runtime.run(triple)}
+            disabled={controlsDisabled() || runtimeState().operation !== "idle"}
+          />
         </div>
         <div class="flex-1 min-w-[150px] sm:max-w-xs mx-auto">
           <TargetSelector
             options={triples}
-            value={triple()}
-            onChange={(value) => {
-              if (typeof value !== "string" || !triples.includes(value)) {
-                return;
-              }
-
-              setTriple(value);
-
-              if (load_additional_sysroot === undefined) {
-                load_additional_sysroot = new SharedObjectRef(
-                  props.ctx.load_additional_sysroot_id,
-                ).proxy<(triple: string) => Promise<void>>();
-              }
-
-              load_additional_sysroot(value).catch(console.error);
-            }}
+            selectedTarget={runtimeState().selectedTarget}
+            activeTarget={runtimeState().activeTarget}
+            operation={runtimeState().operation}
+            completedTargets={runtimeState().completedTargets}
+            disabled={controlsDisabled() || runtimeState().operation === "run"}
+            loadTarget={(triple) =>
+              targetErrors.load(triple, () => runtime.loadTarget(triple))}
           />
+          {targetError() && (
+            <p class="mt-1 text-xs text-red-400" role="alert">
+              {targetError()}
+            </p>
+          )}
         </div>
         <div class="flex-none">
-          <DownloadButton />
+          <DownloadButton download={(file) => runtime.download(file)} />
         </div>
       </div>
     </div>

@@ -165,7 +165,11 @@ export default defineConfig(async ({ command, isPreview }) => {
       tailwindcss(),
     ],
     optimizeDeps: {
-      exclude: ["brotli-dec-wasm"],
+      exclude: [
+        "brotli-dec-wasm",
+        "@oligami/browser_wasi_shim-threads",
+        "@oligami/browser_wasi_shim-threads/worker_background_worker",
+      ],
       esbuildOptions: {
         plugins: [importMetaUrlPlugin],
       },

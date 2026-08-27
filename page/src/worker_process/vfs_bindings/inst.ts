@@ -1,5 +1,9 @@
 import type { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
-import { sysrootMetaStatus, type SysrootMetaResponse } from "../../sysroot_protocol.ts";
+import {
+  sysrootArchiveMetaStatus,
+  type SysrootArchiveMetaResponse,
+  validateExactSysrootChunk,
+} from "../../sysroot_protocol.ts";
 import { createChildProcessImports } from "./child_process_import.ts";
 import { createHttpImports } from "./http_import.ts";
 import { type ImportObject, instantiate } from "./vfs.js";function snakeToCamel(snakeCaseString) {
@@ -105,38 +109,29 @@ export const custom_instantiate = async (
               args: { triple },
             });
           },
-          sysrootGetNextFileMeta: (name_len_ptr: number, data_len_ptr: number): number => {
+          sysrootGetArchiveMeta: (data_len_ptr: number): number => {
             const res = call_unknown_fn(0, {
-              name: "sysrootGetNextFileMeta",
+              name: "sysrootArchiveGetMeta",
               args: {},
-            }) as SysrootMetaResponse;
-            console.log("sysrootGetNextFileMeta returned", res);
+            }) as SysrootArchiveMetaResponse;
+            console.log("sysrootArchiveGetMeta returned", res);
             const view32 = new Int32Array(memory.memory.buffer);
-            const status = sysrootMetaStatus(res);
+            const status = sysrootArchiveMetaStatus(res);
 
             if (status === 1) {
-              view32[(name_len_ptr >>> 0) / 4] = res.name_len!;
               view32[(data_len_ptr >>> 0) / 4] = res.data_len!;
             }
             return status;
           },
-          sysrootReadFileName: (name_ptr: number): void => {
+          sysrootReadArchiveChunk: (data_ptr: number, chunk_len: number): void => {
             const res = call_unknown_fn(0, {
-              name: "sysrootReadFileName",
-              args: {},
-            }) as { name: unknown };
-            if (!res) return;
-            const name_bytes = _toUint8Array(res.name);
-            const view8 = new Uint8Array(memory.memory.buffer);
-            view8.set(name_bytes, name_ptr >>> 0);
-          },
-          sysrootReadFileChunk: (data_ptr: number, chunk_len: number): void => {
-            const res = call_unknown_fn(0, {
-              name: "sysrootReadFileChunk",
+              name: "sysrootReadArchiveChunk",
               args: { chunk_len },
             }) as { chunk: unknown };
-            if (!res) return;
-            const chunk_bytes = _toUint8Array(res.chunk);
+            const chunk_bytes = validateExactSysrootChunk(
+              _toUint8Array(res?.chunk),
+              chunk_len,
+            );
             const view8 = new Uint8Array(memory.memory.buffer);
             view8.set(chunk_bytes, data_ptr >>> 0);
           },

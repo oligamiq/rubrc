@@ -49,6 +49,45 @@ Deno.test("browser acceptance separates startup and interaction budgets", async 
   );
 });
 
+Deno.test("browser acceptance snapshots quarantine before rejected remount", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+  const forceIndex = source.indexOf("api.forceDestroyTimeout()");
+  const disposeIndex = source.indexOf(
+    "await api.disposeRuntime().catch(() => undefined)",
+    forceIndex,
+  );
+  const snapshotIndex = source.indexOf(
+    "const quarantineState = {",
+    disposeIndex,
+  );
+  const remountIndex = source.indexOf("await api.remountRuntime()", disposeIndex);
+  const mountFailureIndex = source.indexOf(
+    "window.__rubrcLspTest.mountFailure?.reloadRequired",
+    remountIndex,
+  );
+  const visibleFailureIndex = source.indexOf(
+    'document.querySelector("#runtime-creation-failure")',
+    remountIndex,
+  );
+
+  assert(forceIndex >= 0, "forced destroy timeout acceptance is missing");
+  assert(disposeIndex > forceIndex, "forced timeout disposal is missing");
+  assert(
+    snapshotIndex > disposeIndex && snapshotIndex < remountIndex,
+    "quarantine state is not captured before rejected remount clears the test API",
+  );
+  assert(
+    mountFailureIndex > remountIndex,
+    "quarantined admission is not verified through the reload-required failure UI",
+  );
+  assert(
+    visibleFailureIndex > remountIndex,
+    "quarantine acceptance does not verify the rendered reload-required UI",
+  );
+});
+
 Deno.test("browser acceptance requires semantic rust-analyzer markers", async () => {
   const source = await Deno.readTextFile(
     "scripts/lsp_browser_diagnostics_test.mjs",
@@ -118,18 +157,19 @@ Deno.test("semantic diagnostics worker clears the full mismatch document", async
 });
 
 Deno.test("semantic diagnostics worker disables cargo build scripts", async () => {
-  const source = await Deno.readTextFile(
+  const worker = await Deno.readTextFile(
     "scripts/vfs_lsp_diagnostics_worker.ts",
   );
-  const initializationOptions = source.slice(
-    source.indexOf("initializationOptions: {"),
-    source.indexOf("linkedProjects:"),
+  const config = await Deno.readTextFile(
+    "page/src/rust_lsp_config.ts",
   );
 
   assert(
-    /cargo:\s*\{\s*sysroot:\s*"\/sysroot",\s*buildScripts:\s*\{\s*enable:\s*false\s*\}\s*\}/.test(
-      initializationOptions,
-    ),
+    worker.includes("createRustAnalyzerConfigurationState()") &&
+      worker.includes(
+        "initializationOptions: analyzerConfiguration.initializationOptions()",
+      ) &&
+      config.includes("buildScripts: { enable: false }"),
     "semantic diagnostics worker does not disable cargo build scripts",
   );
 });
@@ -182,6 +222,149 @@ Deno.test("browser readiness requires one named Rust model and an editable edito
       source.includes("testApi.monaco.editor.EditorOption.readOnly") &&
       source.includes("=== false"),
     "browser readiness does not require an editable mounted editor",
+  );
+});
+
+Deno.test("startup disposal waits for the remounted generation to be exposed", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+  const remount = source.indexOf(
+    "void window.__rubrcLspTest.remountRuntime()",
+  );
+  const exposed = source.indexOf(
+    "await waitForMountedGeneration(page, readyGeneration)",
+    remount,
+  );
+  const dispose = source.indexOf("await api.disposeRuntime()", remount);
+
+  assert(remount >= 0, "startup-disposal remount is missing");
+  assert(
+    exposed > remount && exposed < dispose,
+    "startup disposal does not wait for the remounted test generation",
+  );
+  assert(
+    source.includes("api?.runtime?.generation !== previousGeneration") &&
+      source.includes('typeof api.disposeRuntime === "function"') &&
+      source.includes("api?.mountFailure") &&
+      source.includes("api?.runtime?.reloadRequired"),
+    "mounted-generation wait does not require runtime disposal controls",
+  );
+  assert(
+    source.includes("const preRuntimePhase = api.runtime.phase") &&
+      source.includes("const preStartupPhase = api.startup?.phase") &&
+      source.includes('startupDisposal.preRuntimePhase === "ready"') &&
+      source.includes('startupDisposal.preStartupPhase === "ready"'),
+    "startup disposal does not prove it interrupted a non-ready generation",
+  );
+});
+
+Deno.test("browser acceptance checks lifecycle-phase browser errors", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+  const checkpointIndex = source.indexOf(
+    "const lifecycleBrowserErrorStart = browserErrors.length",
+  );
+  const quarantineIndex = source.indexOf("const quarantine =", checkpointIndex);
+  const assertionIndex = source.indexOf(
+    "assertNoUnexpectedLifecycleBrowserErrors(",
+    quarantineIndex,
+  );
+
+  assert(checkpointIndex >= 0, "lifecycle browser error checkpoint is missing");
+  assert(
+    assertionIndex > quarantineIndex,
+    "browser errors after diagnostics are never checked",
+  );
+});
+
+Deno.test("startup cancellation allowlist is limited to runtime bootstrap assets", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+
+  assert(
+    source.includes('error.includes("/vfs-manifest.json")') &&
+      source.includes('error.includes("/assets/vfs.core-")') &&
+      source.includes('error.includes(".wasm.br.json")'),
+    "startup cancellation does not allow the VFS bootstrap metadata requests",
+  );
+  assert(
+    !source.includes('error.includes(".json")'),
+    "startup cancellation allows arbitrary JSON requests",
+  );
+});
+
+Deno.test("browser acceptance reports renderer termination and bounds Chromium cleanup", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+
+  assert(
+    source.includes('page.on("error"') &&
+      source.includes('browser.on("disconnected"') &&
+      source.includes("dumpio: true"),
+    "browser termination diagnostics are missing",
+  );
+  assert(
+    source.includes("BROWSER_CLOSE_TIMEOUT_MS") &&
+      source.includes('browser.process()?.kill("SIGKILL")'),
+    "browser cleanup can wait indefinitely after a renderer crash",
+  );
+});
+
+Deno.test("remount exposure has a bounded failure-state diagnostic", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+  const waitStart = source.indexOf("async function waitForMountedGeneration");
+  const waitEnd = source.indexOf("\n}\n\ntry {", waitStart);
+  const wait = source.slice(waitStart, waitEnd);
+
+  assert(
+    source.includes("const REMOUNT_TIMEOUT_MS = 30_000") &&
+      wait.includes("{ timeout: REMOUNT_TIMEOUT_MS }"),
+    "remount exposure incorrectly reuses the cold-start timeout",
+  );
+  assert(
+    wait.includes("await safeFailureState("),
+    "remount failure-state collection can hide the original failure",
+  );
+});
+
+Deno.test("remounted readiness preserves the final workspace text", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+  const waitStart = source.indexOf("async function waitForReadyGeneration");
+  const waitEnd = source.indexOf("\n}\n\nasync function waitForMountedGeneration", waitStart);
+  const wait = source.slice(waitStart, waitEnd);
+
+  assert(
+    wait.includes("expectedText") &&
+      wait.includes("api.model?.getValue() === expectedText"),
+    "remounted readiness requires the initial-only startup edit",
+  );
+  assert(
+    /waitForReadyGeneration\(\s*page,\s*startupDisposal\.generation,\s*remountMain,/.test(
+      source,
+    ) &&
+      /waitForReadyGeneration\(\s*page,\s*targetDisposal\.generation,\s*remountMain,/.test(
+        source,
+      ) &&
+      source.includes("window.__rubrcLspTest.model.setValue(text)") &&
+      source.includes("}, remountMain)"),
+    "remounted generations do not verify the persisted final workspace text",
+  );
+  assert(
+    source.includes(
+      'const remountMain = "fn main() { let remount_edit = 1; }\\n"',
+    ) &&
+      /waitForReadyGeneration\(\s*page,\s*startupDisposal\.generation,\s*remountMain,/.test(
+        source,
+      ),
+    "browser acceptance does not persist an edit made immediately before remount",
   );
 });
 

@@ -9,14 +9,21 @@ import { set_fake_worker } from "./vfs_bindings/common";
 import { prebindWasiMemory } from "./prebind_wasi_memory.ts";
 import { get_brotli_decompress_stream } from "../../../lib/src/brotli_stream";
 import {
-  RUST_SRC_BOOTSTRAP_TIMEOUT_MS,
+  createAdditionalSysrootStatusEndpoint,
+  createStartupSysrootStatusEndpoint,
+  STARTUP_SYSROOT_TIMEOUT_MS,
   type VfsReadyResult,
-  waitForRustSrcBootstrap,
 } from "../vfs_readiness.ts";
 import {
   startVfsDebugTracePump,
   traceVfsHostCall,
 } from "../vfs_debug_trace.ts";
+import { observeAsyncFailure } from "../terminal_channel_lifecycle.ts";
+import {
+  createUtilityWorkerMessageHandler,
+  createUtilityWorkerStateMachine,
+  type UtilityWorkerInbound,
+} from "../runtime_worker_protocol.ts";
 
 import thread_spawn_path from "./vfs_bindings/thread_spawn.ts?worker&url";
 import worker_background_worker_url from "./vfs_bindings/worker_background_worker.ts?worker&url";
@@ -27,26 +34,37 @@ import { dispatchSpecialInput, routeTerminalWrite } from "./lsp_dispatch.ts";
 
 const shared: SharedObject[] = [];
 
-globalThis.addEventListener("message", async (event) => {
-  const {
-    wasi_refs,
-    ctx,
-  }: {
-    wasi_refs: any[];
-    ctx: Ctx;
-  } = event.data;
+const utilityWorker = createUtilityWorkerStateMachine({
+  prepareAnimal: prepareUtilityAnimal,
+  createAnimal: createUtilityAnimal,
+  startGuest: startUtilityGuest,
+  postMessage: (message) => globalThis.postMessage(message),
+  onFailure: () => {
+    for (const object of shared.splice(0)) object.bc.close();
+  },
+});
 
+const handleUtilityMessage = createUtilityWorkerMessageHandler({
+  machine: utilityWorker,
+  postMessage: (message) => globalThis.postMessage(message),
+});
+
+globalThis.addEventListener("message", (event) => {
+  void handleUtilityMessage(event.data);
+});
+
+// ThreadSpawner requires the real module at construction; only this prerequisite
+// is loaded pre-adoption. vfs_root instantiation and guest work stay post-adoption.
+async function prepareUtilityAnimal(
+  message: Extract<UtilityWorkerInbound, { type: "initialize" }>,
+  signal: AbortSignal,
+): Promise<WebAssembly.Module> {
+  const { ctx }: { ctx: Ctx } = message;
   console.log("loading virtualized vfs component");
 
   const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
     (args: { sessionId: number; data: Uint8Array }) => Promise<void>
   >();
-  const lsp = new SharedObjectRef(ctx.ls_id).proxy<
-    (args: { data: Uint8Array }) => Promise<void>
-  >();
-  const waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
-    set_end_of_exec: (_end_of_exec: boolean) => Promise<void>;
-  }>();
 
   async function getCachedWasm(
     key: string,
@@ -117,7 +135,7 @@ globalThis.addEventListener("message", async (event) => {
       manifestUrl.pathname += ".br.json";
       manifestUrl.hash = "";
 
-      const manifestRes = await fetch(manifestUrl.href);
+      const manifestRes = await fetch(manifestUrl.href, { signal });
       if (!manifestRes.ok) {
         throw new Error(
           `Failed to fetch manifest: ${manifestUrl.href} ${manifestRes.status} ${manifestRes.statusText}`,
@@ -143,7 +161,9 @@ globalThis.addEventListener("message", async (event) => {
       ) {
         throw new Error(`Invalid originalFile in manifest`);
       }
-      if (!manifestUrl.pathname.endsWith(`/${manifest.originalFile}.br.json`)) {
+      if (
+        !manifestUrl.pathname.endsWith(`/${manifest.originalFile}.br.json`)
+      ) {
         throw new Error(`Manifest URL basename does not match originalFile`);
       }
       if (
@@ -162,9 +182,11 @@ globalThis.addEventListener("message", async (event) => {
       let totalPartSize = 0;
       for (let i = 0; i < manifest.parts.length; i++) {
         const part = manifest.parts[i];
-        const expectedPartFile = `${manifest.originalFile}.br.part-${i
-          .toString()
-          .padStart(3, "0")}`;
+        const expectedPartFile = `${manifest.originalFile}.br.part-${
+          i
+            .toString()
+            .padStart(3, "0")
+        }`;
         if (part.file !== expectedPartFile) {
           throw new Error(
             `Invalid part file in manifest: expected ${expectedPartFile}, got ${part.file}`,
@@ -206,7 +228,7 @@ globalThis.addEventListener("message", async (event) => {
             let partIndex = 0;
             for (const part of manifest.parts) {
               const partUrl = new URL(part.file, manifestUrl.href).href;
-              const partRes = await fetch(partUrl);
+              const partRes = await fetch(partUrl, { signal });
               if (!partRes.ok) {
                 throw new Error(
                   `Failed to fetch part ${partIndex} (${partUrl}): ${partRes.status} ${partRes.statusText}`,
@@ -222,14 +244,18 @@ globalThis.addEventListener("message", async (event) => {
 
                 partLoaded += value.byteLength;
                 loaded += value.byteLength;
-                let progressMsg = `\r\x1b[K[VFS] Downloading: ${(
-                  loaded / 1024 / 1024
-                ).toFixed(2)}MB`;
+                let progressMsg = `\r\x1b[K[VFS] Downloading: ${
+                  (
+                    loaded / 1024 / 1024
+                  ).toFixed(2)
+                }MB`;
                 if (total > 0) {
                   const percent = Math.round((loaded / total) * 100);
-                  progressMsg += `/${(total / 1024 / 1024).toFixed(
-                    2,
-                  )}MB (${percent}%)`;
+                  progressMsg += `/${
+                    (total / 1024 / 1024).toFixed(
+                      2,
+                    )
+                  }MB (${percent}%)`;
                 }
                 await terminal({
                   sessionId: 0,
@@ -301,14 +327,13 @@ globalThis.addEventListener("message", async (event) => {
         });
       }
     } else {
-      let response = await fetch(vfs_wasm_path);
+      let response = await fetch(vfs_wasm_path, { signal });
       if (!response.ok) {
         throw new Error(
           `Failed to fetch ${vfs_wasm_path}: ${response.status} ${response.statusText}`,
         );
       }
-      const etag =
-        response.headers.get("etag") ||
+      const etag = response.headers.get("etag") ||
         response.headers.get("last-modified") ||
         "unknown";
       const cacheKey = `${vfs_wasm_path}?etag=${etag}`;
@@ -340,14 +365,18 @@ globalThis.addEventListener("message", async (event) => {
               const { done, value } = await reader.read();
               if (done) break;
               loaded += value.byteLength;
-              let progressMsg = `\r\x1b[K[VFS] Downloading: ${(
-                loaded / 1024 / 1024
-              ).toFixed(2)}MB`;
+              let progressMsg = `\r\x1b[K[VFS] Downloading: ${
+                (
+                  loaded / 1024 / 1024
+                ).toFixed(2)
+              }MB`;
               if (total > 0) {
                 const percent = Math.round((loaded / total) * 100);
-                progressMsg += `/${(total / 1024 / 1024).toFixed(
-                  2,
-                )}MB (${percent}%)`;
+                progressMsg += `/${
+                  (total / 1024 / 1024).toFixed(
+                    2,
+                  )
+                }MB (${percent}%)`;
               }
               await terminal({
                 sessionId: 0,
@@ -393,15 +422,23 @@ globalThis.addEventListener("message", async (event) => {
     throw err;
   }
 
+  if (!vfs_wasm) throw new Error("VFS module was not loaded");
+  return vfs_wasm;
+}
+
+function createUtilityAnimal(
+  message: Extract<UtilityWorkerInbound, { type: "initialize" }>,
+  threadSpawnModule: WebAssembly.Module,
+): WASIFarmAnimal {
   const vfs_threads = 8;
-  const animal = new WASIFarmAnimal(
-    wasi_refs,
+  return new WASIFarmAnimal(
+    message.wasiRef,
     [], // args
     [`VFS_THREADS=${vfs_threads}`, "VFS_DEBUG_TRACE=1"], // env
     {
       can_thread_spawn: true,
       thread_spawn_worker_url: new URL(thread_spawn_path, import.meta.url).href,
-      thread_spawn_wasm: vfs_wasm,
+      thread_spawn_wasm: threadSpawnModule,
       worker_background_worker_url: new URL(
         worker_background_worker_url,
         import.meta.url,
@@ -415,8 +452,25 @@ globalThis.addEventListener("message", async (event) => {
       },
     },
   );
+}
 
+async function startUtilityGuest(
+  animal: WASIFarmAnimal,
+  message: Extract<UtilityWorkerInbound, { type: "initialize" }>,
+  vfs_wasm: WebAssembly.Module,
+): Promise<void> {
+  const { ctx }: { ctx: Ctx } = message;
   await animal.wait_worker_background_worker();
+
+  const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
+    (args: { sessionId: number; data: Uint8Array }) => Promise<void>
+  >();
+  const lsp = new SharedObjectRef(ctx.ls_id).proxy<
+    (args: { data: Uint8Array }) => Promise<void>
+  >();
+  const waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
+    set_end_of_exec: (_end_of_exec: boolean) => Promise<void>;
+  }>();
 
   const debugTraceEnabled = import.meta.env.VITE_RUBRC_LSP_TEST === "1";
   const emitDebugTrace = (chunk: string) => {
@@ -436,10 +490,13 @@ globalThis.addEventListener("message", async (event) => {
           unknown.args.session_id,
           unknown.args.data,
           (data) => {
-            void lsp({ data: data as any });
+            observeAsyncFailure(lsp({ data: data as any }), console.error);
           },
           (sessionId, data) => {
-            void terminal({ sessionId, data: data as any });
+            observeAsyncFailure(
+              terminal({ sessionId, data: data as any }),
+              console.error,
+            );
           },
         );
       } else if (debugTraceEnabled && unknown.name === "hostRunCargo") {
@@ -469,14 +526,12 @@ globalThis.addEventListener("message", async (event) => {
   // Initialize main session
   vfs_root.dispatch(0, 3, 0, 0);
 
-  const get_terminal_size = new SharedObjectRef(ctx.get_terminal_size_id).proxy<
-    () => Promise<{ cols: number; rows: number }>
-  >();
+  const get_terminal_size = new SharedObjectRef(ctx.get_terminal_size_id)
+    .proxy<
+      () => Promise<{ cols: number; rows: number }>
+    >();
   const { cols, rows } = await get_terminal_size();
   vfs_root.dispatch(0, 1, cols, rows);
-  const rustSrcResult = await waitForRustSrcBootstrap(vfs_root, {
-    timeoutMs: RUST_SRC_BOOTSTRAP_TIMEOUT_MS,
-  });
 
   shared.push(
     new SharedObject(({ sessionId }: { sessionId: number }) => {
@@ -504,6 +559,13 @@ globalThis.addEventListener("message", async (event) => {
 
   shared.push(
     new SharedObject(
+      createAdditionalSysrootStatusEndpoint(vfs_root),
+      ctx.load_additional_sysroot_id,
+    ),
+  );
+
+  shared.push(
+    new SharedObject(
       ({
         sessionId,
         data,
@@ -516,8 +578,9 @@ globalThis.addEventListener("message", async (event) => {
             sessionId,
             data,
           })
-        )
+        ) {
           return;
+        }
 
         if (typeof data !== "string") {
           throw new Error("terminal input must be a string");
@@ -530,10 +593,13 @@ globalThis.addEventListener("message", async (event) => {
             }
           }
         } catch (error) {
-          void terminal({
-            sessionId,
-            data: new TextEncoder().encode(`Error: ${error}\r\n`),
-          });
+          observeAsyncFailure(
+            terminal({
+              sessionId,
+              data: new TextEncoder().encode(`Error: ${error}\r\n`),
+            }),
+            console.error,
+          );
         }
       },
       ctx.input_string_id,
@@ -578,8 +644,17 @@ globalThis.addEventListener("message", async (event) => {
     }, ctx.close_session_id),
   );
 
+  shared.push(
+    new SharedObject(
+      createStartupSysrootStatusEndpoint(vfs_root, {
+        timeoutMs: STARTUP_SYSROOT_TIMEOUT_MS,
+      }),
+      ctx.install_startup_sysroots_id,
+    ),
+  );
+
   const vfs_ready = new SharedObjectRef(ctx.vfs_ready_id).proxy<
     (result: VfsReadyResult) => Promise<void>
   >();
-  await vfs_ready(rustSrcResult);
-});
+  await vfs_ready({ ok: true });
+}

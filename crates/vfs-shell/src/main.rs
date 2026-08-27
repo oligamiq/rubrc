@@ -1,9 +1,10 @@
-mod rust_src_bootstrap;
+mod startup_sysroot_bootstrap;
 mod sysroot_extraction;
 
 use colored::*;
 use dashmap::DashMap;
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::env;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -13,11 +14,12 @@ use std::sync::{Arc, LazyLock, Mutex};
 use strum::FromRepr;
 use unicode_width::UnicodeWidthStr;
 use wasi_shell::{
-    handle_parallel, CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor,
+    CommandRegistry, IoContext, KeyEvent, KeyEventHandler, LineEditor, handle_parallel,
 };
 
+use startup_sysroot_bootstrap::{StartupSysroot, StartupSysrootBootstraps, StartupSysrootError};
 use sysroot_extraction::{
-    sysroot_entry_name_len, sysroot_meta_has_file, with_sysroot_load_lock, write_sysroot_entry,
+    SysrootArchiveReader, extract_sysroot_archive, sysroot_meta_has_file, with_sysroot_load_lock,
 };
 
 macro_rules! debug_log {
@@ -128,6 +130,215 @@ static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 // vfs-shell writes here; vfs reads via vfs_shell::memcpy_to.
 static CMD_ARGS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+enum AdditionalSysrootState {
+    Pending = 0,
+    Loading = 1,
+    Ready = 2,
+    Failed = 3,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+enum AdditionalSysrootError {
+    None = 0,
+    Fetch = 1,
+    Extract = 2,
+    InvalidRequest = 3,
+    Cancelled = 4,
+}
+
+#[derive(Clone, Copy)]
+struct AdditionalSysrootRequest {
+    id: u32,
+    state: AdditionalSysrootState,
+    error: AdditionalSysrootError,
+    cancelled: bool,
+}
+
+impl AdditionalSysrootRequest {
+    const EMPTY: Self = Self {
+        id: 0,
+        state: AdditionalSysrootState::Pending,
+        error: AdditionalSysrootError::None,
+        cancelled: false,
+    };
+}
+
+struct AdditionalSysrootRequests<const N: usize> {
+    slots: Mutex<[AdditionalSysrootRequest; N]>,
+    next_id: AtomicU32,
+}
+
+impl<const N: usize> AdditionalSysrootRequests<N> {
+    const fn new() -> Self {
+        Self {
+            slots: Mutex::new([AdditionalSysrootRequest::EMPTY; N]),
+            next_id: AtomicU32::new(1),
+        }
+    }
+
+    fn slots(&self) -> std::sync::MutexGuard<'_, [AdditionalSysrootRequest; N]> {
+        self.slots
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn register(&self) -> u32 {
+        let mut slots = self.slots();
+        let Some(slot_index) = slots.iter().position(|slot| slot.id == 0) else {
+            return 0;
+        };
+        let id = self.next_id.load(Ordering::Relaxed);
+        if id == 0 {
+            return 0;
+        }
+        self.next_id.store(id.wrapping_add(1), Ordering::Relaxed);
+        slots[slot_index] = AdditionalSysrootRequest {
+            id,
+            state: AdditionalSysrootState::Pending,
+            error: AdditionalSysrootError::None,
+            cancelled: false,
+        };
+        id
+    }
+
+    fn begin(&self, id: u32) -> bool {
+        let mut slots = self.slots();
+        let Some(slot) = slots.iter_mut().find(|slot| slot.id == id) else {
+            return false;
+        };
+        if slot.state != AdditionalSysrootState::Pending {
+            return false;
+        }
+        slot.state = AdditionalSysrootState::Loading;
+        true
+    }
+
+    fn finish(&self, id: u32, result: Result<(), AdditionalSysrootError>) {
+        let mut slots = self.slots();
+        let Some(slot) = slots.iter_mut().find(|slot| slot.id == id) else {
+            return;
+        };
+        if slot.state != AdditionalSysrootState::Loading {
+            return;
+        }
+        if slot.cancelled {
+            slot.state = AdditionalSysrootState::Failed;
+            slot.error = AdditionalSysrootError::Cancelled;
+            return;
+        }
+        match result {
+            Ok(()) => {
+                slot.state = AdditionalSysrootState::Ready;
+                slot.error = AdditionalSysrootError::None;
+            }
+            Err(error) => {
+                slot.state = AdditionalSysrootState::Failed;
+                slot.error = error;
+            }
+        }
+    }
+
+    fn state_code(&self, id: u32) -> u32 {
+        self.slots()
+            .iter()
+            .find(|slot| slot.id == id)
+            .map(|slot| slot.state as u32)
+            .unwrap_or(AdditionalSysrootState::Failed as u32)
+    }
+
+    fn error_code(&self, id: u32) -> u32 {
+        self.slots()
+            .iter()
+            .find(|slot| slot.id == id)
+            .map(|slot| slot.error as u32)
+            .unwrap_or(AdditionalSysrootError::InvalidRequest as u32)
+    }
+
+    fn release(&self, id: u32) -> u32 {
+        let mut slots = self.slots();
+        let Some(slot) = slots.iter_mut().find(|slot| slot.id == id) else {
+            return 0;
+        };
+        if !matches!(
+            slot.state,
+            AdditionalSysrootState::Ready | AdditionalSysrootState::Failed
+        ) {
+            return 0;
+        }
+        *slot = AdditionalSysrootRequest::EMPTY;
+        1
+    }
+
+    fn cancel(&self, id: u32) -> u32 {
+        let mut slots = self.slots();
+        let Some(slot) = slots.iter_mut().find(|slot| slot.id == id) else {
+            return 0;
+        };
+        match slot.state {
+            AdditionalSysrootState::Pending => {
+                slot.state = AdditionalSysrootState::Failed;
+                slot.error = AdditionalSysrootError::Cancelled;
+            }
+            AdditionalSysrootState::Loading => slot.cancelled = true,
+            AdditionalSysrootState::Ready | AdditionalSysrootState::Failed => return 0,
+        }
+        1
+    }
+
+    fn is_cancelled(&self, id: u32) -> bool {
+        self.slots()
+            .iter()
+            .find(|slot| slot.id == id)
+            .is_some_and(|slot| slot.cancelled)
+    }
+}
+
+const ADDITIONAL_SYSROOT_REQUEST_CAPACITY: usize = 8;
+static ADDITIONAL_SYSROOT_REQUESTS: AdditionalSysrootRequests<ADDITIONAL_SYSROOT_REQUEST_CAPACITY> =
+    AdditionalSysrootRequests::new();
+
+fn additional_sysroot_command_result(
+    result: Result<(), String>,
+) -> Result<(), AdditionalSysrootError> {
+    result.map_err(|message| {
+        if message.contains("additional sysroot request cancelled") {
+            AdditionalSysrootError::Cancelled
+        } else if StartupSysrootError::from_load_error(&message) == StartupSysrootError::Fetch {
+            AdditionalSysrootError::Fetch
+        } else {
+            AdditionalSysrootError::Extract
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vfs_shell_additional_sysroot_register() -> u32 {
+    ADDITIONAL_SYSROOT_REQUESTS.register()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vfs_shell_additional_sysroot_state(request_id: u32) -> u32 {
+    ADDITIONAL_SYSROOT_REQUESTS.state_code(request_id)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vfs_shell_additional_sysroot_error_code(request_id: u32) -> u32 {
+    ADDITIONAL_SYSROOT_REQUESTS.error_code(request_id)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vfs_shell_additional_sysroot_cancel(request_id: u32) -> u32 {
+    ADDITIONAL_SYSROOT_REQUESTS.cancel(request_id)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vfs_shell_additional_sysroot_release(request_id: u32) -> u32 {
+    ADDITIONAL_SYSROOT_REQUESTS.release(request_id)
+}
+
 // ----------------------------------------------------------
 // Exported functions for args passing (vfs-shell → vfs)
 // ----------------------------------------------------------
@@ -228,14 +439,11 @@ unsafe extern "C" {
     #[link_name = "sysroot_start_fetch"]
     pub fn sysroot_start_fetch(triple_ptr: i32, triple_len: i32);
 
-    #[link_name = "sysroot_get_next_file_meta"]
-    pub fn sysroot_get_next_file_meta(name_len_ptr: i32, data_len_ptr: i32) -> i32;
+    #[link_name = "sysroot_get_archive_meta"]
+    pub fn sysroot_get_archive_meta(data_len_ptr: i32) -> i32;
 
-    #[link_name = "sysroot_read_file_name"]
-    pub fn sysroot_read_file_name(name_ptr: i32, name_len: i32);
-
-    #[link_name = "sysroot_read_file_chunk"]
-    pub fn sysroot_read_file_chunk(data_ptr: i32, chunk_len: i32);
+    #[link_name = "sysroot_read_archive_chunk"]
+    pub fn sysroot_read_archive_chunk(data_ptr: i32, chunk_len: i32);
 
     #[link_name = "terminal_write"]
     pub fn terminal_write(session_id: u32, data_ptr: i32, data_len: i32);
@@ -243,8 +451,6 @@ unsafe extern "C" {
     #[link_name = "vfs_set_current_session_id"]
     pub fn vfs_set_current_session_id(session_id: u32);
 }
-
-const SYSROOT_FILE_CHUNK_SIZE: usize = 50 * 1024 * 1024;
 
 // Import: vfs_execute_command (scalar-only, no pointer args)
 // ----------------------------------------------------------
@@ -330,6 +536,20 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
     reg.register("load_sysroot", move |args, io| {
         unsafe { vfs_set_current_session_id(sid) };
         let triple = args.get(1).map(|s| s.as_str()).unwrap_or("wasm32-wasip1");
+        let request_id = args
+            .get(2)
+            .map(|value| {
+                value
+                    .parse::<u32>()
+                    .map_err(|_| format!("invalid additional sysroot request id: {value}"))
+            })
+            .transpose()?;
+        if request_id.is_some_and(|id| !ADDITIONAL_SYSROOT_REQUESTS.begin(id)) {
+            return Err(format!(
+                "invalid additional sysroot request id: {}",
+                request_id.unwrap()
+            ));
+        }
         let is_src = triple == "rust-src";
 
         if is_src {
@@ -343,7 +563,7 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
         } else {
             Path::new("/sysroot/lib/rustlib").join(triple).join("lib")
         };
-        let (files_loaded, total_bytes, total_elapsed) = with_sysroot_load_lock(|| {
+        let load_result = with_sysroot_load_lock(|| {
             unsafe {
                 sysroot_start_fetch(triple.as_ptr() as i32, triple.len() as i32);
             }
@@ -355,94 +575,86 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                 )
             })?;
 
-            let mut files_loaded = 0;
-            let mut total_bytes = 0;
             let start_time = std::time::Instant::now();
-
-            loop {
-                let mut name_len = 0i32;
-                let mut data_len = 0i32;
-                let has_next = unsafe {
-                    sysroot_get_next_file_meta(
-                        &mut name_len as *mut _ as i32,
-                        &mut data_len as *mut _ as i32,
-                    )
-                };
-                if !sysroot_meta_has_file(has_next, triple)? {
-                    break;
-                }
-                if name_len < 0 || data_len < -1 {
-                    return Err(format!(
-                        "invalid sysroot archive entry lengths: name={name_len}, data={data_len}"
-                    ));
-                }
-
-                let name_len_usize = sysroot_entry_name_len(name_len)?;
-                let mut name_buf = vec![0u8; name_len_usize];
-                unsafe {
-                    sysroot_read_file_name(name_buf.as_mut_ptr() as i32, name_len);
-                }
-
-                let mut data_buf = Vec::new();
-                if data_len >= 0 {
-                    data_buf = vec![0u8; data_len as usize];
-                    let mut remaining = data_len as usize;
-                    let mut offset = 0;
-                    while remaining > 0 {
-                        let to_read = std::cmp::min(remaining, SYSROOT_FILE_CHUNK_SIZE);
-                        unsafe {
-                            sysroot_read_file_chunk(
-                                data_buf[offset..].as_mut_ptr() as i32,
-                                to_read as i32,
-                            );
-                        }
-                        offset += to_read;
-                        remaining -= to_read;
-                        total_bytes += to_read;
-
-                        let elapsed = start_time.elapsed().as_secs_f64();
-                        let speed = if elapsed > 0.0 {
-                            total_bytes as f64 / elapsed
-                        } else {
-                            0.0
-                        };
-                        if data_len > 1024 * 1024 {
-                            let progress = (offset as f64 / data_len as f64) * 100.0;
-                            write!(
-                                io.stdout,
-                                "\r\x1b[KLoading {}... [{:.1}%] Speed: {}/s",
-                                String::from_utf8_lossy(&name_buf),
-                                progress,
-                                format_size(speed as usize)
-                            )
-                            .unwrap();
-                            let _ = io.stdout.flush();
-                        }
-                    }
-                }
-
-                let data = (data_len >= 0).then_some(data_buf.as_slice());
-                write_sysroot_entry(&base_dir, name_buf, data)?;
-                files_loaded += 1;
-                let elapsed = start_time.elapsed().as_secs_f64();
-                let speed = if elapsed > 0.0 {
-                    total_bytes as f64 / elapsed
-                } else {
-                    0.0
-                };
-                write!(
-                    io.stdout,
-                    "\r\x1b[KLoaded {} files ({} total) - Speed: {}/s",
-                    files_loaded,
-                    format_size(total_bytes),
-                    format_size(speed as usize)
-                )
-                .unwrap();
-                let _ = io.stdout.flush();
+            let mut archive_len = 0i32;
+            let has_archive =
+                unsafe { sysroot_get_archive_meta(&mut archive_len as *mut _ as i32) };
+            if !sysroot_meta_has_file(has_archive, triple)? {
+                return Err(format!("sysroot archive for '{triple}' is unavailable"));
             }
+            let archive_len = usize::try_from(archive_len)
+                .map_err(|_| format!("invalid sysroot archive length: {archive_len}"))?;
+            let mut archive_bytes_read = 0usize;
+            let mut last_progress_bytes = 0usize;
+            let archive_reader = SysrootArchiveReader::new(
+                archive_len,
+                || request_id.is_some_and(|id| ADDITIONAL_SYSROOT_REQUESTS.is_cancelled(id)),
+                |buffer: &mut [u8]| {
+                    let chunk_len = i32::try_from(buffer.len()).map_err(|_| {
+                        std::io::Error::other("sysroot archive read request exceeds i32::MAX")
+                    })?;
+                    unsafe {
+                        sysroot_read_archive_chunk(buffer.as_mut_ptr() as i32, chunk_len);
+                    }
+                    archive_bytes_read += buffer.len();
+                    let elapsed = start_time.elapsed().as_secs_f64();
+                    let speed = if elapsed > 0.0 {
+                        archive_bytes_read as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+                    if archive_len > 1024 * 1024
+                        && (archive_bytes_read == archive_len
+                            || archive_bytes_read.saturating_sub(last_progress_bytes)
+                                >= 1024 * 1024)
+                    {
+                        let progress = (archive_bytes_read as f64 / archive_len as f64) * 100.0;
+                        write!(
+                            io.stdout,
+                            "\r\x1b[KDownloading archive... [{:.1}%] Speed: {}/s",
+                            progress,
+                            format_size(speed as usize)
+                        )
+                        .unwrap();
+                        let _ = io.stdout.flush();
+                        last_progress_bytes = archive_bytes_read;
+                    }
+                    Ok(())
+                },
+            );
+
+            let (files_loaded, total_bytes) = extract_sysroot_archive(&base_dir, archive_reader)?;
+
+            let elapsed = start_time.elapsed().as_secs_f64();
+            let speed = if elapsed > 0.0 {
+                total_bytes as f64 / elapsed
+            } else {
+                0.0
+            };
+            write!(
+                io.stdout,
+                "\r\x1b[KLoaded {} files ({} total) - Speed: {}/s",
+                files_loaded,
+                format_size(total_bytes),
+                format_size(speed as usize)
+            )
+            .unwrap();
+            let _ = io.stdout.flush();
 
             Ok((files_loaded, total_bytes, start_time.elapsed()))
-        })?;
+        });
+        if let Some(request_id) = request_id {
+            ADDITIONAL_SYSROOT_REQUESTS.finish(
+                request_id,
+                additional_sysroot_command_result(
+                    load_result
+                        .as_ref()
+                        .map(|_| ())
+                        .map_err(|error| error.clone()),
+                ),
+            );
+        }
+        let (files_loaded, total_bytes, total_elapsed) = load_result?;
         if is_src {
             writeln!(
                 io.stdout,
@@ -554,6 +766,7 @@ pub enum SessionEventType {
     InputString = 4,
     CloseSession = 5,
     BootstrapRustSrc = 6,
+    BootstrapTarget = 7,
 }
 
 #[derive(Debug)]
@@ -565,6 +778,7 @@ pub enum SessionEvent {
     InputString(String),
     CloseSession,
     BootstrapRustSrc,
+    BootstrapTarget,
 }
 
 impl SessionEvent {
@@ -584,6 +798,7 @@ impl SessionEvent {
             }
             SessionEventType::CloseSession => Some(Self::CloseSession),
             SessionEventType::BootstrapRustSrc => Some(Self::BootstrapRustSrc),
+            SessionEventType::BootstrapTarget => Some(Self::BootstrapTarget),
         }
     }
 }
@@ -595,12 +810,68 @@ struct SessionState {
 
 static SESSIONS: LazyLock<DashMap<u32, SessionState>> = LazyLock::new(|| DashMap::new());
 const RUST_SRC_CORE: &str = "/sysroot/lib/rustlib/src/rust/library/core/src/lib.rs";
-static RUST_SRC_BOOTSTRAP: rust_src_bootstrap::RustSrcBootstrap =
-    rust_src_bootstrap::RustSrcBootstrap::new();
+const STARTUP_TARGET_LIB: &str = "/sysroot/lib/rustlib/wasm32-wasip1/lib";
+static STARTUP_SYSROOTS: StartupSysrootBootstraps = StartupSysrootBootstraps::new();
+
+fn rust_src_core_exists_at(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+}
+
+fn rust_src_core_exists() -> bool {
+    rust_src_core_exists_at(Path::new(RUST_SRC_CORE))
+}
+
+fn target_core_exists_at(path: &Path) -> bool {
+    std::fs::read_dir(path).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("libcore-") && name.ends_with(".rlib")
+        })
+    })
+}
+
+fn target_core_exists() -> bool {
+    target_core_exists_at(Path::new(STARTUP_TARGET_LIB))
+}
+
+struct BootstrapCommandOutcome {
+    result: Result<(), StartupSysrootError>,
+    report: Option<String>,
+}
+
+fn bootstrap_command_outcome(
+    triple: &str,
+    sentinel: &str,
+    command_error: Option<&str>,
+    sentinel_exists: bool,
+) -> BootstrapCommandOutcome {
+    if let Some(error) = command_error {
+        BootstrapCommandOutcome {
+            result: Err(StartupSysrootError::from_load_error(error)),
+            report: Some(format!("{triple} bootstrap failed: {error}")),
+        }
+    } else if !sentinel_exists {
+        BootstrapCommandOutcome {
+            result: Err(StartupSysrootError::MissingSentinel),
+            report: Some(format!("{triple} bootstrap failed: missing {sentinel}")),
+        }
+    } else {
+        BootstrapCommandOutcome {
+            result: Ok(()),
+            report: None,
+        }
+    }
+}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vfs_shell_rust_src_load_state() -> u32 {
-    RUST_SRC_BOOTSTRAP.state() as u32
+pub extern "C" fn vfs_shell_startup_sysroot_load_state(kind: u32) -> u32 {
+    STARTUP_SYSROOTS.load_state_code(kind)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vfs_shell_startup_sysroot_error_code(kind: u32) -> u32 {
+    STARTUP_SYSROOTS.error_code(kind)
 }
 
 #[unsafe(no_mangle)]
@@ -696,8 +967,16 @@ fn print_prompt(writer: &mut dyn Write) {
 
 struct CommandStdin {
     rx: Arc<Mutex<mpsc::Receiver<SessionEvent>>>,
+    deferred_events: Arc<Mutex<VecDeque<SessionEvent>>>,
     cancellation_token: wasibox_core::CancellationToken,
     buffer: Vec<u8>,
+}
+
+fn defer_startup_event(deferred_events: &Mutex<VecDeque<SessionEvent>>, event: SessionEvent) {
+    deferred_events
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push_back(event);
 }
 
 impl Read for CommandStdin {
@@ -770,7 +1049,8 @@ impl Read for CommandStdin {
                 SessionEvent::CreateSession => {
                     continue;
                 }
-                SessionEvent::BootstrapRustSrc => {
+                event @ (SessionEvent::BootstrapRustSrc | SessionEvent::BootstrapTarget) => {
+                    defer_startup_event(&self.deferred_events, event);
                     continue;
                 }
             }
@@ -787,6 +1067,7 @@ fn run_session_loop(
     CANCELLATION_TOKEN.with(|t| *t.borrow_mut() = Some(cancellation_token.clone()));
 
     let rx_arc = Arc::new(Mutex::new(rx));
+    let deferred_events = Arc::new(Mutex::new(VecDeque::new()));
     let mut line_reader = LineEditor::new(20);
     let mut stdout = SessionStdout::new(session_id);
     let session_reg = create_session_registry(session_id);
@@ -805,7 +1086,6 @@ fn run_session_loop(
             "ls -la",
             "tree",
             "seq | grep 2 | head -n5",
-            "load_sysroot wasm32-wasip1",
         ];
 
         for line in pre_lines {
@@ -813,6 +1093,7 @@ fn run_session_loop(
 
             let cmd_stdin = CommandStdin {
                 rx: Arc::clone(&rx_arc),
+                deferred_events: Arc::clone(&deferred_events),
                 cancellation_token: cancellation_token.clone(),
                 buffer: Vec::new(),
             };
@@ -836,10 +1117,18 @@ fn run_session_loop(
 
     loop {
         let event = {
-            let rx = rx_arc.lock().unwrap();
-            match rx.recv() {
-                Ok(e) => e,
-                Err(_) => break,
+            let deferred = deferred_events
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .pop_front();
+            if let Some(event) = deferred {
+                event
+            } else {
+                let rx = rx_arc.lock().unwrap();
+                match rx.recv() {
+                    Ok(e) => e,
+                    Err(_) => break,
+                }
             }
         };
 
@@ -853,6 +1142,7 @@ fn run_session_loop(
                     &session_reg,
                     session_id,
                     &rx_arc,
+                    &deferred_events,
                 );
             }
             SessionEvent::InputString(s) => {
@@ -865,6 +1155,7 @@ fn run_session_loop(
                         &session_reg,
                         session_id,
                         &rx_arc,
+                        &deferred_events,
                     );
                 }
             }
@@ -876,27 +1167,55 @@ fn run_session_loop(
             SessionEvent::CloseSession => {
                 break;
             }
-            SessionEvent::BootstrapRustSrc => {
-                if !RUST_SRC_BOOTSTRAP.begin() {
+            event @ (SessionEvent::BootstrapRustSrc | SessionEvent::BootstrapTarget) => {
+                let (kind, triple, sentinel, sentinel_exists): (
+                    StartupSysroot,
+                    &str,
+                    &str,
+                    fn() -> bool,
+                ) = match event {
+                    SessionEvent::BootstrapRustSrc => (
+                        StartupSysroot::RustSrc,
+                        "rust-src",
+                        RUST_SRC_CORE,
+                        rust_src_core_exists,
+                    ),
+                    SessionEvent::BootstrapTarget => (
+                        StartupSysroot::Target,
+                        "wasm32-wasip1",
+                        STARTUP_TARGET_LIB,
+                        target_core_exists,
+                    ),
+                    _ => unreachable!(),
+                };
+                if !STARTUP_SYSROOTS.begin(kind) {
                     continue;
                 }
                 let command_stdin = CommandStdin {
                     rx: Arc::clone(&rx_arc),
+                    deferred_events: Arc::clone(&deferred_events),
                     cancellation_token: cancellation_token.clone(),
                     buffer: Vec::new(),
                 };
                 let results = handle_parallel(
-                    vec!["load_sysroot rust-src".to_string()],
+                    vec![format!("load_sysroot {triple}")],
                     Box::new(command_stdin),
                     Box::new(SessionStdout::new(session_id)),
                     Arc::clone(&session_reg),
                     cancellation_token.clone(),
                 );
-                let ready = results.iter().all(Result::is_ok) && Path::new(RUST_SRC_CORE).is_file();
-                RUST_SRC_BOOTSTRAP.finish(ready);
-                if !ready {
-                    writeln!(stdout, "rust-src bootstrap failed: missing {RUST_SRC_CORE}").unwrap();
+                let command_error = results.into_iter().find_map(Result::err);
+                let has_sentinel = command_error.is_none() && sentinel_exists();
+                let BootstrapCommandOutcome { result, report } = bootstrap_command_outcome(
+                    triple,
+                    sentinel,
+                    command_error.as_deref(),
+                    has_sentinel,
+                );
+                if let Some(report) = report {
+                    writeln!(stdout, "{report}").unwrap();
                 }
+                STARTUP_SYSROOTS.finish(kind, result);
             }
         }
     }
@@ -910,6 +1229,7 @@ fn process_input_char(
     session_reg: &Arc<CommandRegistry>,
     _session_id: u32,
     rx_arc: &Arc<Mutex<mpsc::Receiver<SessionEvent>>>,
+    deferred_events: &Arc<Mutex<VecDeque<SessionEvent>>>,
 ) {
     if cancellation_token.is_cancelled() {
         cancellation_token.reset();
@@ -965,6 +1285,7 @@ fn process_input_char(
 
         let cmd_stdin = CommandStdin {
             rx: Arc::clone(rx_arc),
+            deferred_events: Arc::clone(deferred_events),
             cancellation_token: cancellation_token.clone(),
             buffer: Vec::new(),
         };
@@ -1017,7 +1338,182 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
+    use crate::startup_sysroot_bootstrap::LoadState;
+
+    #[test]
+    fn additional_sysroot_requests_are_bounded_and_reusable() {
+        let requests = AdditionalSysrootRequests::<2>::new();
+
+        let first = requests.register();
+        let second = requests.register();
+        assert_ne!(first, 0);
+        assert_ne!(second, 0);
+        assert_ne!(first, second);
+        assert_eq!(requests.register(), 0);
+        assert_eq!(
+            requests.state_code(first),
+            AdditionalSysrootState::Pending as u32
+        );
+
+        assert_eq!(requests.release(first), 0);
+        assert!(requests.begin(first));
+        requests.finish(first, Ok(()));
+        assert_eq!(requests.release(first), 1);
+        assert_eq!(requests.release(first), 0);
+        let replacement = requests.register();
+        assert_ne!(replacement, 0);
+        assert_ne!(replacement, first);
+        assert_eq!(
+            requests.state_code(first),
+            AdditionalSysrootState::Failed as u32
+        );
+        assert_eq!(
+            requests.error_code(first),
+            AdditionalSysrootError::InvalidRequest as u32
+        );
+    }
+
+    #[test]
+    fn additional_sysroot_request_ids_skip_zero_and_active_ids_after_wrap() {
+        let requests = AdditionalSysrootRequests::<3>::new();
+        let first = requests.register();
+        assert_eq!(first, 1);
+
+        requests.next_id.store(u32::MAX, Ordering::Relaxed);
+        let maximum = requests.register();
+        assert_eq!(maximum, u32::MAX);
+        assert!(requests.begin(first));
+        requests.finish(first, Ok(()));
+        assert_eq!(requests.release(first), 1);
+        assert_eq!(requests.register(), 0);
+    }
+
+    #[test]
+    fn additional_sysroot_loading_request_cancels_then_fails_terminally() {
+        let requests = AdditionalSysrootRequests::<1>::new();
+        let request_id = requests.register();
+
+        assert!(requests.begin(request_id));
+        assert_eq!(requests.cancel(request_id), 1);
+        assert!(requests.is_cancelled(request_id));
+        assert_eq!(requests.release(request_id), 0);
+        requests.finish(request_id, Err(AdditionalSysrootError::Cancelled));
+        assert_eq!(
+            requests.state_code(request_id),
+            AdditionalSysrootState::Failed as u32
+        );
+        assert_eq!(
+            requests.error_code(request_id),
+            AdditionalSysrootError::Cancelled as u32
+        );
+        assert_eq!(requests.release(request_id), 1);
+    }
+
+    #[test]
+    fn additional_sysroot_cancel_wins_final_success_race() {
+        let requests = AdditionalSysrootRequests::<1>::new();
+        let request_id = requests.register();
+
+        assert!(requests.begin(request_id));
+        assert_eq!(requests.cancel(request_id), 1);
+        requests.finish(request_id, Ok(()));
+
+        assert_eq!(
+            requests.state_code(request_id),
+            AdditionalSysrootState::Failed as u32
+        );
+        assert_eq!(
+            requests.error_code(request_id),
+            AdditionalSysrootError::Cancelled as u32
+        );
+    }
+
+    #[test]
+    fn additional_sysroot_pending_request_cancels_terminally() {
+        let requests = AdditionalSysrootRequests::<1>::new();
+        let request_id = requests.register();
+
+        assert_eq!(requests.cancel(request_id), 1);
+        assert_eq!(
+            requests.state_code(request_id),
+            AdditionalSysrootState::Failed as u32
+        );
+        assert_eq!(
+            requests.error_code(request_id),
+            AdditionalSysrootError::Cancelled as u32
+        );
+        assert_eq!(requests.release(request_id), 1);
+    }
+
+    #[test]
+    fn additional_sysroot_cancel_rejects_terminal_and_unknown_requests() {
+        let requests = AdditionalSysrootRequests::<1>::new();
+        let request_id = requests.register();
+        assert_eq!(requests.cancel(u32::MAX), 0);
+
+        assert!(requests.begin(request_id));
+        requests.finish(request_id, Ok(()));
+        assert_eq!(requests.cancel(request_id), 0);
+    }
+
+    #[test]
+    fn additional_sysroot_requests_record_terminal_command_results() {
+        let requests = AdditionalSysrootRequests::<1>::new();
+        let request_id = requests.register();
+
+        assert!(requests.begin(request_id));
+        assert_eq!(
+            requests.state_code(request_id),
+            AdditionalSysrootState::Loading as u32
+        );
+        assert_eq!(requests.release(request_id), 0);
+        requests.finish(request_id, Ok(()));
+        assert_eq!(
+            requests.state_code(request_id),
+            AdditionalSysrootState::Ready as u32
+        );
+        assert_eq!(
+            requests.error_code(request_id),
+            AdditionalSysrootError::None as u32
+        );
+
+        assert_eq!(requests.release(request_id), 1);
+        let failed_id = requests.register();
+        assert!(requests.begin(failed_id));
+        requests.finish(failed_id, Err(AdditionalSysrootError::Fetch));
+        assert_eq!(
+            requests.state_code(failed_id),
+            AdditionalSysrootState::Failed as u32
+        );
+        assert_eq!(
+            requests.error_code(failed_id),
+            AdditionalSysrootError::Fetch as u32
+        );
+        assert!(!requests.begin(failed_id));
+    }
+
+    #[test]
+    fn additional_sysroot_command_outcome_classifies_failures() {
+        assert_eq!(additional_sysroot_command_result(Ok(())), Ok(()));
+        assert_eq!(
+            additional_sysroot_command_result(Err(
+                "sysroot archive for 'x86_64-unknown-linux-gnu' is unavailable".to_string()
+            )),
+            Err(AdditionalSysrootError::Fetch)
+        );
+        assert_eq!(
+            additional_sysroot_command_result(Err(
+                "failed to decode sysroot archive entry".to_string()
+            )),
+            Err(AdditionalSysrootError::Extract)
+        );
+        assert_eq!(
+            additional_sysroot_command_result(Err(
+                "additional sysroot request cancelled".to_string()
+            )),
+            Err(AdditionalSysrootError::Cancelled)
+        );
+    }
 
     #[test]
     fn test_normalize_path_logical() {
@@ -1040,57 +1536,107 @@ mod tests {
     }
 
     #[test]
-    fn test_cd_parallel_execution() {
-        // Ensure registry is initialized
-        let registry = Arc::clone(&REGISTRY);
+    fn startup_sysroot_bootstrap_requires_nonempty_rust_src_core() {
+        let path = std::env::temp_dir().join(format!("rubrc-rust-src-core-{}", std::process::id()));
+        std::fs::write(&path, []).unwrap();
+        assert!(!rust_src_core_exists_at(&path));
 
-        // Use a temporary directory for testing if possible,
-        // otherwise just test the logic with a simulated sequence.
-        // In wasip1-threads, std::env::set_current_dir modifies process-wide state.
-
-        let start_dir = std::env::current_dir().unwrap();
-
-        // Simulate "cd . && cd ." which should be safe and stay in same dir
-        let line = "cd . && cd .";
-        let results = handle_parallel(
-            vec![line.to_string()],
-            Box::new(Cursor::new("")),
-            Box::new(io::sink()),
-            registry,
-            wasibox_core::CancellationToken::new(),
-        );
-
-        for res in results {
-            res.expect("Parallel cd command failed");
-        }
-
-        assert_eq!(
-            std::env::current_dir().unwrap().canonicalize().unwrap(),
-            start_dir.canonicalize().unwrap()
-        );
+        std::fs::write(&path, b"pub mod core;\n").unwrap();
+        assert!(rust_src_core_exists_at(&path));
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
-    fn test_shell_full_interaction_simulation() {
-        let start_dir = std::env::current_dir().unwrap();
+    fn startup_sysroot_bootstrap_requires_target_libcore_rlib() {
+        let path =
+            std::env::temp_dir().join(format!("rubrc-target-libcore-{}", std::process::id()));
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("libcore.rlib"), b"not hashed").unwrap();
+        std::fs::write(path.join("libcore-example.rmeta"), b"wrong suffix").unwrap();
+        assert!(!target_core_exists_at(&path));
 
-        // Ensure state is clean
-        CANCELLATION_TOKEN.reset();
+        std::fs::write(path.join("libcore-example.rlib"), b"core").unwrap();
+        assert!(target_core_exists_at(&path));
+        let _ = std::fs::remove_dir_all(path);
+    }
 
-        // Simulate "cd . && cd .\n" input character by character
-        // Most shells/terminals use 13 (\r) for Enter,
-        // LineEditor usually maps 10 or 13 to KeyEvent::Enter.
-        let cmd = "cd . && cd .\r";
+    #[test]
+    fn startup_sysroot_bootstrap_events_are_deferred_during_command_input() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(SessionEvent::BootstrapRustSrc).unwrap();
+        sender.send(SessionEvent::BootstrapTarget).unwrap();
+        sender.send(SessionEvent::Interrupt).unwrap();
+        let deferred_events = Arc::new(Mutex::new(VecDeque::new()));
+        let mut stdin = CommandStdin {
+            rx: Arc::new(Mutex::new(receiver)),
+            deferred_events: Arc::clone(&deferred_events),
+            cancellation_token: wasibox_core::CancellationToken::new(),
+            buffer: Vec::new(),
+        };
+        assert_eq!(stdin.read(&mut [0; 1]).unwrap(), 0);
 
-        for c in cmd.chars() {
-            vfs_shell_input_char(c as u32);
+        let mut events = deferred_events.lock().unwrap();
+        assert!(matches!(
+            events.pop_front(),
+            Some(SessionEvent::BootstrapRustSrc)
+        ));
+        assert!(matches!(
+            events.pop_front(),
+            Some(SessionEvent::BootstrapTarget)
+        ));
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn startup_sysroot_bootstrap_command_outcomes_set_state_error_and_report_once() {
+        let cases = [
+            (
+                Some("invalid sysroot archive length: -1"),
+                false,
+                Err(StartupSysrootError::Fetch),
+                Some("rust-src bootstrap failed: invalid sysroot archive length: -1"),
+                LoadState::Failed,
+                StartupSysrootError::Fetch,
+            ),
+            (
+                Some("failed to decode sysroot archive entry"),
+                false,
+                Err(StartupSysrootError::Extract),
+                Some("rust-src bootstrap failed: failed to decode sysroot archive entry"),
+                LoadState::Failed,
+                StartupSysrootError::Extract,
+            ),
+            (
+                None,
+                false,
+                Err(StartupSysrootError::MissingSentinel),
+                Some("rust-src bootstrap failed: missing /sentinel"),
+                LoadState::Failed,
+                StartupSysrootError::MissingSentinel,
+            ),
+            (
+                None,
+                true,
+                Ok(()),
+                None,
+                LoadState::Ready,
+                StartupSysrootError::None,
+            ),
+        ];
+
+        for (command_error, sentinel_exists, expected_result, expected_report, state, error) in
+            cases
+        {
+            let outcome =
+                bootstrap_command_outcome("rust-src", "/sentinel", command_error, sentinel_exists);
+            assert_eq!(outcome.result, expected_result);
+            assert_eq!(outcome.report.as_deref(), expected_report);
+
+            let bootstraps = StartupSysrootBootstraps::new();
+            assert!(bootstraps.begin(StartupSysroot::RustSrc));
+            bootstraps.finish(StartupSysroot::RustSrc, outcome.result);
+            assert_eq!(bootstraps.state(StartupSysroot::RustSrc), state);
+            assert_eq!(bootstraps.error(StartupSysroot::RustSrc), error);
         }
-
-        // vfs_shell_input_char handles command execution synchronously via handle_parallel,
-        // so we can check the result immediately.
-        assert_eq!(
-            std::env::current_dir().unwrap().canonicalize().unwrap(),
-            start_dir.canonicalize().unwrap()
-        );
     }
 }

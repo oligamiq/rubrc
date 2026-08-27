@@ -80,11 +80,9 @@ globalThis.onmessage = async (event) => {
           return {};
         } else if (message.name === "sysrootStartFetch") {
           return {};
-        } else if (message.name === "sysrootGetNextFileMeta") {
-          return { has_file: false, name_len: 0, data_len: 0 };
-        } else if (message.name === "sysrootReadFileName") {
-          return { name: [] };
-        } else if (message.name === "sysrootReadFileChunk") {
+        } else if (message.name === "sysrootArchiveGetMeta") {
+          return { has_archive: false, data_len: 0 };
+        } else if (message.name === "sysrootReadArchiveChunk") {
           return { chunk: [] };
         } else {
           throw new Error(

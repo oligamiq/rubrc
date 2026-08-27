@@ -114,6 +114,123 @@ Deno.test("didOpen completion rejects with the original continuation error", asy
   );
 });
 
+Deno.test("strict initial didOpen rejects on VFS failure without forwarding", async () => {
+  const original = new Error("initial VFS write failed");
+  const sync = new RustDocumentSync(
+    async () => {
+      throw original;
+    },
+    { logger: () => {} },
+  );
+  const completion = sync.waitForStrictDidOpen("file:///src/main.rs");
+  let forwarded = false;
+  let middlewareError: unknown;
+  let waiterError: unknown;
+
+  await sync.middleware.didOpen!(
+    document("file:///src/main.rs", "fn main() {}", 1),
+    async () => {
+      forwarded = true;
+    },
+  ).catch((error) => {
+    middlewareError = error;
+  });
+  await completion.catch((error) => {
+    waiterError = error;
+  });
+
+  assert(middlewareError === original, "strict middleware replaced VFS error");
+  assert(waiterError === original, "strict waiter replaced VFS error");
+  assert(!forwarded, "strict didOpen forwarded after VFS failure");
+});
+
+Deno.test("disposal rejects a pending didOpen waiter", async () => {
+  const sync = new RustDocumentSync(async () => {});
+  const completion = sync.waitForDidOpen("file:///src/main.rs");
+  let received: unknown;
+
+  await sync.dispose();
+  await completion.catch((error) => {
+    received = error;
+  });
+
+  assert(
+    received instanceof Error &&
+      received.message === "Rust document sync is disposed",
+    `wrong disposal error: ${received}`,
+  );
+});
+
+Deno.test("disposal waits for an in-flight didOpen continuation", async () => {
+  const order: string[] = [];
+  let finishDidOpen!: () => void;
+  const didOpenPending = new Promise<void>((resolve) => {
+    finishDidOpen = resolve;
+  });
+  const sync = new RustDocumentSync(async () => {});
+  const didOpen = sync.middleware.didOpen!(
+    document("file:///src/main.rs", "fn main() {}", 1),
+    async () => {
+      order.push("didOpen-start");
+      await didOpenPending;
+      order.push("didOpen-complete");
+    },
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+
+  let disposed = false;
+  const disposal = sync.dispose().then(() => {
+    disposed = true;
+    order.push("disposed");
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert(!disposed, `sync disposed during didOpen: ${order}`);
+
+  finishDidOpen();
+  await Promise.all([didOpen, disposal]);
+  assert(
+    order.join(",") === "didOpen-start,didOpen-complete,disposed",
+    `wrong didOpen disposal order: ${order}`,
+  );
+});
+
+Deno.test("abort discards pending writes without waiting for an in-flight didOpen", async () => {
+  const scheduler = new FakeScheduler();
+  let writes = 0;
+  let finishDidOpen!: () => void;
+  const didOpenPending = new Promise<void>((resolve) => {
+    finishDidOpen = resolve;
+  });
+  const sync = new RustDocumentSync(async () => {
+    writes++;
+  }, { scheduler });
+  await sync.middleware.didChange!(
+    {
+      document: document("file:///src/pending.rs", "fn pending() {}", 1),
+      contentChanges: [],
+    } as never,
+    async () => {},
+  );
+  const didOpen = sync.middleware.didOpen!(
+    document("file:///src/main.rs", "fn main() {}", 1),
+    () => didOpenPending,
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert("abort" in sync, "document sync does not expose abort cleanup");
+  (sync as RustDocumentSync & { abort(reason: unknown): void }).abort(
+    new DOMException("runtime disposed", "AbortError"),
+  );
+  await sync.dispose();
+  scheduler.runAll();
+
+  assert(writes === 1, `abort flushed ${writes - 1} pending writes`);
+  finishDidOpen();
+  await didOpen;
+});
+
 Deno.test("didChange forwards immediately and debounces only VFS", async () => {
   const writes: Array<[string, string]> = [];
   const scheduler = new FakeScheduler();
@@ -143,6 +260,73 @@ Deno.test("didChange forwards immediately and debounces only VFS", async () => {
   assert(
     writes.length === 1 && writes[0][1] === "fn main() {}",
     "latest text not coalesced",
+  );
+});
+
+Deno.test("didChange reports every document version before forwarding", async () => {
+  const order: string[] = [];
+  const sync = new RustDocumentSync(async () => {}, {
+    onDocumentChanged: (version) => order.push(`version:${version}`),
+  });
+
+  await sync.middleware.didChange!(
+    {
+      document: document("file:///src/main.rs", "fn main() {}", 7),
+      contentChanges: [],
+    } as never,
+    async () => {
+      order.push("didChange");
+    },
+  );
+
+  assert(
+    order.join(",") === "version:7,didChange",
+    `wrong version notification order: ${order}`,
+  );
+});
+
+Deno.test("an edit during didOpen cannot overtake the open notification", async () => {
+  const order: string[] = [];
+  let finishWrite!: () => void;
+  const writePending = new Promise<void>((resolve) => {
+    finishWrite = resolve;
+  });
+  const sync = new RustDocumentSync(async () => {
+    order.push("write-start");
+    await writePending;
+    order.push("write-complete");
+  });
+  const opened = document("file:///src/main.rs", "fn main() {}", 1);
+  const didOpen = sync.middleware.didOpen!(opened, async () => {
+    order.push("didOpen");
+  });
+  await Promise.resolve();
+
+  const changed = document(
+    "file:///src/main.rs",
+    "fn main() { changed(); }",
+    2,
+  );
+  let didChangeSettled = false;
+  const didChange = Promise.resolve(
+    sync.middleware.didChange!(
+      { document: changed, contentChanges: [] } as never,
+      async () => {
+        order.push("didChange");
+      },
+    ),
+  ).then(() => {
+    didChangeSettled = true;
+  });
+  await Promise.resolve();
+
+  assert(!didChangeSettled, `didChange overtook didOpen: ${order}`);
+  assert(order.join(",") === "write-start", `wrong pending order: ${order}`);
+  finishWrite();
+  await Promise.all([didOpen, didChange]);
+  assert(
+    order.join(",") === "write-start,write-complete,didOpen,didChange",
+    `wrong open/change order: ${order}`,
   );
 });
 
@@ -202,6 +386,48 @@ Deno.test("flush waits for an in-flight write before the run callback", async ()
   assert(
     order.join(",") === "write-start,write-complete,run",
     `in-flight write did not precede run: ${order}`,
+  );
+});
+
+Deno.test("flush drains an edit queued during an in-flight write", async () => {
+  const scheduler = new FakeScheduler();
+  const writes: string[] = [];
+  let completeFirstWrite!: () => void;
+  const firstWrite = new Promise<void>((resolve) => {
+    completeFirstWrite = resolve;
+  });
+  const sync = new RustDocumentSync(
+    async (_path, content) => {
+      writes.push(content);
+      if (writes.length === 1) await firstWrite;
+    },
+    { scheduler },
+  );
+  const next = async () => {};
+  await sync.middleware.didChange!(
+    {
+      document: document("file:///src/main.rs", "fn first() {}", 2),
+      contentChanges: [],
+    } as never,
+    next,
+  );
+  scheduler.runAll();
+  await Promise.resolve();
+
+  const flush = sync.flush();
+  await sync.middleware.didChange!(
+    {
+      document: document("file:///src/main.rs", "fn latest() {}", 3),
+      contentChanges: [],
+    } as never,
+    next,
+  );
+  completeFirstWrite();
+  await flush;
+
+  assert(
+    writes.join(",") === "fn first() {},fn latest() {}",
+    `flush dropped the latest edit: ${writes}`,
   );
 });
 
@@ -273,6 +499,35 @@ Deno.test("a later successful write clears the workspace flush failure", async (
   assert(writes === 2, `recovery write count was ${writes}`);
 });
 
+Deno.test("a later flush retries a failed snapshot without another edit", async () => {
+  let shouldFail = true;
+  const writes: string[] = [];
+  const scheduler = new FakeScheduler();
+  const sync = new RustDocumentSync(
+    async (_path, content) => {
+      writes.push(content);
+      if (shouldFail) throw new Error("write failed");
+    },
+    { scheduler, logger: () => {} },
+  );
+  await sync.middleware.didChange!(
+    {
+      document: document("file:///src/main.rs", "fn main() { retry(); }", 2),
+      contentChanges: [],
+    } as never,
+    async () => {},
+  );
+
+  await sync.flush().catch(() => undefined);
+  shouldFail = false;
+  await sync.flush();
+
+  assert(
+    writes.length === 2 && writes[0] === writes[1],
+    `failed snapshot was not retried: ${writes}`,
+  );
+});
+
 Deno.test("different Rust file URIs retain independent snapshots", async () => {
   const writes: string[] = [];
   const scheduler = new FakeScheduler();
@@ -325,6 +580,24 @@ Deno.test("didClose flushes VFS before standard close", async () => {
   assert(order.join(",") === "write,close", `wrong close order: ${order}`);
 });
 
+Deno.test("didClose waiter resolves only after the standard close completes", async () => {
+  const order: string[] = [];
+  const sync = new RustDocumentSync(async () => {});
+  const closed = sync.waitForDidClose("file:///src/main.rs").then(() => {
+    order.push("waiter");
+  });
+
+  await sync.middleware.didClose!(
+    document("file:///src/main.rs", "fn main() {}", 1),
+    async () => {
+      order.push("close");
+    },
+  );
+  await closed;
+
+  assert(order.join(",") === "close,waiter", `wrong close wait: ${order}`);
+});
+
 Deno.test("non-Rust and non-file models bypass VFS mirroring", async () => {
   let writes = 0;
   const sync = new RustDocumentSync(async () => {
@@ -342,27 +615,39 @@ Deno.test("non-Rust and non-file models bypass VFS mirroring", async () => {
   assert(writes === 0, `unexpected writes: ${writes}`);
 });
 
-Deno.test("writer failure is logged and does not suppress LSP continuation", async () => {
+Deno.test("ordinary sync logs VFS failures without suppressing LSP and recovers", async () => {
   const calls: string[] = [];
   const logs: string[] = [];
   const scheduler = new FakeScheduler();
+  let shouldFail = true;
   const sync = new RustDocumentSync(
     async () => {
-      throw new Error("write failed");
+      if (shouldFail) throw new Error("write failed");
     },
     { scheduler, logger: (message) => logs.push(message) },
   );
   const opened = document("file:///src/main.rs", "fn main() {}", 1);
+  const completion = sync.waitForDidOpen("file:///src/main.rs");
   await sync.middleware.didOpen!(opened, async () => {
     calls.push("open");
   });
+  await completion;
+  shouldFail = false;
+  const changed = document(
+    "file:///src/main.rs",
+    "fn main() { recovered(); }",
+    2,
+  );
   await sync.middleware.didChange!(
-    { document: opened, contentChanges: [] } as never,
+    {
+      document: changed,
+      contentChanges: [],
+    } as never,
     async () => {
       calls.push("change");
     },
   );
-  await sync.middleware.didClose!(opened, async () => {
+  await sync.middleware.didClose!(changed, async () => {
     calls.push("close");
   });
   await sync.dispose();
@@ -372,7 +657,7 @@ Deno.test("writer failure is logged and does not suppress LSP continuation", asy
   );
   assert(
     logs.every((message) => message.includes("/src/main.rs")) &&
-      logs.length >= 2,
+      logs.length > 0,
     "missing path logs",
   );
 });

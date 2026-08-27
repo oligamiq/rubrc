@@ -74,9 +74,8 @@ async function runLspTest() {
                     downloadFileChunk: () => {},
                     downloadFileEnd: () => {},
                     sysrootStartFetch: () => {},
-                    sysrootGetNextFileMeta: () => 0,
-                    sysrootReadFileName: () => {},
-                    sysrootReadFileChunk: () => {},
+                    sysrootGetArchiveMeta: () => 0,
+                    sysrootReadArchiveChunk: () => {},
                 }
             }
         } as any,

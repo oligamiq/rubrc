@@ -22,9 +22,8 @@ export class Downloader {
   static downloadFileChunk(dataPtr: number, dataLen: number): void;
   static downloadFileEnd(): void;
   static sysrootStartFetch(triplePtr: number, tripleLen: number): void;
-  static sysrootGetNextFileMeta(nameLenPtr: number, dataLenPtr: number): number;
-  static sysrootReadFileName(namePtr: number): void;
-  static sysrootReadFileChunk(dataPtr: number, chunkLen: number): void;
+  static sysrootGetArchiveMeta(dataLenPtr: number): number;
+  static sysrootReadArchiveChunk(dataPtr: number, chunkLen: number): void;
 }
 
 export class Http {

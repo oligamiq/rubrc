@@ -2,8 +2,151 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { createLspConnection } from "./lsp_bridge.ts";
 import type { Ctx } from "./ctx.ts";
 import { encodeLspMessage } from "./lsp_protocol.ts";
+import type { RuntimeSharedObjectFactories } from "./runtime_command_service.ts";
 
 const originalBroadcastChannel = globalThis.BroadcastChannel;
+
+test("LSP connection acquires both channels through runtime factories", () => {
+  const created: string[] = [];
+  const factories: RuntimeSharedObjectFactories = {
+    createSharedObject: (_value, id) => {
+      created.push(`object:${id}`);
+      return { bc: { close() {} } };
+    },
+    createSharedObjectRef: (id) => {
+      created.push(`ref:${id}`);
+      return {
+        proxy: <T>() => (() => Promise.resolve()) as T,
+        bc: { close() {} },
+      };
+    },
+  };
+  const ctx = { ls_id: "owned-ls", input_string_id: "owned-input" } as Ctx;
+  const connection = createLspConnection(ctx, undefined, factories);
+
+  connection.reader.listen(() => {});
+
+  expect(created).toEqual(["ref:owned-input", "object:owned-ls"]);
+  connection.dispose();
+});
+
+test("LSP writer proxy failure closes its acquired ref", () => {
+  let closes = 0;
+  const proxyError = new Error("writer proxy failed");
+  const factories: RuntimeSharedObjectFactories = {
+    createSharedObject: () => ({ bc: { close() {} } }),
+    createSharedObjectRef: () => ({
+      proxy: <T>() => {
+        throw proxyError;
+      },
+      bc: { close: () => closes++ },
+    }),
+  };
+
+  expect(() =>
+    createLspConnection(
+      { ls_id: "rollback-reader", input_string_id: "rollback-writer" } as Ctx,
+      undefined,
+      factories,
+    ),
+  ).toThrow(proxyError);
+  expect(closes).toBe(1);
+});
+
+test("LSP reader construction failure closes the previously acquired writer", () => {
+  let writerCloses = 0;
+  const readerError = new Error("reader construction failed");
+  const factories: RuntimeSharedObjectFactories = {
+    createSharedObject: () => {
+      throw readerError;
+    },
+    createSharedObjectRef: () => ({
+      proxy: <T>() => (() => Promise.resolve()) as T,
+      bc: { close: () => writerCloses++ },
+    }),
+  };
+  const connection = createLspConnection(
+    { ls_id: "failed-reader", input_string_id: "owned-writer" } as Ctx,
+    undefined,
+    factories,
+  );
+
+  expect(() => connection.reader.listen(() => {})).toThrow(readerError);
+  expect(writerCloses).toBe(1);
+});
+
+test("LSP connection disposal attempts reader and writer and aggregates failures", () => {
+  const readerError = new Error("reader close failed");
+  const writerError = new Error("writer close failed");
+  const attempts: string[] = [];
+  const factories: RuntimeSharedObjectFactories = {
+    createSharedObject: () => ({
+      bc: {
+        close() {
+          attempts.push("reader");
+          throw readerError;
+        },
+      },
+    }),
+    createSharedObjectRef: () => ({
+      proxy: <T>() => (() => Promise.resolve()) as T,
+      bc: {
+        close() {
+          attempts.push("writer");
+          throw writerError;
+        },
+      },
+    }),
+  };
+  const connection = createLspConnection(
+    { ls_id: "throwing-reader", input_string_id: "throwing-writer" } as Ctx,
+    undefined,
+    factories,
+  );
+  connection.reader.listen(() => {});
+  let caught: unknown;
+
+  try {
+    connection.dispose();
+  } catch (error) {
+    caught = error;
+  }
+
+  expect(attempts).toEqual(["reader", "writer"]);
+  expect(caught).toBeInstanceOf(AggregateError);
+  expect((caught as AggregateError).errors).toEqual([readerError, writerError]);
+});
+
+test("LSP writer invokes base dispose when channel close throws", () => {
+  const writerError = new Error("writer close failed");
+  const factories: RuntimeSharedObjectFactories = {
+    createSharedObject: () => ({ bc: { close() {} } }),
+    createSharedObjectRef: () => ({
+      proxy: <T>() => (() => Promise.resolve()) as T,
+      bc: {
+        close: () => {
+          throw writerError;
+        },
+      },
+    }),
+  };
+  const connection = createLspConnection(
+    { ls_id: "base-reader", input_string_id: "base-writer" } as Ctx,
+    undefined,
+    factories,
+  );
+  const basePrototype = Object.getPrototypeOf(
+    Object.getPrototypeOf(connection.writer),
+  ) as { dispose(): void };
+  const baseDispose = spyOn(basePrototype, "dispose");
+
+  try {
+    expect(() => connection.writer.dispose()).toThrow(writerError);
+    expect(baseDispose).toHaveBeenCalledTimes(1);
+  } finally {
+    baseDispose.mockRestore();
+  }
+});
 
 class FakeBroadcastChannel {
   name: string;
@@ -200,4 +343,72 @@ test("lsp_bridge: malformed input fires error and close exactly once and ignores
   expect(dataCount).toBe(0);
   expect(errorCount).toBe(1);
   expect(closeCount).toBe(1);
+});
+
+test("lsp_bridge: observer sees each decoded message before the client", () => {
+  const ctx = { ls_id: "ls-observe", input_string_id: "in-observe" } as Ctx;
+  const deliveries: Array<{ owner: string; message: unknown }> = [];
+  const connection = createLspConnection(ctx, (message) => {
+    deliveries.push({ owner: "observer", message });
+  });
+  connection.reader.listen((message) => {
+    deliveries.push({ owner: "client", message });
+  });
+  const readerChannel = FakeBroadcastChannel.created.find((channel) =>
+    channel.name.includes("ls-observe"),
+  );
+  const frame = encodeLspMessage({ jsonrpc: "2.0", method: "ready" });
+
+  readerChannel!.triggerMessage({
+    msg: "func_call::call",
+    to: "parent",
+    names: [".self"],
+    args: [{ data: frame }],
+  });
+
+  expect(deliveries.map(({ owner }) => owner)).toEqual(["observer", "client"]);
+  expect(deliveries[0].message).toEqual(deliveries[1].message);
+  expect(deliveries[0].message).not.toBe(deliveries[1].message);
+});
+
+test("lsp_bridge: observer errors are reported without closing or consuming the stream", () => {
+  const ctx = {
+    ls_id: "ls-observer-error",
+    input_string_id: "in-observer-error",
+  } as Ctx;
+  const expected = new Error("observer failed");
+  let observedErrors = 0;
+  let closes = 0;
+  const delivered: number[] = [];
+  const connection = createLspConnection(ctx, () => {
+    throw expected;
+  });
+  connection.reader.onError((error) => {
+    expect(error).toBe(expected);
+    observedErrors++;
+  });
+  connection.reader.onClose(() => closes++);
+  connection.reader.listen((message) => {
+    delivered.push((message as unknown as { id: number }).id);
+  });
+  const readerChannel = FakeBroadcastChannel.created.find((channel) =>
+    channel.name.includes("ls-observer-error"),
+  );
+  const first = encodeLspMessage({ jsonrpc: "2.0", id: 1, result: null });
+  const second = encodeLspMessage({ jsonrpc: "2.0", id: 2, result: null });
+  const frames = new Uint8Array(first.length + second.length);
+  frames.set(first);
+  frames.set(second, first.length);
+
+  readerChannel!.triggerMessage({
+    msg: "func_call::call",
+    to: "parent",
+    names: [".self"],
+    args: [{ data: frames }],
+  });
+
+  expect(observedErrors).toBe(2);
+  expect(delivered).toEqual([1, 2]);
+  expect(closes).toBe(0);
+  expect(readerChannel!.closed).toBe(false);
 });

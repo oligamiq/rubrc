@@ -87,6 +87,24 @@ export class LspFrameDecoder {
   }
 }
 
+export function observeAndDeliverLspMessage<T>(
+  message: T,
+  observeMessage: ((message: T) => void) | undefined,
+  deliver: (message: T) => void,
+  reportObserverError: (error: unknown) => void,
+): void {
+  try {
+    if (observeMessage) observeMessage(structuredClone(message));
+  } catch (error) {
+    try {
+      reportObserverError(error);
+    } catch {
+      // Observer reporting must remain outside the transport failure path.
+    }
+  }
+  deliver(message);
+}
+
 export class OrderedLspSender {
   private pending = Promise.resolve();
 
@@ -101,4 +119,3 @@ export class OrderedLspSender {
     return write;
   }
 }
-

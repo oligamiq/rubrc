@@ -1,14 +1,11 @@
 import { ConsoleStdout, File, OpenFile } from "@bjorn3/browser_wasi_shim";
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
-import { parseTar } from "../lib/src/parse_tar.ts";
-import {
-  type SysrootArchiveEntry,
-  validateSysrootArchiveEntryName,
-} from "../page/src/sysroot_archive.ts";
 import { takeExactSysrootChunk } from "../page/src/sysroot_protocol.ts";
 import { buildPreopenDirectory } from "./build_preopen.ts";
-import { prepareCachedSysroot } from "./sysroot_cache.ts";
+import { prepareCachedArchive, prepareCachedSysroot } from "./sysroot_cache.ts";
 import { prepareInstalledRustSrcArchive } from "./rust_src_archive.ts";
+
+const OOM_REGRESSION_ARCHIVE_LEN = 74_096_640;
 
 function assertAtLeastFourPairedHostCargoCalls(trace: string): void {
   const events = Array.from(
@@ -82,15 +79,16 @@ const preopen = await (async () => {
   }
 })();
 const lspOutput = new MessageChannel();
-let rustSrcTemplates: readonly Readonly<SysrootArchiveEntry>[] | undefined;
-type QueuedSysrootEntry = {
-  name: Uint8Array;
-  data: Uint8Array;
-  isDirectory: boolean;
-};
-let sysrootQueue: QueuedSysrootEntry[] = [];
-let currentSysrootFile: QueuedSysrootEntry | null = null;
+let rustSrcTarCache: Uint8Array | undefined;
+let wasm32TarCache: Uint8Array | undefined;
+let currentSysrootArchive: Uint8Array | null = null;
 let maxSysrootChunkLength = 0;
+let maxHostArchiveReadLength = 0;
+
+const { archive: wasm32ArchiveBytes } = await prepareCachedArchive({
+  triple: "wasm32-wasip1",
+});
+
 const farm = new WASIFarm(
   new OpenFile(new File([])),
   ConsoleStdout.lineBuffered((message) => console.log(`[stdout] ${message}`)),
@@ -115,68 +113,94 @@ const farm = new WASIFarm(
         return {};
       }
       if (name === "sysrootStartFetch") {
-        if (unknown.args?.triple !== "rust-src") {
-          sysrootQueue = [];
-          currentSysrootFile = null;
+        const triple = unknown.args?.triple;
+        if (triple !== "rust-src" && triple !== "wasm32-wasip1") {
+          currentSysrootArchive = null;
           return {};
         }
-        if (!rustSrcTemplates) {
+
+        if (triple === "wasm32-wasip1") {
+          if (!wasm32TarCache) {
+            const archive = new ArrayBuffer(wasm32ArchiveBytes.byteLength);
+            new Uint8Array(archive).set(wasm32ArchiveBytes);
+            const stream = new Blob([archive])
+              .stream()
+              .pipeThrough(new DecompressionStream("brotli"));
+            const reader = stream.getReader();
+            const chunks: Uint8Array[] = [];
+            let totalLength = 0;
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              chunks.push(value);
+              totalLength += value.byteLength;
+            }
+            const tarBytes = new Uint8Array(totalLength);
+            let offset = 0;
+            for (const chunk of chunks) {
+              tarBytes.set(chunk, offset);
+              offset += chunk.byteLength;
+            }
+            wasm32TarCache = tarBytes;
+          }
+          currentSysrootArchive = new Uint8Array(wasm32TarCache);
+          return {};
+        }
+
+        if (!rustSrcTarCache) {
           const archive = new ArrayBuffer(rustSrcArchive.byteLength);
           new Uint8Array(archive).set(rustSrcArchive);
           const stream = new Blob([archive])
             .stream()
             .pipeThrough(new DecompressionStream("brotli"));
-          const entries: Readonly<SysrootArchiveEntry>[] = [];
-          await parseTar(stream, (file) => {
-            const name = validateSysrootArchiveEntryName(file.name);
-            if (name === null) return;
-            entries.push(
-              Object.freeze({
-                name: new TextEncoder().encode(name),
-                data: file.data?.slice() ?? new Uint8Array(),
-                isDirectory: file.type === "directory",
-              }),
-            );
-          });
-          rustSrcTemplates = Object.freeze(entries);
+          const reader = stream.getReader();
+          const chunks: Uint8Array[] = [];
+          let totalLength = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            totalLength += value.byteLength;
+          }
+          const tarBytes = new Uint8Array(
+            Math.max(totalLength, OOM_REGRESSION_ARCHIVE_LEN),
+          );
+          let offset = 0;
+          for (const chunk of chunks) {
+            tarBytes.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+          rustSrcTarCache = tarBytes;
         }
-        sysrootQueue = rustSrcTemplates.map((entry) => ({ ...entry }));
-        currentSysrootFile = null;
+        currentSysrootArchive = new Uint8Array(rustSrcTarCache);
         return {};
       }
-      if (name === "sysrootGetNextFileMeta") {
-        if (sysrootQueue.length > 0) {
-          currentSysrootFile = sysrootQueue.shift()!;
+      if (name === "sysrootArchiveGetMeta") {
+        if (currentSysrootArchive !== null) {
           return {
-            has_file: true,
-            name_len: currentSysrootFile.name.length,
-            data_len: currentSysrootFile.isDirectory
-              ? -1
-              : currentSysrootFile.data.length,
+            has_archive: true,
+            data_len: currentSysrootArchive.length,
           };
         }
-        currentSysrootFile = null;
-        return { has_file: false, name_len: 0, data_len: 0 };
+        return { has_archive: false, data_len: 0 };
       }
-      if (name === "sysrootReadFileName") {
-        if (currentSysrootFile?.name) {
-          return { name: Array.from(currentSysrootFile.name) };
-        }
-        throw new Error("No current sysroot file to read name from");
-      }
-      if (name === "sysrootReadFileChunk") {
+      if (name === "sysrootReadArchiveChunk") {
         const requested = unknown.args?.chunk_len;
         if (typeof requested === "number") {
           maxSysrootChunkLength = Math.max(maxSysrootChunkLength, requested);
         }
-        if (!currentSysrootFile) {
-          throw new Error("No current sysroot file to read data from");
+        if (!currentSysrootArchive) {
+          throw new Error("No current sysroot archive to read data from");
         }
         const { chunk, remaining } = takeExactSysrootChunk(
-          currentSysrootFile.data,
+          currentSysrootArchive,
           requested,
         );
-        currentSysrootFile.data = remaining;
+        maxHostArchiveReadLength = Math.max(
+          maxHostArchiveReadLength,
+          chunk.byteLength,
+        );
+        currentSysrootArchive = remaining.length === 0 ? null : remaining;
         return { chunk: Array.from(chunk) };
       }
       throw new Error(`unexpected callback: ${name ?? "unknown"}`);
@@ -192,6 +216,7 @@ const result = await new Promise<{
   detail: string;
   trace: string;
   traceDroppedChunks: number;
+  cargoCallsBeforeInit?: number;
 }>((resolve) => {
   const timer = setTimeout(() => {
     worker.terminate();
@@ -200,6 +225,7 @@ const result = await new Promise<{
       detail: "diagnostics worker timed out after 360 seconds",
       trace: "",
       traceDroppedChunks: 0,
+      cargoCallsBeforeInit: undefined,
     });
   }, 360_000);
   worker.onmessage = (event) => {
@@ -226,6 +252,37 @@ console.log(result.detail);
 console.log(result.trace);
 console.log(`trace dropped chunks: ${result.traceDroppedChunks}`);
 if (result.ok) assertAtLeastFourPairedHostCargoCalls(result.trace);
-console.log(`served ${rustSrcTemplates?.length ?? 0} rust-src archive entries`);
+console.log(`served rust-src archive: ${rustSrcTarCache?.length ?? 0} bytes`);
 console.log(`maximum sysroot chunk request: ${maxSysrootChunkLength}`);
+console.log(`maximum host archive read: ${maxHostArchiveReadLength}`);
+if (rustSrcTarCache?.length !== OOM_REGRESSION_ARCHIVE_LEN) {
+  throw new Error(
+    `expected ${OOM_REGRESSION_ARCHIVE_LEN}-byte OOM regression archive, got ${rustSrcTarCache?.length ?? 0}`,
+  );
+}
+if (maxSysrootChunkLength !== 8192) {
+  throw new Error(
+    `expected maximum sysroot chunk request 8192, got ${maxSysrootChunkLength}`,
+  );
+}
+if (
+  maxHostArchiveReadLength <= 0 ||
+  maxHostArchiveReadLength > 512 * 1024
+) {
+  throw new Error(
+    `maximum host archive read ${maxHostArchiveReadLength} is outside 1..524288`,
+  );
+}
+const retainedSysrootArchive = currentSysrootArchive as Uint8Array | null;
+if (retainedSysrootArchive !== null) {
+  throw new Error(
+    `sysroot archive retained ${retainedSysrootArchive.length} unread bytes`,
+  );
+}
+if (result.cargoCallsBeforeInit !== 0) {
+  throw new Error(
+    `expected zero Cargo/rustc calls before project activation, got ${result.cargoCallsBeforeInit}`,
+  );
+}
+
 if (!result.ok) Deno.exit(1);

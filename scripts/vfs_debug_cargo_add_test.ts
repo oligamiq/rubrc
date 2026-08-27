@@ -90,11 +90,10 @@ farm = new WASIFarm(
       if (isChildProcessMessage(message)) return childBridge(message);
       const name = (message as { name?: string })?.name;
       if (name === "terminalWrite" || name === "sysrootStartFetch") return {};
-      if (name === "sysrootGetNextFileMeta") {
-        return { has_file: false, name_len: 0, data_len: 0 };
+      if (name === "sysrootArchiveGetMeta") {
+        return { has_archive: false, data_len: 0 };
       }
-      if (name === "sysrootReadFileName") return { name: [] };
-      if (name === "sysrootReadFileChunk") return { chunk: [] };
+      if (name === "sysrootReadArchiveChunk") return { chunk: [] };
       throw new Error(`unexpected farm callback: ${name ?? "unknown"}`);
     },
   },

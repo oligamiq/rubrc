@@ -1,3 +1,6 @@
+import btnSource from "./btn.tsx" with { type: "text" };
+import { createRunAfterFlush } from "./run_after_flush.ts";
+
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
 };
@@ -8,15 +11,8 @@ type CreateRunAfterFlush = (
   reportError: (error: unknown) => void,
 ) => (triple?: string) => Promise<void>;
 
-const loadFactory = async (): Promise<CreateRunAfterFlush> => {
-  const moduleUrl = new URL("./run_after_flush.ts", import.meta.url).href;
-  const module = await import(moduleUrl);
-  assert(
-    module.createRunAfterFlush,
-    "single-flight flush-before-run factory is missing",
-  );
-  return module.createRunAfterFlush as CreateRunAfterFlush;
-};
+const loadFactory = async (): Promise<CreateRunAfterFlush> =>
+  createRunAfterFlush;
 
 Deno.test("run command waits for the workspace flush", async () => {
   const createRunAfterFlush = await loadFactory();
@@ -126,16 +122,19 @@ Deno.test("a later click retries after the first run settles", async () => {
   assert(errors.length === 1, `retry reported ${errors.length} errors`);
 });
 
-Deno.test("RunButton creates one guarded flush-before-run callback", async () => {
-  const source = await Deno.readTextFile("page/src/btn.tsx");
+Deno.test("RunButton receives and invokes the runtime run callback", async () => {
+  const source = btnSource;
   assert(
-    source.includes(
-      "createRunAfterFlush(props.flush, compile_and_run, console.error)",
-    ),
-    "RunButton does not create the guarded run callback",
+    source.includes("run(triple?: string): Promise<void>"),
+    "RunButton lacks a concrete run callback",
   );
   assert(
-    source.includes("void run(props.triple)"),
-    "RunButton does not invoke the guarded run callback",
+    source.includes("void props.run(props.triple).catch(console.error)"),
+    "RunButton does not invoke the runtime callback",
+  );
+  assert(
+    !source.includes("import { compile_and_run") &&
+      !source.includes("createRunAfterFlush"),
+    "RunButton still owns module-global run behavior",
   );
 });

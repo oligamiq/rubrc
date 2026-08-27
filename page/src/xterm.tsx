@@ -1,286 +1,154 @@
 import { createEffect, on, onCleanup } from "solid-js";
-import { SharedObject, SharedObjectRef } from "@oligami/shared-object";
 import { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import XTerm from "./solid_xterm";
-import {
-  isTouchCapableDevice,
-} from "./mobile_terminal_gestures";
-import {
-  wait_async_polyfill,
-  WASIFarm,
-  type WASIFarmRef,
-} from "@oligami/browser_wasi_shim-threads";
-import { Fd } from "@bjorn3/browser_wasi_shim";
-import type { Ctx } from "./ctx";
-import {
-  createHttpBridge,
-  isHttpBridgeMessage,
-} from "../../lib/src/http_bridge";
-import {
-  createChildProcessBridge,
-  isChildProcessMessage,
-} from "../../lib/src/child_process_bridge";
-import { createCratesProxyFetch } from "../../lib/src/proxy";
-import childProcessWorkerUrl from "./worker_process/vfs_bindings/child_process_worker.ts?worker&url";
-import {
-  loadSysrootArchive,
-  type SysrootArchiveEntry,
-} from "./sysroot_archive";
-import { takeExactSysrootChunk } from "./sysroot_protocol";
-import { routeWasiTerminalWrite } from "./worker_process/lsp_dispatch";
-import { populateWebRustSrc } from "./web_sysroot";
-import { workspaceFileSystem } from "./workspace_fs";
+import { isTouchCapableDevice } from "./mobile_terminal_gestures";
+import type { AppRuntime } from "./app_runtime.ts";
 
-wait_async_polyfill();
+export type RuntimeTerminalBinding = Pick<
+  AppRuntime,
+  | "attachTerminal"
+  | "resizeTerminal"
+  | "inputTerminal"
+  | "interruptTerminal"
+>;
 
-const getDownloadFileName = (name: string): string => {
-  const normalized = name.replaceAll("\\", "/");
-  const fileName = normalized.slice(normalized.lastIndexOf("/") + 1);
-  return fileName || "download";
-};
-
-let shared_xterm: SharedObject | undefined;
-const terminals = new Map<number, Terminal>();
-let out_buff = "";
-let error_buff = "";
-
-const toUint8Array = (data: any): Uint8Array => {
-  if (data instanceof Uint8Array) {
-    return data;
-  }
-  if (data && data.buffer instanceof ArrayBuffer) {
-    return new Uint8Array(data.buffer);
-  }
-  if (Array.isArray(data)) {
-    return new Uint8Array(data as number[]);
-  }
-  if (typeof data === "object" && data !== null) {
-    if (Array.isArray(data.data)) {
-      return new Uint8Array(data.data as number[]);
-    }
-    const vals = Object.values(data) as number[];
-    return new Uint8Array(vals);
-  }
-  return new Uint8Array();
-};
-
-const write_to_terminal = (sessionId: number, data: any) => {
-  const terminal = terminals.get(sessionId);
-  if (terminal) {
-    const bytes = toUint8Array(data);
-    const decoded = new TextDecoder().decode(bytes);
-    const fixed = decoded.replace(/\n/g, "\r\n");
-    terminal.write(fixed);
-
-    if (sessionId === 0) {
-      out_buff += fixed;
-    }
-  }
-};
-
-export const SetupMyTerminal = (props: {
-  ctx: Ctx;
+export type SetupMyTerminalProps = {
+  runtime: RuntimeTerminalBinding;
   sessionId: number;
-  isMain: boolean;
   isActive: boolean;
-  callback?: (wasi_ref: WASIFarmRef) => void;
-}) => {
-  let xterm: Terminal | undefined = undefined;
+};
 
-  const fit_addon = new FitAddon();
+export const SetupMyTerminal = (props: SetupMyTerminalProps) => {
+  let xterm: Terminal | undefined;
+  const fitAddon = new FitAddon();
 
-  createEffect(on(() => props.isActive, (active) => {
-    if (active && xterm) {
-      const terminal = xterm;
-      const timeout = window.setTimeout(() => {
-        fit_addon.fit();
-        if (!isTouchCapableDevice()) {
-          terminal.focus();
-        }
-        resize_fn({ sessionId: props.sessionId, cols: terminal.cols, rows: terminal.rows }).catch(console.error);
-      }, 0);
-      onCleanup(() => window.clearTimeout(timeout));
-    }
-  }, { defer: true }));
+  const report = (operation: Promise<void>) => {
+    void operation.catch(console.error);
+  };
 
-  if (!shared_xterm) {
-    const terminal_handler = (args: {
-      sessionId: number;
-      data: Uint8Array;
-    }) => {
-      write_to_terminal(args.sessionId, args.data);
-    };
-
-    // @ts-ignore
-    terminal_handler.reset_err_buff = () => {
-      error_buff = "";
-    };
-    // @ts-ignore
-    terminal_handler.get_err_buff = () => {
-      return error_buff;
-    };
-    // @ts-ignore
-    terminal_handler.reset_out_buff = () => {
-      out_buff = "";
-    };
-    // @ts-ignore
-    terminal_handler.get_out_buff = () => {
-      return out_buff;
-    };
-
-    shared_xterm = new SharedObject(terminal_handler, props.ctx.terminal_id);
-  }
-
-  new SharedObject(() => {
-    return {
-      cols: xterm?.cols ?? 80,
-      rows: xterm?.rows ?? 24,
-    };
-  }, props.ctx.get_terminal_size_id);
-
-  const resize_fn = new SharedObjectRef(props.ctx.resize_id).proxy<
-    (args: { sessionId: number; cols: number; rows: number }) => Promise<void>
-  >();
-
-  const input_char = new SharedObjectRef(props.ctx.input_char_id).proxy<
-    (args: { sessionId: number; c: number }) => Promise<void>
-  >();
-
-  const input_string = new SharedObjectRef(props.ctx.input_string_id).proxy<
-    (args: { sessionId: number; data: string }) => Promise<void>
-  >();
-  const lsp = new SharedObjectRef(props.ctx.ls_id).proxy<
-    (args: { data: unknown }) => Promise<void>
-  >();
-
-  const interrupt_fn = new SharedObjectRef(props.ctx.interrupt_id).proxy<
-    (args: { sessionId: number }) => Promise<void>
-  >();
+  createEffect(
+    on(
+      () => props.isActive,
+      (active) => {
+        if (!active || !xterm) return;
+        const terminal = xterm;
+        const timeout = window.setTimeout(() => {
+          fitAddon.fit();
+          if (!isTouchCapableDevice()) terminal.focus();
+          report(
+            props.runtime.resizeTerminal(
+              props.sessionId,
+              terminal.cols,
+              terminal.rows,
+            ),
+          );
+        }, 0);
+        onCleanup(() => window.clearTimeout(timeout));
+      },
+      { defer: true },
+    ),
+  );
 
   const handleMount = (terminal: Terminal) => {
     xterm = terminal;
-    terminals.set(props.sessionId, terminal);
+    const attachment = props.runtime.attachTerminal(props.sessionId, {
+      write: (value) => terminal.write(value.replace(/\n/g, "\r\n")),
+      size: () => ({ cols: terminal.cols, rows: terminal.rows }),
+    });
 
-    if (props.isMain && props.callback) {
-      get_ref(terminal, props.callback, lsp);
-    } else {
-      const create_session_fn = new SharedObjectRef(
-        props.ctx.create_session_id,
-      ).proxy<(args: { sessionId: number }) => Promise<void>>();
-      create_session_fn({ sessionId: props.sessionId }).catch(console.error);
-    }
-
-    fit_addon.fit();
-    resize_fn({
-      sessionId: props.sessionId,
-      cols: terminal.cols,
-      rows: terminal.rows,
-    }).catch(console.error);
+    fitAddon.fit();
+    report(
+      props.runtime.resizeTerminal(
+        props.sessionId,
+        terminal.cols,
+        terminal.rows,
+      ),
+    );
 
     const onWindowResize = () => {
-      fit_addon.fit();
-      resize_fn({
-        sessionId: props.sessionId,
-        cols: terminal.cols,
-        rows: terminal.rows,
-      }).catch(console.error);
+      fitAddon.fit();
+      report(
+        props.runtime.resizeTerminal(
+          props.sessionId,
+          terminal.cols,
+          terminal.rows,
+        ),
+      );
     };
     window.addEventListener("resize", onWindowResize);
 
-    terminal.attachCustomKeyEventHandler((e) => {
+    terminal.attachCustomKeyEventHandler((event) => {
       if (
-        e.type === "keydown" &&
-        (e.ctrlKey || e.metaKey) &&
-        (e.key.toLowerCase() === "v" || e.code === "KeyV")
+        event.type === "keydown" &&
+        (event.ctrlKey || event.metaKey) &&
+        (event.key.toLowerCase() === "v" || event.code === "KeyV")
       ) {
         return false;
       }
       if (
-        e.type === "keydown" &&
-        (e.ctrlKey || e.metaKey) &&
-        (e.key.toLowerCase() === "c" || e.code === "KeyC")
+        event.type === "keydown" &&
+        (event.ctrlKey || event.metaKey) &&
+        (event.key.toLowerCase() === "c" || event.code === "KeyC") &&
+        terminal.hasSelection()
       ) {
-        if (terminal.hasSelection()) {
-          return false;
-        }
+        return false;
       }
       return true;
     });
 
-    if (props.isActive && !isTouchCapableDevice()) {
-      terminal.focus();
-    }
+    if (props.isActive && !isTouchCapableDevice()) terminal.focus();
 
     return () => {
-      terminals.delete(props.sessionId);
+      attachment.dispose();
+      if (xterm === terminal) xterm = undefined;
       window.removeEventListener("resize", onWindowResize);
-      console.log(`Terminal ${props.sessionId} unmounted.`);
     };
   };
 
   const onData = (data: string) => {
-    console.log(
-      `[UI] onData received for session ${props.sessionId}, length: ${data.length}, first char code: ${data.charCodeAt(
-        0,
-      )}`,
-    );
-
-    // Map ANSI escape sequences to custom wasi-shell key codes
     const keyMap: Record<string, number> = {
       "\x1b[A": 0x110001,
-      "\x1bOA": 0x110001, // Up
+      "\x1bOA": 0x110001,
       "\x1b[B": 0x110002,
-      "\x1bOB": 0x110002, // Down
+      "\x1bOB": 0x110002,
       "\x1b[C": 0x110003,
-      "\x1bOC": 0x110003, // Right
+      "\x1bOC": 0x110003,
       "\x1b[D": 0x110004,
-      "\x1bOD": 0x110004, // Left
+      "\x1bOD": 0x110004,
       "\x1b[H": 0x110005,
       "\x1bOH": 0x110005,
-      "\x1b[1~": 0x110005, // Home
+      "\x1b[1~": 0x110005,
       "\x1b[F": 0x110006,
       "\x1bOF": 0x110006,
-      "\x1b[4~": 0x110006, // End
-      "\x1b[3~": 0x110007, // Delete
+      "\x1b[4~": 0x110006,
+      "\x1b[3~": 0x110007,
     };
-
-    if (keyMap[data]) {
-      input_char({ sessionId: props.sessionId, c: keyMap[data] }).catch(
-        console.error,
-      );
+    const mapped = keyMap[data];
+    if (mapped !== undefined) {
+      report(props.runtime.inputTerminal(props.sessionId, mapped));
       return;
     }
-
     if (data.length > 1) {
-      input_string({ sessionId: props.sessionId, data }).catch(console.error);
+      report(props.runtime.inputTerminal(props.sessionId, data));
       return;
     }
-
-    for (let i = 0; i < data.length; i++) {
-      const codePoint = data.codePointAt(i);
-      if (codePoint === undefined) {
-        continue;
-      }
+    for (let index = 0; index < data.length; index++) {
+      const codePoint = data.codePointAt(index);
+      if (codePoint === undefined) continue;
       if (codePoint === 3) {
-        interrupt_fn({ sessionId: props.sessionId }).catch(console.error);
-        continue;
+        report(props.runtime.interruptTerminal(props.sessionId));
+      } else {
+        report(props.runtime.inputTerminal(props.sessionId, codePoint));
       }
-      input_char({ sessionId: props.sessionId, c: codePoint }).catch(
-        console.error,
-      );
-      if (codePoint > 0xffff) {
-        i++;
-      }
+      if (codePoint > 0xffff) index++;
     }
   };
 
   const onResize = (size: { cols: number; rows: number }) => {
-    resize_fn({
-      sessionId: props.sessionId,
-      cols: size.cols,
-      rows: size.rows,
-    }).catch(console.error);
+    report(
+      props.runtime.resizeTerminal(props.sessionId, size.cols, size.rows),
+    );
   };
 
   return (
@@ -288,189 +156,9 @@ export const SetupMyTerminal = (props: {
       onMount={handleMount}
       onData={onData}
       onResize={onResize}
-      addons={[fit_addon]}
-      options={{
-        scrollSensitivity: isTouchCapableDevice() ? 8 : 1
-      }}
+      addons={[fitAddon]}
+      options={{ scrollSensitivity: isTouchCapableDevice() ? 8 : 1 }}
       class="w-full h-full"
     />
   );
-};
-
-const get_ref = (
-  term,
-  callback,
-  lsp: (args: { data: unknown }) => Promise<void>,
-) => {
-  class XtermStdio extends Fd {
-    term: Terminal;
-
-    constructor(term: Terminal) {
-      super();
-      this.term = term;
-    }
-    fd_write(data: Uint8Array) /*: {ret: number, nwritten: number}*/ {
-      const decoded = new TextDecoder().decode(data);
-      // \n to \r\n
-      const fixed = decoded.replace(/\n/g, "\r\n");
-      this.term.write(fixed);
-
-      out_buff += fixed;
-
-      return { ret: 0, nwritten: data.byteLength };
-    }
-    fd_seek() {
-      // wasi.ERRNO_BADF 8
-      return { ret: 8, offset: 0n };
-    }
-    fd_filestat_get() {
-      // wasi.ERRNO_BADF 8
-      return { ret: 8, filestat: null };
-    }
-  }
-
-  class XtermStderr extends Fd {
-    term: Terminal;
-
-    constructor(term: Terminal) {
-      super();
-      this.term = term;
-    }
-    fd_seek() {
-      // wasi.ERRNO_BADF 8
-      return { ret: 8, offset: 0n };
-    }
-    fd_write(data: Uint8Array) /*: {ret: number, nwritten: number}*/ {
-      const decoded = new TextDecoder().decode(data);
-      // \n to \r\n
-      const fixed = decoded.replace(/\n/g, "\r\n");
-      // ansi colors
-      this.term.write(`\x1b[31m${fixed}\x1b[0m`);
-
-      error_buff += fixed;
-
-      return { ret: 0, nwritten: data.byteLength };
-    }
-    fd_filestat_get() {
-      // wasi.ERRNO_BADF 8
-      return { ret: 8, filestat: null };
-    }
-  }
-
-  let download_name = "";
-  let download_chunks: Uint8Array[] = [];
-
-  let sysroot_queue: SysrootArchiveEntry[] = [];
-  let current_sysroot_file: SysrootArchiveEntry | null = null;
-  let sysroot_error: string | null = null;
-  const cratesProxyFetch = createCratesProxyFetch({
-    proxyBaseUrl: "https://proxy.rubrc.workers.dev",
-  });
-  const httpBridge = createHttpBridge(cratesProxyFetch);
-  let farm: WASIFarm;
-  const stdin = new XtermStdio(term);
-  const stdout = new XtermStdio(term);
-  const stderr = new XtermStderr(term);
-  const childBridge = createChildProcessBridge({
-    getWasiRef: () => farm.get_ref(),
-    workerUrl: childProcessWorkerUrl,
-    filesystemRoot: workspaceFileSystem.rootDirectory,
-    uploadTimeoutMs: 30000,
-    executionTimeoutMs: 120000,
-  });
-
-  farm = new WASIFarm(stdin, stdout, stderr, [workspaceFileSystem.preopen], {
-    allocator_size: 100 * 1024 * 1024, // 100MB
-    base_call_allocator_size: 64 * 1024 * 1024, // 64 MiB
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    unknown_fn: async (unknown: any) => {
-      if (isHttpBridgeMessage(unknown)) {
-        return await httpBridge(unknown);
-      } else if (isChildProcessMessage(unknown)) {
-        return await childBridge(unknown);
-      } else if (unknown.name === "downloadFileStart") {
-        download_name = unknown.args.name;
-        download_chunks = [];
-      } else if (unknown.name === "downloadFileChunk") {
-        const chunk = toUint8Array(unknown.args.data);
-        download_chunks.push(chunk);
-      } else if (unknown.name === "downloadFileEnd") {
-        const blob = new Blob(download_chunks);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = getDownloadFileName(download_name);
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        // reset the download state
-        download_name = "";
-        download_chunks = [];
-      } else if (unknown.name === "sysrootStartFetch") {
-        const triple = unknown.args.triple;
-        sysroot_queue = [];
-        current_sysroot_file = null;
-        sysroot_error = null;
-        try {
-          sysroot_queue = await loadSysrootArchive(triple);
-          if (triple === "rust-src") {
-            populateWebRustSrc(
-              workspaceFileSystem.sysrootContents,
-              sysroot_queue,
-            );
-          }
-        } catch (error) {
-          sysroot_error =
-            error instanceof Error ? error.message : String(error);
-          console.error(`Failed to fetch ${triple}`, error);
-        }
-        return {};
-      } else if (unknown.name === "sysrootGetNextFileMeta") {
-        if (sysroot_error !== null) {
-          return { has_file: -1, name_len: 0, data_len: 0 };
-        }
-        if (sysroot_queue.length > 0) {
-          current_sysroot_file = sysroot_queue.shift()!;
-          return {
-            has_file: true,
-            name_len: current_sysroot_file.name.length,
-            data_len: current_sysroot_file.isDirectory
-              ? -1
-              : current_sysroot_file.data.length,
-          };
-        } else {
-          current_sysroot_file = null;
-          return { has_file: false, name_len: 0, data_len: 0 };
-        }
-      } else if (unknown.name === "sysrootReadFileName") {
-        if (current_sysroot_file?.name) {
-          return { name: Array.from(current_sysroot_file.name) };
-        }
-        throw new Error("No current sysroot file to read name from");
-      } else if (unknown.name === "sysrootReadFileChunk") {
-        if (!current_sysroot_file) {
-          throw new Error("No current sysroot file to read data from");
-        }
-        const { chunk, remaining } = takeExactSysrootChunk(
-          current_sysroot_file.data,
-          unknown.args.chunk_len,
-        );
-        current_sysroot_file.data = remaining;
-        return { chunk: Array.from(chunk) };
-      } else if (unknown.name === "terminalWrite") {
-        routeWasiTerminalWrite(
-          unknown.args,
-          (message) => void lsp(message),
-          write_to_terminal,
-        );
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        console.warn("Unknown function called", unknown);
-      }
-    },
-  });
-
-  callback(farm.get_ref());
 };
