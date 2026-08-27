@@ -72,18 +72,20 @@ jobs:
             swapon --show || true
           } | tee ci-logs/runner.txt
 
-      - name: Add emergency swap
+      - name: Ensure swap headroom
         run: |
-          FREE_KB="$(df --output=avail -k / | tail -1)"
-          if [ "$FREE_KB" -ge $((10 * 1024 * 1024)) ]; then
-            sudo fallocate -l 6G /swapfile
-            sudo chmod 600 /swapfile
-            sudo mkswap /swapfile
-            sudo swapon /swapfile
+          SWAP_BYTES="$(free -b | awk '/^Swap:/ {print $2}')"
+          if [ "$SWAP_BYTES" -ge $((2 * 1024 * 1024 * 1024)) ]; then
+            echo "Runner already has at least 2 GiB swap; keeping it"
           else
-            echo "Less than 10 GiB free; skipping extra swap"
+            echo "Runner has little/no swap; trying a 6 GiB fallback"
+            sudo fallocate -l 6G /mnt/rubrc-ci-swapfile || true
+            sudo chmod 600 /mnt/rubrc-ci-swapfile || true
+            sudo mkswap /mnt/rubrc-ci-swapfile || true
+            sudo swapon /mnt/rubrc-ci-swapfile || true
           fi
           free -h | tee ci-logs/memory-after-swap.txt
+          swapon --show | tee -a ci-logs/memory-after-swap.txt || true
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
