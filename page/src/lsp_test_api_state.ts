@@ -37,6 +37,14 @@ export type LspTestGenerationState<TMonaco, TEditor, TModel> = {
   model?: TModel;
   mainDidOpenComplete?: boolean;
   requestSyntaxTree?: (uri: string) => Promise<string>;
+  requestCompletion?: (
+    uri: string,
+    position: { line: number; character: number },
+  ) => Promise<unknown>;
+  requestDefinition?: (
+    uri: string,
+    position: { line: number; character: number },
+  ) => Promise<unknown>;
   lspEvents?: unknown[];
   mainDiagnosticsPublicationCount?: number;
   runtime?: RuntimeTestState;
@@ -116,6 +124,9 @@ export function beginLspTestGeneration<TMonaco, TEditor, TModel>(
   delete state.mountFailure;
   delete state.mainDidOpenComplete;
   delete state.requestSyntaxTree;
+  delete state.requestCrateGraph;
+  delete state.requestCompletion;
+  delete state.requestDefinition;
   delete state.lspEvents;
   delete state.mainDiagnosticsPublicationCount;
   if (metadata === undefined) {
@@ -168,6 +179,8 @@ export function beginLspTestGeneration<TMonaco, TEditor, TModel>(
       delete state.model;
       delete state.mainDidOpenComplete;
       delete state.requestSyntaxTree;
+      delete state.requestCompletion;
+      delete state.requestDefinition;
       delete state.lspEvents;
       delete state.mainDiagnosticsPublicationCount;
       delete state.runtime;
