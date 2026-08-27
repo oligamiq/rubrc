@@ -9,18 +9,34 @@ const graph = (nodes: string) =>
   `digraph rust_analyzer_crate_graph {\n${nodes}\n}`;
 const mainNode = '  _0 [label="rubrc_main"];';
 const coreNode = '  _1 [label="core"];';
+const allocNode = '  _2 [label="alloc"];';
+const stdNode = '  _3 [label="std"];';
+const readyNodes = `${mainNode}\n${coreNode}\n${allocNode}\n${stdNode}`;
 
 Deno.test("crate graph recognizes exact RA node labels only", async () => {
   const nearGraphs = [
-    graph('  _0 [label="rubrc_main_extra"];\n  _1 [label="core"];'),
-    graph('  _0 [label="rubrc_main"];\n  _1 [label="core2"];'),
-    graph('  _0 [label="rubrc_main"];\n  _0 -> _1 [label="core"];'),
-    graph('  _0 [label="rubrc_main"];\n  _1 [label="co\\re"];'),
-    graph('  _0 [label="rubrc_main"];\n  node [label="core"];'),
+    graph(
+      '  _0 [label="rubrc_main_extra"];\n' +
+        `${coreNode}\n${allocNode}\n${stdNode}`,
+    ),
+    graph(`${mainNode}\n  _1 [label="core2"];\n${allocNode}\n${stdNode}`),
+    graph(
+      `${mainNode}\n  _0 -> _1 [label="core"];\n${allocNode}\n${stdNode}`,
+    ),
+    graph(
+      `${mainNode}\n  _1 [label="co\\re"];\n${allocNode}\n${stdNode}`,
+    ),
+    graph(
+      `${mainNode}\n  node [label="core"];\n${allocNode}\n${stdNode}`,
+    ),
+    graph(`${mainNode}\n${coreNode}\n  _2 [label="alloc2"];\n${stdNode}`),
+    graph(`${mainNode}\n${coreNode}\n${allocNode}\n  _3 [label="std2"];`),
   ];
   const actualRaGraph = graph(
     '  _0[label="rubrc_main"][tooltip="workspace -> sysroot"][shape="box"];\n' +
       '  _1[label="core"][shape="box"];\n' +
+      '  _2[label="alloc"][shape="box"];\n' +
+      '  _3[label="std"][shape="box"];\n' +
       '  _0 -> _1 [label="core", color="blue"];',
   );
   let requests = 0;
@@ -44,15 +60,16 @@ Deno.test("crate graph recognizes exact RA node labels only", async () => {
 
   await readiness.waitForCrateGraph(new AbortController().signal);
 
-  assert(requests === 6, `accepted a non-exact graph after ${requests} polls`);
+  assert(requests === 8, `accepted a non-exact graph after ${requests} polls`);
 });
 
-Deno.test("crate graph polling requires main and core in the full graph", async () => {
+Deno.test("crate graph polling requires main, core, alloc, and std in the full graph", async () => {
   const responses = [
-    graph(""),
-    graph(mainNode),
-    graph(coreNode),
-    graph(`${mainNode}\n${coreNode}`),
+    graph(`${coreNode}\n${allocNode}\n${stdNode}`),
+    graph(`${mainNode}\n${allocNode}\n${stdNode}`),
+    graph(`${mainNode}\n${coreNode}\n${stdNode}`),
+    graph(`${mainNode}\n${coreNode}\n${allocNode}`),
+    graph(readyNodes),
   ];
   const requests: Array<{ method: string; params: unknown }> = [];
   const readiness = new RustAnalyzerReadiness(
@@ -68,7 +85,7 @@ Deno.test("crate graph polling requires main and core in the full graph", async 
 
   await readiness.waitForCrateGraph(new AbortController().signal);
 
-  assert(requests.length === 4, `resolved after ${requests.length} polls`);
+  assert(requests.length === 5, `resolved after ${requests.length} polls`);
   assert(
     requests.every((request) =>
       request.method === "rust-analyzer/viewCrateGraph" &&
@@ -85,7 +102,7 @@ Deno.test("crate graph retries only ContentModified request failures", async () 
       async sendRequest<R>(): Promise<R> {
         requests++;
         if (requests === 1) throw { code: -32801 };
-        return graph(`${mainNode}\n${coreNode}`) as R;
+        return graph(readyNodes) as R;
       },
     },
     uri,
@@ -104,7 +121,7 @@ Deno.test("semantic readiness rejects pre-graph diagnostics and converts the ful
       async sendRequest<R>(method: string, params: unknown): Promise<R> {
         requests.push({ method, params });
         if (method === "rust-analyzer/viewCrateGraph") {
-          return graph(`${mainNode}\n${coreNode}`) as R;
+          return graph(readyNodes) as R;
         }
         return [] as R;
       },
@@ -168,7 +185,7 @@ Deno.test("document changes clear diagnostics and invalidate an in-flight hint",
     {
       async sendRequest<R>(method: string): Promise<R> {
         if (method === "rust-analyzer/viewCrateGraph") {
-          return graph(`${mainNode}\n${coreNode}`) as R;
+          return graph(readyNodes) as R;
         }
         hintVersions.push(version);
         if (hintVersions.length === 1) {
@@ -223,7 +240,7 @@ Deno.test("an edit partway through a sleep restarts the complete quiet window", 
     {
       async sendRequest<R>(method: string): Promise<R> {
         if (method === "rust-analyzer/viewCrateGraph") {
-          return graph(`${mainNode}\n${coreNode}`) as R;
+          return graph(readyNodes) as R;
         }
         hints++;
         return [] as R;
@@ -274,7 +291,7 @@ Deno.test("out-of-order stale diagnostics cannot erase the latest version", asyn
     {
       async sendRequest<R>(method: string): Promise<R> {
         if (method === "rust-analyzer/viewCrateGraph") {
-          return graph(`${mainNode}\n${coreNode}`) as R;
+          return graph(readyNodes) as R;
         }
         hints++;
         return [] as R;
@@ -321,7 +338,7 @@ Deno.test("ContentModified retries after another quiet window", async () => {
     {
       async sendRequest<R>(method: string): Promise<R> {
         if (method === "rust-analyzer/viewCrateGraph") {
-          return graph(`${mainNode}\n${coreNode}`) as R;
+          return graph(readyNodes) as R;
         }
         hints++;
         if (hints === 1) throw { code: -32801, message: "Content modified" };
@@ -367,7 +384,7 @@ Deno.test("non-ContentModified hint failures fail semantic readiness", async () 
     {
       async sendRequest<R>(method: string): Promise<R> {
         if (method === "rust-analyzer/viewCrateGraph") {
-          return graph(`${mainNode}\n${coreNode}`) as R;
+          return graph(readyNodes) as R;
         }
         throw expected;
       },
@@ -481,7 +498,7 @@ Deno.test("a crate graph response settling after its deadline still fails", asyn
     {
       async sendRequest<R>(): Promise<R> {
         now = 11;
-        return graph(`${mainNode}\n${coreNode}`) as R;
+        return graph(readyNodes) as R;
       },
     },
     uri,
@@ -570,7 +587,7 @@ Deno.test("abort interrupts a never-settling inlay-hint request", async () => {
     {
       async sendRequest<R>(method: string): Promise<R> {
         if (method === "rust-analyzer/viewCrateGraph") {
-          return graph(`${mainNode}\n${coreNode}`) as R;
+          return graph(readyNodes) as R;
         }
         inlayStarted();
         return await new Promise<never>(() => {});
