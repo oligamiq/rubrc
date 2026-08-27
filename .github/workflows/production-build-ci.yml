@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 330
     env:
-      BINARYEN_CORES: "1"
+      BINARYEN_CORES: "2"
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
 
