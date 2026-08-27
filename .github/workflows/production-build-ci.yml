@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 330
     env:
-      BINARYEN_CORES: "2"
+      BINARYEN_CORES: "1"
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
 
@@ -72,20 +72,18 @@ jobs:
             swapon --show || true
           } | tee ci-logs/runner.txt
 
-      - name: Ensure swap headroom
+      - name: Add swap headroom
         run: |
-          SWAP_BYTES="$(free -b | awk '/^Swap:/ {print $2}')"
-          if [ "$SWAP_BYTES" -ge $((2 * 1024 * 1024 * 1024)) ]; then
-            echo "Runner already has at least 2 GiB swap; keeping it"
-          else
-            echo "Runner has little/no swap; trying a 6 GiB fallback"
-            sudo fallocate -l 6G /mnt/rubrc-ci-swapfile || true
-            sudo chmod 600 /mnt/rubrc-ci-swapfile || true
-            sudo mkswap /mnt/rubrc-ci-swapfile || true
-            sudo swapon /mnt/rubrc-ci-swapfile || true
-          fi
+          echo "== before extra swap =="
+          free -h
+          df -h / /mnt || true
+          sudo fallocate -l 16G /mnt/rubrc-ci-swapfile
+          sudo chmod 600 /mnt/rubrc-ci-swapfile
+          sudo mkswap /mnt/rubrc-ci-swapfile
+          sudo swapon /mnt/rubrc-ci-swapfile
+          echo "== after extra swap =="
           free -h | tee ci-logs/memory-after-swap.txt
-          swapon --show | tee -a ci-logs/memory-after-swap.txt || true
+          swapon --show | tee -a ci-logs/memory-after-swap.txt
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -95,14 +93,19 @@ jobs:
         run: |
           set -o pipefail
           (
+            set +e
             while true; do
-              echo "===== $(date -u +%FT%TZ) ====="
+              echo "===== resource heartbeat $(date -u +%FT%TZ) ====="
               free -h
-              ps -eo pid,ppid,comm,%cpu,%mem,rss --sort=-rss | head -15
-              sleep 30
+              ps -eo pid,ppid,comm,%cpu,%mem,rss --sort=-rss > ci-logs/ps.txt
+              head -15 ci-logs/ps.txt
+              echo "===== end heartbeat ====="
+              sleep 60
             done
-          ) >> ci-logs/resources.log 2>&1 &
+          ) > >(tee -a ci-logs/resources.log) 2>&1 &
           MONITOR_PID=$!
+          dump_resources() { echo "===== terminating $(date -u +%FT%TZ) ====="; free -h; swapon --show; ps -eo pid,ppid,comm,%cpu,%mem,rss --sort=-rss | sed -n '1,20p'; }
+          trap 'dump_resources; kill "$MONITOR_PID" 2>/dev/null || true; exit 143' TERM INT
           trap 'kill "$MONITOR_PID" 2>/dev/null || true' EXIT
 
           set +e
