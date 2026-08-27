@@ -1,0 +1,146 @@
+name: Production build (monolithic parallel comparison)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-build-monolithic-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      BINARYEN_CORES: "2"
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Setup Rust nightly
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup target add wasm32-wasip1-threads --toolchain nightly
+
+      - name: Install wasi_virt_layer
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/oligamiq/wasi_virt_layer/releases/download/v0.6.1/wasi_virt_layer-cli-installer.sh \
+            | sh
+          wasi_virt_layer --version
+
+      - name: Install Binaryen
+        env:
+          BINARYEN_VERSION: version_131
+          BINARYEN_SHA256: b5bf1f0eaf17c63ee588ff7a5954dc8f6ce2c26989051c66f24dfe9ece3e46db
+        run: |
+          curl --fail --location --retry 3 \
+            --output binaryen.tar.gz \
+            "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz"
+          echo "${BINARYEN_SHA256}  binaryen.tar.gz" | sha256sum --check -
+          tar -xzf binaryen.tar.gz
+          BINARYEN_DIR="$PWD/binaryen-${BINARYEN_VERSION}"
+          echo "${BINARYEN_DIR}/bin" >> "$GITHUB_PATH"
+          "${BINARYEN_DIR}/bin/wasm-opt" --version
+
+      - name: Record runner resources
+        run: |
+          mkdir -p ci-logs
+          {
+            echo "== CPU =="
+            nproc
+            lscpu
+            echo "== memory =="
+            free -h
+            echo "== disk =="
+            df -h /
+            echo "== swap =="
+            swapon --show || true
+          } | tee ci-logs/runner.txt
+
+      - name: Add swap headroom
+        run: |
+          echo "== before extra swap =="
+          free -h
+          df -h / /mnt || true
+          sudo fallocate -l 16G /mnt/rubrc-ci-swapfile
+          sudo chmod 600 /mnt/rubrc-ci-swapfile
+          sudo mkswap /mnt/rubrc-ci-swapfile
+          sudo swapon /mnt/rubrc-ci-swapfile
+          echo "== after extra swap =="
+          free -h | tee ci-logs/memory-after-swap.txt
+          swapon --show | tee -a ci-logs/memory-after-swap.txt
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Production build with resource monitor
+        shell: bash
+        run: |
+          set -o pipefail
+          (
+            set +e
+            while true; do
+              echo "===== resource heartbeat $(date -u +%FT%TZ) ====="
+              free -h
+              ps -eo pid,ppid,comm,%cpu,%mem,rss --sort=-rss > ci-logs/ps.txt
+              head -15 ci-logs/ps.txt
+              echo "===== end heartbeat ====="
+              sleep 60
+            done
+          ) > >(tee -a ci-logs/resources.log) 2>&1 &
+          MONITOR_PID=$!
+          dump_resources() { echo "===== terminating $(date -u +%FT%TZ) ====="; free -h; swapon --show; ps -eo pid,ppid,comm,%cpu,%mem,rss --sort=-rss | sed -n '1,20p'; }
+          trap 'dump_resources; kill "$MONITOR_PID" 2>/dev/null || true; exit 143' TERM INT
+          trap 'kill "$MONITOR_PID" 2>/dev/null || true' EXIT
+
+          set +e
+          /usr/bin/time -v -o ci-logs/build-time.txt \
+            bun run build:prod 2>&1 | tee ci-logs/build.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+
+          kill "$MONITOR_PID" 2>/dev/null || true
+          wait "$MONITOR_PID" 2>/dev/null || true
+          trap - EXIT
+          exit "$STATUS"
+
+      - name: Summarize build output
+        if: always()
+        run: |
+          echo "== build timing =="
+          cat ci-logs/build-time.txt 2>/dev/null || true
+          echo "== final memory =="
+          free -h
+          echo "== output sizes =="
+          find page/dist -type f -printf '%12s %p\n' 2>/dev/null \
+            | sort -nr | head -30 || true
+          df -h /
+
+      - name: Upload resource logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-build-resource-logs
+          path: ci-logs
+          retention-days: 7
+
+      - name: Upload production build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubrc-production-build
+          path: page/dist
+          compression-level: 0
+          retention-days: 7

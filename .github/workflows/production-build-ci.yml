@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-build-resource-test
+  group: production-build-split-${{ github.run_id }}
   cancel-in-progress: false
 
 env:
