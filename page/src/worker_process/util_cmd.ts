@@ -8,6 +8,7 @@ import { custom_instantiate } from "./vfs_bindings/inst";
 import { set_fake_worker } from "./vfs_bindings/common";
 import { prebindWasiMemory } from "./prebind_wasi_memory.ts";
 import { get_brotli_decompress_stream } from "../../../lib/src/brotli_stream";
+import { createParallelPartStream } from "./parallel_part_download.ts";
 import {
   createAdditionalSysrootStatusEndpoint,
   createStartupSysrootStatusEndpoint,
@@ -219,73 +220,74 @@ async function prepareUtilityAnimal(
         const total = manifest.compressedSize;
         const decompressStream = await get_brotli_decompress_stream();
 
-        const { readable, writable } = new TransformStream();
-
-        (async () => {
-          const writer = writable.getWriter();
-          try {
-            let loaded = 0;
-            let partIndex = 0;
-            for (const part of manifest.parts) {
-              const partUrl = new URL(part.file, manifestUrl.href).href;
-              const partRes = await fetch(partUrl, { signal });
-              if (!partRes.ok) {
-                throw new Error(
-                  `Failed to fetch part ${partIndex} (${partUrl}): ${partRes.status} ${partRes.statusText}`,
-                );
-              }
-              const reader = partRes.body?.getReader();
-              if (!reader) throw new Error("No body on part response");
-
-              let partLoaded = 0;
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                partLoaded += value.byteLength;
-                loaded += value.byteLength;
-                let progressMsg = `\r\x1b[K[VFS] Downloading: ${
-                  (
-                    loaded / 1024 / 1024
-                  ).toFixed(2)
-                }MB`;
-                if (total > 0) {
-                  const percent = Math.round((loaded / total) * 100);
-                  progressMsg += `/${
-                    (total / 1024 / 1024).toFixed(
-                      2,
-                    )
-                  }MB (${percent}%)`;
-                }
-                await terminal({
-                  sessionId: 0,
-                  data: new TextEncoder().encode(progressMsg),
-                });
-                await writer.write(value);
-              }
-              if (partLoaded !== part.size) {
-                throw new Error(
-                  `Part size mismatch for ${part.file}: loaded ${partLoaded}, expected ${part.size}`,
-                );
-              }
-              partIndex++;
-            }
-            if (loaded !== manifest.compressedSize) {
-              throw new Error(
-                `Total size mismatch: loaded ${loaded}, expected ${manifest.compressedSize}`,
-              );
+        let loaded = 0;
+        let reportedLoaded = 0;
+        let progressError: unknown | undefined;
+        let progressOutput: Promise<void> | null = null;
+        const flushProgress = async (): Promise<void> => {
+          while (reportedLoaded !== loaded) {
+            const snapshot = loaded;
+            reportedLoaded = snapshot;
+            let progressMsg = `\r\x1b[K[VFS] Downloading: ${
+              (snapshot / 1024 / 1024).toFixed(2)
+            }MB`;
+            if (total > 0) {
+              const percent = Math.round((snapshot / total) * 100);
+              progressMsg += `/${
+                (total / 1024 / 1024).toFixed(2)
+              }MB (${percent}%)`;
             }
             await terminal({
               sessionId: 0,
-              data: new TextEncoder().encode(
-                `\r\n[VFS] Finalizing compilation...\r\n`,
-              ),
+              data: new TextEncoder().encode(progressMsg),
             });
-            await writer.close();
-          } catch (e) {
-            await writer.abort(e);
           }
-        })();
+        };
+        const scheduleProgress = (): void => {
+          if (progressOutput || progressError !== undefined) return;
+          progressOutput = flushProgress()
+            .catch((error) => {
+              progressError = error;
+            })
+            .finally(() => {
+              progressOutput = null;
+              if (progressError === undefined && reportedLoaded !== loaded) {
+                scheduleProgress();
+              }
+            });
+        };
+
+        const partStream = createParallelPartStream({
+          parts: manifest.parts,
+          manifestUrl: manifestUrl.href,
+          signal,
+          onChunk(bytes) {
+            loaded += bytes;
+            scheduleProgress();
+          },
+        });
+        const compressedReadable = partStream.stream.pipeThrough(
+          new TransformStream({
+            transform(chunk, controller) {
+              controller.enqueue(chunk);
+            },
+            async flush() {
+              await progressOutput;
+              if (progressError !== undefined) throw progressError;
+              if (loaded !== manifest.compressedSize) {
+                throw new Error(
+                  `Total size mismatch: loaded ${loaded}, expected ${manifest.compressedSize}`,
+                );
+              }
+              await terminal({
+                sessionId: 0,
+                data: new TextEncoder().encode(
+                  `\r\n[VFS] Finalizing compilation...\r\n`,
+                ),
+              });
+            },
+          }),
+        );
 
         let decompressedLoaded = 0;
         const validationStream = new TransformStream({
@@ -310,7 +312,7 @@ async function prepareUtilityAnimal(
           },
         });
 
-        const decompressedReadable = readable
+        const decompressedReadable = compressedReadable
           .pipeThrough(decompressStream)
           .pipeThrough(validationStream);
 
@@ -319,6 +321,7 @@ async function prepareUtilityAnimal(
             headers: { "Content-Type": "application/wasm" },
           }),
         );
+        await partStream.cacheReady;
 
         await cacheWasm(cacheKey, vfs_wasm);
         await terminal({
