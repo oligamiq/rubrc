@@ -1,5 +1,6 @@
 import { rustWasmReleaseArchiveUrl } from "../lib/src/rust_wasm_release.ts";
 import { prepareReleasedRustSrcArchive } from "./rust_src_archive.ts";
+import { prepareCachedArchive } from "./sysroot_cache.ts";
 
 Deno.test("released rust-src preparation uses the pinned release and validates bytes", async () => {
   const calls: unknown[] = [];
@@ -29,6 +30,45 @@ Deno.test("released rust-src preparation uses the pinned release and validates b
     options.triple !== "rust-src" ||
     options.url !== rustWasmReleaseArchiveUrl("rust-src")
   ) throw new Error(`wrong release request: ${JSON.stringify(options)}`);
+});
+
+Deno.test("released rust-src never reuses the legacy installed-toolchain cache", async () => {
+  const legacyCacheArchive = ".rubrc-cache/sysroot/rust-src.tar.br";
+  const releaseArchive = new Uint8Array([7]);
+  let downloaded = false;
+  const result = await prepareReleasedRustSrcArchive({
+    deps: {
+      prepare: (options) =>
+        prepareCachedArchive({
+          ...options,
+          deps: {
+            exists: async (path) => path === legacyCacheArchive,
+            remove: async () => {},
+            mkdir: async () => {},
+            readFile: async () => new Uint8Array([6]),
+            writeFile: async () => {},
+            rename: async () => {},
+            fetchBytes: async () => {
+              downloaded = true;
+              return releaseArchive;
+            },
+            extractTarBr: async () => {},
+          },
+        }),
+      validate: async () => true,
+      remove: async () => {},
+    },
+  });
+
+  if (!downloaded || result.source !== "download") {
+    throw new Error("legacy installed-toolchain cache was reused");
+  }
+  if (
+    result.cacheArchive !==
+      ".rubrc-cache/sysroot/rust_wasm/v0.2.1/rust-src.tar.br"
+  ) {
+    throw new Error(`release cache was not versioned: ${result.cacheArchive}`);
+  }
 });
 
 Deno.test("invalid released rust-src is removed from cache", async () => {

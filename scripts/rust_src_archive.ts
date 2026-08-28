@@ -1,4 +1,7 @@
-import { rustWasmReleaseArchiveUrl } from "../lib/src/rust_wasm_release.ts";
+import {
+  RUST_WASM_RELEASE_VERSION,
+  rustWasmReleaseArchiveUrl,
+} from "../lib/src/rust_wasm_release.ts";
 import {
   prepareCachedArchive,
   type SysrootCacheSource,
@@ -11,6 +14,9 @@ type PreparedArchive = {
   cacheArchive: string;
   url: string;
 };
+
+const DEFAULT_RELEASED_RUST_SRC_CACHE_DIR =
+  `.rubrc-cache/sysroot/rust_wasm/${RUST_WASM_RELEASE_VERSION}`;
 
 export type ReleasedRustSrcArchiveDeps = {
   prepare(options: {
@@ -45,7 +51,7 @@ export async function prepareReleasedRustSrcArchive(
   const deps = options.deps ?? defaultDeps;
   const prepared = await deps.prepare({
     triple: "rust-src",
-    cacheDir: options.cacheDir,
+    cacheDir: options.cacheDir ?? DEFAULT_RELEASED_RUST_SRC_CACHE_DIR,
     url: rustWasmReleaseArchiveUrl("rust-src"),
   });
   if (!(await deps.validate(prepared.archive))) {
