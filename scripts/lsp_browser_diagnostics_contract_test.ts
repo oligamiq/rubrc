@@ -117,6 +117,26 @@ Deno.test("browser acceptance requires semantic rust-analyzer markers", async ()
   );
 });
 
+Deno.test("browser acceptance verifies practical std analysis", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+
+  for (const required of [
+    'nodeLabel("alloc")',
+    'nodeLabel("std")',
+    "requestCompletion",
+    "requestDefinition",
+    "definitely_missing",
+    "/sysroot/lib/rustlib/src/rust/library/std/",
+  ]) {
+    assert(
+      source.includes(required),
+      `browser std-analysis contract missing ${required}`,
+    );
+  }
+});
+
 Deno.test("browser acceptance fails any file service resolution error", async () => {
   const source = await Deno.readTextFile(
     "scripts/lsp_browser_diagnostics_test.mjs",

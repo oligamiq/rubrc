@@ -21,6 +21,10 @@ const validMain = "fn main() {}\n";
 const startupMain = "fn main() { let startup_edit = 1; }\n";
 const remountMain = "fn main() { let remount_edit = 1; }\n";
 const invalidSecondary = "pub fn secondary() { let value = ; }\n";
+const completionMain = "fn main() { let _ = std::env::curr; }\n";
+const validStdMain = "fn main() { let _ = std::env::current_dir(); }\n";
+const invalidStdMain =
+  "fn main() { let _ = std::env::definitely_missing(); }\n";
 const DEFAULT_API_NOT_READY = "Default api is not ready yet";
 const BROWSER_CLOSE_TIMEOUT_MS = 10_000;
 const REMOUNT_TIMEOUT_MS = 30_000;
@@ -489,9 +493,14 @@ try {
         `(?:^|[;{\\n])\\s*(?:[A-Za-z_][\\w]*|"(?:\\\\.|[^"\\\\])*")\\s*(?:\\[[^\\]]*\\])*\\[?[^;]*\\blabel="${label}"`,
         "m",
       ).test(graph);
-    if (!nodeLabel("rubrc_main") || !nodeLabel("core")) {
+    if (
+      !nodeLabel("rubrc_main") ||
+      !nodeLabel("core") ||
+      !nodeLabel("alloc") ||
+      !nodeLabel("std")
+    ) {
       throw new Error(
-        "crate graph is missing configured rubrc-main (RA label rubrc_main) and core nodes",
+        "crate graph is missing rubrc-main, core, alloc, or std nodes",
       );
     }
   }, startupMain);
@@ -499,6 +508,153 @@ try {
   const analysisDeadline = Date.now() + ANALYSIS_TIMEOUT_MS;
   const remainingAnalysisBudget = () =>
     Math.max(1, analysisDeadline - Date.now());
+
+  const beforeCompletionPublication = await page.evaluate(
+    () => window.__rubrcLspTest.mainDiagnosticsPublicationCount,
+  );
+  await page.evaluate((text) => {
+    window.__rubrcLspTest.model.setValue(text);
+  }, completionMain);
+  await page.waitForFunction(
+    (previous) =>
+      window.__rubrcLspTest.mainDiagnosticsPublicationCount > previous,
+    { timeout: remainingAnalysisBudget() },
+    beforeCompletionPublication,
+  );
+
+  const completion = await page.evaluate(async () => {
+    const api = window.__rubrcLspTest;
+    const result = await api.requestCompletion(
+      "file:///src/main.rs",
+      { line: 0, character: "fn main() { let _ = std::env::curr".length },
+    );
+    const items = Array.isArray(result) ? result : result?.items ?? [];
+    return items.map((item) => item.label);
+  });
+  if (!completion.includes("current_dir")) {
+    throw new Error(`std completion omitted current_dir: ${completion.join(",")}`);
+  }
+
+  const beforeValidStdPublication = await page.evaluate(
+    () => window.__rubrcLspTest.mainDiagnosticsPublicationCount,
+  );
+  await page.evaluate((text) => {
+    window.__rubrcLspTest.model.setValue(text);
+  }, validStdMain);
+  await waitForDiagnosticsQuiescence({
+    stage: "valid std definition",
+    waitForPublication: () =>
+      page.waitForFunction(
+        (previous) =>
+          window.__rubrcLspTest.mainDiagnosticsPublicationCount > previous,
+        { timeout: remainingAnalysisBudget() },
+        beforeValidStdPublication,
+      ),
+    waitForMarkers: () =>
+      page.waitForFunction(
+        () => {
+          const { monaco } = window.__rubrcLspTest;
+          const uri = monaco.Uri.parse("file:///src/main.rs");
+          return !monaco.editor
+            .getModelMarkers({ resource: uri })
+            .some((marker) => marker.severity === monaco.MarkerSeverity.Error);
+        },
+        { timeout: remainingAnalysisBudget() },
+      ),
+    requestSyntaxTree: () =>
+      page.evaluate(() =>
+        window.__rubrcLspTest.requestSyntaxTree("file:///src/main.rs")
+      ),
+    timeoutMs: remainingAnalysisBudget(),
+  });
+
+  const definitionUris = await page.evaluate(async () => {
+    const api = window.__rubrcLspTest;
+    const result = await api.requestDefinition(
+      "file:///src/main.rs",
+      { line: 0, character: "fn main() { let _ = std::env::current".length },
+    );
+    const values = result == null ? [] : Array.isArray(result) ? result : [result];
+    return values.map((value) => value.uri ?? value.targetUri ?? "");
+  });
+  if (
+    !definitionUris.some((uri) =>
+      uri.includes("/sysroot/lib/rustlib/src/rust/library/std/")
+    )
+  ) {
+    throw new Error(`std definition resolved outside rust-src: ${definitionUris}`);
+  }
+
+  const beforeInvalidStdPublication = await page.evaluate(
+    () => window.__rubrcLspTest.mainDiagnosticsPublicationCount,
+  );
+  await page.evaluate((text) => {
+    window.__rubrcLspTest.model.setValue(text);
+  }, invalidStdMain);
+  await waitForDiagnosticsQuiescence({
+    stage: "invalid std diagnostics",
+    waitForPublication: () =>
+      page.waitForFunction(
+        (previous) =>
+          window.__rubrcLspTest.mainDiagnosticsPublicationCount > previous,
+        { timeout: remainingAnalysisBudget() },
+        beforeInvalidStdPublication,
+      ),
+    waitForMarkers: () =>
+      page.waitForFunction(
+        () => {
+          const { monaco } = window.__rubrcLspTest;
+          const uri = monaco.Uri.parse("file:///src/main.rs");
+          return monaco.editor
+            .getModelMarkers({ resource: uri })
+            .some((marker) =>
+              marker.severity === monaco.MarkerSeverity.Error &&
+              marker.source === "rust-analyzer" &&
+              marker.message.includes("definitely_missing")
+            );
+        },
+        { timeout: remainingAnalysisBudget() },
+      ),
+    requestSyntaxTree: () =>
+      page.evaluate(() =>
+        window.__rubrcLspTest.requestSyntaxTree("file:///src/main.rs")
+      ),
+    timeoutMs: remainingAnalysisBudget(),
+  });
+
+  const beforeStdClearPublication = await page.evaluate(
+    () => window.__rubrcLspTest.mainDiagnosticsPublicationCount,
+  );
+  await page.evaluate((text) => {
+    window.__rubrcLspTest.model.setValue(text);
+  }, validStdMain);
+  await waitForDiagnosticsQuiescence({
+    stage: "clearing std diagnostics",
+    waitForPublication: () =>
+      page.waitForFunction(
+        (previous) =>
+          window.__rubrcLspTest.mainDiagnosticsPublicationCount > previous,
+        { timeout: remainingAnalysisBudget() },
+        beforeStdClearPublication,
+      ),
+    waitForMarkers: () =>
+      page.waitForFunction(
+        () => {
+          const { monaco } = window.__rubrcLspTest;
+          const uri = monaco.Uri.parse("file:///src/main.rs");
+          return !monaco.editor
+            .getModelMarkers({ resource: uri })
+            .some((marker) => marker.severity === monaco.MarkerSeverity.Error);
+        },
+        { timeout: remainingAnalysisBudget() },
+      ),
+    requestSyntaxTree: () =>
+      page.evaluate(() =>
+        window.__rubrcLspTest.requestSyntaxTree("file:///src/main.rs")
+      ),
+    timeoutMs: remainingAnalysisBudget(),
+  });
+
   await page.evaluate((text) => {
     const { monaco } = window.__rubrcLspTest;
     monaco.editor
