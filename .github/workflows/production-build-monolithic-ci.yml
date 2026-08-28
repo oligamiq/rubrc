@@ -3,7 +3,7 @@ name: Production build (monolithic parallel comparison)
 on:
   push:
     branches:
-      - ci/production-build-wasm-opt
+      - develop
   workflow_dispatch:
 
 permissions:
