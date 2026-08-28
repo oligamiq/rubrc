@@ -1,14 +1,14 @@
-import { prepareInstalledRustSrcArchive } from "./rust_src_archive.ts";
+import { prepareReleasedRustSrcArchive } from "./rust_src_archive.ts";
 
 type PrepareRustSrcArchive = () => Promise<{
   archive: Uint8Array;
   cacheArchive: string;
-  source: "cache" | "generated";
+  source: "cache" | "download";
 }>;
 
 export async function writeRustSrcAsset(
   outputPath = "page/dist/rust-src.tar.vfsbr",
-  prepare: PrepareRustSrcArchive = prepareInstalledRustSrcArchive,
+  prepare: PrepareRustSrcArchive = prepareReleasedRustSrcArchive,
 ): Promise<void> {
   const { archive } = await prepare();
   const parent = outputPath.slice(0, outputPath.lastIndexOf("/"));

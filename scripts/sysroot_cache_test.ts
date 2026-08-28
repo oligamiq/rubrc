@@ -1,90 +1,11 @@
 import {
-  createRustSrcCacheMetadata,
-  deterministicRustSrcTarArgs,
   prepareCachedArchive,
   prepareCachedSysroot,
-  rustSrcCacheMatchesIdentity,
-  rustSrcCacheMatchesMetadata,
-  rustSrcToolchainIdentity,
   type SysrootCacheDeps,
   sysrootCachePaths,
   validateRustSrcArchive,
   validateTarEntryName,
 } from "./sysroot_cache.ts";
-
-Deno.test("rust-src cache identity includes exact compiler and sysroot", () => {
-  const identity = rustSrcToolchainIdentity(
-    "rustc 1.95.0-nightly\ncommit-hash: abc123\n",
-    "/toolchains/nightly",
-  );
-  if (!rustSrcCacheMatchesIdentity(identity, `${identity}\n`)) {
-    throw new Error("matching identity was rejected");
-  }
-  if (
-    rustSrcCacheMatchesIdentity(
-      identity,
-      rustSrcToolchainIdentity(
-        "rustc 1.95.0-nightly\ncommit-hash: def456",
-        "/toolchains/nightly",
-      ),
-    )
-  ) {
-    throw new Error("different compiler identity was reused");
-  }
-  if (
-    rustSrcCacheMatchesIdentity(
-      identity,
-      rustSrcToolchainIdentity(
-        "rustc 1.95.0-nightly\ncommit-hash: abc123",
-        "/other",
-      ),
-    )
-  ) {
-    throw new Error("different sysroot identity was reused");
-  }
-});
-
-Deno.test("rust-src cache metadata rejects an archive digest mismatch", async () => {
-  const identity = rustSrcToolchainIdentity("rustc exact", "/exact/sysroot");
-  const original = new Uint8Array([1, 2, 3]);
-  const metadata = await createRustSrcCacheMetadata(identity, original);
-  if (!await rustSrcCacheMatchesMetadata(identity, original, metadata)) {
-    throw new Error("matching cache metadata was rejected");
-  }
-  if (
-    await rustSrcCacheMatchesMetadata(
-      identity,
-      new Uint8Array([1, 2, 4]),
-      metadata,
-    )
-  ) {
-    throw new Error("digest-mismatched archive was accepted");
-  }
-});
-
-Deno.test("rust-src tar arguments fix ordering and metadata", () => {
-  const args = deterministicRustSrcTarArgs("/toolchain/library");
-  const expected = [
-    "--create",
-    "--file",
-    "-",
-    "--sort=name",
-    "--mtime=@0",
-    "--owner=0",
-    "--group=0",
-    "--numeric-owner",
-    "--mode=u+rwX,go+rX,go-w",
-    "--pax-option=delete=atime,delete=ctime",
-    "--directory",
-    "/toolchain/library",
-    ".",
-  ];
-  if (args.join("\n") !== expected.join("\n")) {
-    throw new Error(
-      `unexpected deterministic tar arguments:\n${args.join("\n")}`,
-    );
-  }
-});
 
 Deno.test("rust-src archive validation requires complete safe crate roots", async () => {
   const archive = new Uint8Array([7]);

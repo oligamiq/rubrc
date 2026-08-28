@@ -1,3 +1,4 @@
+import { rustWasmReleaseArchiveUrl } from "../../lib/src/rust_wasm_release.ts";
 import { pruneRustSrcCacheVariants } from "./rust_src_cache.ts";
 
 export type SysrootArchiveEntry = {
@@ -35,7 +36,6 @@ type ParseArchiveOptions = {
   ) => Promise<void>;
 };
 
-const BASE_URL = "https://oligamiq.github.io/rust_wasm/v0.2.0";
 const RUST_SRC_ASSET = "rust-src.tar.vfsbr";
 declare const __RUBRC_SOURCE_REVISION__: string;
 declare const __RUBRC_BUILD_EPOCH__: string;
@@ -52,7 +52,7 @@ export function sysrootArchiveUrl(
   sourceRevision = SOURCE_REVISION,
   buildEpoch = BUILD_EPOCH,
 ): string {
-  if (triple !== "rust-src") return `${BASE_URL}/${triple}.tar.br`;
+  if (triple !== "rust-src") return rustWasmReleaseArchiveUrl(triple);
   const url = pageUrl === undefined
     ? new URL(`./${RUST_SRC_ASSET}`, "https://development.invalid/")
     : new URL(RUST_SRC_ASSET, pageUrl);

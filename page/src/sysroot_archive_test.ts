@@ -40,7 +40,7 @@ Deno.test("rust-src uses same-origin asset while target sysroots stay remote", (
       "https://example.test/rubrc/index.html",
       "abc123",
       "42",
-    ) === "https://oligamiq.github.io/rust_wasm/v0.2.0/wasm32-wasip1.tar.br",
+    ) === "https://oligamiq.github.io/rust_wasm/v0.2.1/wasm32-wasip1.tar.br",
     "target sysroot URL changed",
   );
 });
