@@ -442,3 +442,33 @@ Deno.test("Pages artifact retains deployment metadata", async () => {
     "Pages workflow does not retain metadata through artifact upload",
   );
 });
+
+Deno.test("browser acceptance supports a validated port override", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+  const portIndex = source.indexOf(
+    'const port = Number(process.env.PORT ?? "4173")',
+  );
+  const urlIndex = source.indexOf(
+    "const url = `http://127.0.0.1:${port}`",
+    portIndex,
+  );
+  const listenIndex = source.indexOf("port,", urlIndex);
+
+  assert(portIndex >= 0, "browser acceptance does not read the PORT override");
+  assert(
+    source.includes("!Number.isSafeInteger(port)") &&
+      source.includes("port < 1") &&
+      source.includes("port > 65_535"),
+    "browser acceptance does not validate the selected port",
+  );
+  assert(
+    urlIndex > portIndex,
+    "browser acceptance URL does not use the validated port",
+  );
+  assert(
+    listenIndex > urlIndex,
+    "browser static server does not use the validated port",
+  );
+});

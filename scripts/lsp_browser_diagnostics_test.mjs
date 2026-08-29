@@ -14,7 +14,11 @@ import {
 } from "./lsp_browser_static_server.mjs";
 import { VfsDebugTraceCollector } from "../page/src/vfs_debug_trace.ts";
 
-const url = "http://127.0.0.1:4173";
+const port = Number(process.env.PORT ?? "4173");
+if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+  throw new Error(`invalid browser acceptance port: ${process.env.PORT}`);
+}
+const url = `http://127.0.0.1:${port}`;
 const expectedMetadataUrl = new URL("/.rubrc-pages-build.json", url).href;
 const invalidMain = 'fn main() { let value: i32 = "wrong"; }\n';
 const validMain = "fn main() {}\n";
@@ -248,7 +252,7 @@ try {
   await assertSingleDefaultApiBundle();
   staticServer = await startBrowserStaticServer({
     hostname: "127.0.0.1",
-    port: 4173,
+    port,
   });
   await waitForServer();
 
