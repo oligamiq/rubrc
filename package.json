@@ -26,6 +26,9 @@
     "vfs:prepare:prod": "node scripts/prepare-vfs-asset.mjs page/dist",
     "rust-src:prepare-asset": "deno run --no-lock --allow-read --allow-write --allow-run scripts/prepare_rust_src_asset.ts",
     "rust-src:prepare-dev-asset": "deno run --no-lock --allow-read --allow-write --allow-run scripts/prepare_rust_src_dev_asset.ts",
+    "pages:prepare-ci": "bash scripts/prepare-ci-pages-dist.sh",
+    "pages:preview": "bun scripts/preview-pages-dist.mjs",
+    "pages:preview-ci": "bash scripts/preview-ci-pages-dist.sh",
     "pages:publish": "bash scripts/publish-pages-dist.sh",
     "test:lsp-browser": "VITE_RUBRC_LSP_TEST=1 bun run --cwd page build && bun run vfs:prepare:prod && bun run rust-src:prepare-asset && bun scripts/lsp_browser_diagnostics_test.mjs"
   },

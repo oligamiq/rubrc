@@ -79,12 +79,9 @@ SOURCE_SHA="$SOURCE_SHA" BUILD_EPOCH="$BUILD_EPOCH" bun run build:prod
 bun run vfs:prepare:prod
 bun run rust-src:prepare-asset
 
-(
-  cd page
-  bunx mini-coi -sw dist/mini-coi.js
-  sed -i '/<head>/a \    <script src="./mini-coi.js" scope="./"></script>' dist/index.html
-)
-
+# page/dist is the shared Cloudflare/GitHub Pages source artifact.
+# Cloudflare consumes _headers directly. GitHub Pages adds mini-coi in
+# .github/workflows/static.yml immediately before its own deployment.
 
 
 # 4.4 metadata

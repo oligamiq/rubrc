@@ -80,6 +80,23 @@ jobs:
       - name: Remove site/.git
         run: rm -rf site/.git
 
+      - name: Add GitHub Pages cross-origin isolation fallback
+        run: |
+          npx --yes mini-coi@0.4.3 -sw site/mini-coi.js
+          node <<'NODE'
+          const fs = require("node:fs");
+          const indexPath = "site/index.html";
+          const tag = '    <script src="./mini-coi.js" scope="./"></script>';
+          let html = fs.readFileSync(indexPath, "utf8");
+          if (!html.includes(tag)) {
+            if (!html.includes("<head>")) {
+              throw new Error("site/index.html has no <head>");
+            }
+            html = html.replace("<head>", `<head>\n${tag}`);
+            fs.writeFileSync(indexPath, html);
+          }
+          NODE
+
       - name: Validate metadata
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
