@@ -40,6 +40,26 @@ NODE
 
 node "$ROOT_DIR/scripts/prepare-vfs-asset.mjs" "$OUTPUT_DIR"
 
+# Older production-build artifacts (including runs created before rust-src was
+# bundled by CI) still expect the same-origin /rust-src.tar.vfsbr asset.
+# Preserve an artifact-provided copy when present; otherwise backfill it from
+# the installed toolchain used for local preview preparation.
+if [ ! -s "$OUTPUT_DIR/rust-src.tar.vfsbr" ]; then
+  (
+    cd "$ROOT_DIR"
+    deno run --no-lock --allow-read --allow-write --allow-run \
+      "$ROOT_DIR/scripts/prepare_rust_src_asset.ts" \
+      "$OUTPUT_DIR/rust-src.tar.vfsbr"
+  )
+fi
+[ -s "$OUTPUT_DIR/rust-src.tar.vfsbr" ] || fail "rust-src asset was not prepared"
+
+# Older CI artifacts also predate deployment metadata. The runtime treats it as
+# optional cache-pruning input, so publish inert JSON instead of leaving a 404.
+if [ ! -s "$OUTPUT_DIR/.rubrc-pages-build.json" ]; then
+  printf '{}\n' > "$OUTPUT_DIR/.rubrc-pages-build.json"
+fi
+
 # _headers makes this directory directly deployable to Cloudflare Pages.
 # GitHub Pages adds mini-coi in its deployment workflow.
 
