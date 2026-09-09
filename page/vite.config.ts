@@ -51,6 +51,35 @@ function developmentRustSrcPlugin(asset: DevelopmentRustSrcAsset): Plugin {
   };
 }
 
+function wasiThreadShimCacheGuardPlugin(): Plugin {
+  return {
+    name: "rubrc-wasi-thread-shim-cache-guard",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        const rawUrl = request.url;
+        if (
+          rawUrl?.includes("/@fs/") &&
+          rawUrl.includes(
+            "/node_modules/@oligami/browser_wasi_shim-threads/",
+          )
+        ) {
+          const setHeader = response.setHeader;
+          response.setHeader = function (name, value) {
+            return setHeader.call(
+              this,
+              name,
+              name.toLowerCase() === "cache-control" ? "no-store" : value,
+            );
+          };
+          response.setHeader("Cache-Control", "no-store");
+        }
+        next();
+      });
+    },
+  };
+}
+
 async function serveDevelopmentRustSrcAsset(
   request: import("node:http").IncomingMessage,
   response: import("node:http").ServerResponse,
@@ -161,6 +190,7 @@ export default defineConfig(async ({ command, isPreview }) => {
       ...(developmentRustSrcAsset
         ? [developmentRustSrcPlugin(developmentRustSrcAsset)]
         : []),
+      ...(isDevelopmentServer ? [wasiThreadShimCacheGuardPlugin()] : []),
       solidPlugin(),
       tailwindcss(),
     ],
