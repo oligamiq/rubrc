@@ -1,4 +1,4 @@
-import { prepareInstalledRustSrcArchive } from "./rust_src_archive.ts";
+import { prepareReleasedRustSrcArchive } from "./rust_src_archive.ts";
 
 export const DEV_RUST_SRC_DIRECTORY = ".rubrc-cache/dev";
 export const DEV_RUST_SRC_SIDECAR = `${DEV_RUST_SRC_DIRECTORY}/rust-src.sha256`;
@@ -99,7 +99,7 @@ function bytesToHex(bytes: Uint8Array): string {
 
 export async function writeRustSrcDevAsset(
   directory = DEV_RUST_SRC_DIRECTORY,
-  prepare = prepareInstalledRustSrcArchive,
+  prepare = prepareReleasedRustSrcArchive,
 ): Promise<string> {
   const { archive } = await prepare();
   const digest = await crypto.subtle.digest("SHA-256", archive as BufferSource);

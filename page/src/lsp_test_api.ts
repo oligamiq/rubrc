@@ -23,13 +23,16 @@ type TestApi = DiagnosticsPublicationTestState &
     model?: Monaco.editor.ITextModel;
   };
 
-type SyntaxTreeRequestClient = {
+type AnalyzerTestRequestClient = {
   sendRequest<TResult>(method: string, params: unknown): Promise<TResult>;
 };
 
-type SyntaxTreeRequestState = Pick<
+type AnalyzerTestRequestState = Pick<
   TestApi,
-  "requestSyntaxTree" | "requestCrateGraph"
+  | "requestSyntaxTree"
+  | "requestCrateGraph"
+  | "requestCompletion"
+  | "requestDefinition"
 >;
 export type LspTestGenerationRecorder = ReturnType<
   typeof captureLspTestGeneration<unknown, unknown, unknown>
@@ -392,9 +395,9 @@ export function recordAnalyzerTestReadiness(
   });
 }
 
-export function installSyntaxTreeRequest(
-  state: SyntaxTreeRequestState,
-  client: SyntaxTreeRequestClient,
+export function installAnalyzerTestRequests(
+  state: AnalyzerTestRequestState,
+  client: AnalyzerTestRequestClient,
 ): { dispose(): void } {
   const requestSyntaxTree = (uri: string) =>
     client.sendRequest<string>("rust-analyzer/viewSyntaxTree", {
@@ -402,8 +405,26 @@ export function installSyntaxTreeRequest(
     });
   const requestCrateGraph = () =>
     client.sendRequest<string>("rust-analyzer/viewCrateGraph", { full: true });
+  const requestCompletion = (
+    uri: string,
+    position: { line: number; character: number },
+  ) =>
+    client.sendRequest("textDocument/completion", {
+      textDocument: { uri },
+      position,
+    });
+  const requestDefinition = (
+    uri: string,
+    position: { line: number; character: number },
+  ) =>
+    client.sendRequest("textDocument/definition", {
+      textDocument: { uri },
+      position,
+    });
   state.requestSyntaxTree = requestSyntaxTree;
   state.requestCrateGraph = requestCrateGraph;
+  state.requestCompletion = requestCompletion;
+  state.requestDefinition = requestDefinition;
   return {
     dispose: () => {
       if (state.requestSyntaxTree === requestSyntaxTree) {
@@ -412,29 +433,35 @@ export function installSyntaxTreeRequest(
       if (state.requestCrateGraph === requestCrateGraph) {
         delete state.requestCrateGraph;
       }
+      if (state.requestCompletion === requestCompletion) {
+        delete state.requestCompletion;
+      }
+      if (state.requestDefinition === requestDefinition) {
+        delete state.requestDefinition;
+      }
     },
   };
 }
 
-export function installGenerationSyntaxTreeRequest(
+export function installGenerationAnalyzerTestRequests(
   generation: LspTestGenerationRecorder,
-  client: SyntaxTreeRequestClient,
+  client: AnalyzerTestRequestClient,
 ): { dispose(): void } {
   let disposable: { dispose(): void } = { dispose() {} };
   generation.record((state) => {
-    disposable = installSyntaxTreeRequest(state, client);
+    disposable = installAnalyzerTestRequests(state, client);
   });
   return disposable;
 }
 
-export function exposeSyntaxTreeRequest(
+export function exposeAnalyzerTestRequests(
   generation: LspTestGenerationRecorder,
-  client: SyntaxTreeRequestClient,
+  client: AnalyzerTestRequestClient,
 ): {
   dispose(): void;
 } {
   if (!enabled) return { dispose() {} };
-  return installGenerationSyntaxTreeRequest(generation, client);
+  return installGenerationAnalyzerTestRequests(generation, client);
 }
 
 export function markLspReady(

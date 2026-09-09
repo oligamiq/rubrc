@@ -154,7 +154,9 @@ const nodeLabels = (dot: string) => {
 const crateGraphIsReady = (dot: unknown) => {
   if (typeof dot !== "string") return false;
   const labels = nodeLabels(dot);
-  return labels.has("rubrc_main") && labels.has("core");
+  return ["rubrc_main", "core", "alloc", "std"].every((label) =>
+    labels.has(label)
+  );
 };
 
 export class RustAnalyzerReadiness {

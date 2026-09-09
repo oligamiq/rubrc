@@ -117,6 +117,26 @@ Deno.test("browser acceptance requires semantic rust-analyzer markers", async ()
   );
 });
 
+Deno.test("browser acceptance verifies practical std analysis", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+
+  for (const required of [
+    'nodeLabel("alloc")',
+    'nodeLabel("std")',
+    "requestCompletion",
+    "requestDefinition",
+    "definitely_missing",
+    "/sysroot/lib/rustlib/src/rust/library/std/",
+  ]) {
+    assert(
+      source.includes(required),
+      `browser std-analysis contract missing ${required}`,
+    );
+  }
+});
+
 Deno.test("browser acceptance fails any file service resolution error", async () => {
   const source = await Deno.readTextFile(
     "scripts/lsp_browser_diagnostics_test.mjs",
@@ -420,5 +440,35 @@ Deno.test("Pages artifact retains deployment metadata", async () => {
   assert(
     metadataCheck >= 0 && metadataCheck < artifactUpload,
     "Pages workflow does not retain metadata through artifact upload",
+  );
+});
+
+Deno.test("browser acceptance supports a validated port override", async () => {
+  const source = await Deno.readTextFile(
+    "scripts/lsp_browser_diagnostics_test.mjs",
+  );
+  const portIndex = source.indexOf(
+    'const port = Number(process.env.PORT ?? "4173")',
+  );
+  const urlIndex = source.indexOf(
+    "const url = `http://127.0.0.1:${port}`",
+    portIndex,
+  );
+  const listenIndex = source.indexOf("port,", urlIndex);
+
+  assert(portIndex >= 0, "browser acceptance does not read the PORT override");
+  assert(
+    source.includes("!Number.isSafeInteger(port)") &&
+      source.includes("port < 1") &&
+      source.includes("port > 65_535"),
+    "browser acceptance does not validate the selected port",
+  );
+  assert(
+    urlIndex > portIndex,
+    "browser acceptance URL does not use the validated port",
+  );
+  assert(
+    listenIndex > urlIndex,
+    "browser static server does not use the validated port",
   );
 });

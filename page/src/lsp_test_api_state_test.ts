@@ -50,6 +50,9 @@ Deno.test("test API generation exposure resets stale readiness and references", 
     model: oldModel,
     mainDidOpenComplete: true,
     requestSyntaxTree: async () => "stale",
+    requestCrateGraph: async () => "stale",
+    requestCompletion: async () => "stale",
+    requestDefinition: async () => "stale",
     lspEvents: ["stale"],
     mainDiagnosticsPublicationCount: 3,
     vfsWrites: [{ path: "/old", content: "old" }],
@@ -66,6 +69,9 @@ Deno.test("test API generation exposure resets stale readiness and references", 
   assert(state.model === model, "new generation did not expose model");
   assert(!("mainDidOpenComplete" in state), "didOpen state was stale");
   assert(!("requestSyntaxTree" in state), "syntax request was stale");
+  assert(!("requestCrateGraph" in state), "crate-graph request was stale");
+  assert(!("requestCompletion" in state), "completion request was stale");
+  assert(!("requestDefinition" in state), "definition request was stale");
   assert(!("lspEvents" in state), "LSP events were stale");
   assert(
     !("mainDiagnosticsPublicationCount" in state),
@@ -85,6 +91,10 @@ Deno.test("test API cleanup cannot erase a newer generation", () => {
 
   old.dispose();
   assert(state.model === currentModel, "stale cleanup erased current model");
+  state.requestSyntaxTree = async () => "current";
+  state.requestCrateGraph = async () => "current";
+  state.requestCompletion = async () => "current";
+  state.requestDefinition = async () => "current";
   state.ready = true;
   current.dispose();
   assert(!state.ready, "cleanup retained ready state");
@@ -92,6 +102,9 @@ Deno.test("test API cleanup cannot erase a newer generation", () => {
   assert(!("editor" in state), "cleanup retained editor");
   assert(!("model" in state), "cleanup retained model");
   assert(!("requestSyntaxTree" in state), "cleanup retained syntax request");
+  assert(!("requestCrateGraph" in state), "cleanup retained crate-graph request");
+  assert(!("requestCompletion" in state), "cleanup retained completion request");
+  assert(!("requestDefinition" in state), "cleanup retained definition request");
 });
 
 Deno.test("stale test API producer cannot record into a newer generation", () => {

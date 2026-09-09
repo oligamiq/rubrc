@@ -18,8 +18,8 @@ import { activateRustProject, runRustLspStartup } from "./rust_lsp_startup";
 import type { StagedAnalyzerSession } from "./startup_coordinator";
 import { createWorkspaceVfsWriter } from "./workspace_sync";
 import {
-  exposeSyntaxTreeRequest,
   captureCurrentLspTestGeneration,
+  exposeAnalyzerTestRequests,
   handleGenerationPublishedDiagnostics,
   recordAnalyzerTestReadiness,
   recordDidOpenComplete,
@@ -165,7 +165,7 @@ export async function startRustLspClient(
 
     if (import.meta.env.VITE_RUBRC_LSP_TEST === "1") {
       owner.setTestApiDisposable(
-        exposeSyntaxTreeRequest(testGeneration, client),
+        exposeAnalyzerTestRequests(testGeneration, client),
       );
     }
 

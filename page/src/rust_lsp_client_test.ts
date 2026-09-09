@@ -3,8 +3,8 @@ import {
   RustLspResourceOwner,
 } from "./rust_lsp_client_dispose.ts";
 import {
-  installGenerationSyntaxTreeRequest,
-  installSyntaxTreeRequest,
+  installAnalyzerTestRequests,
+  installGenerationAnalyzerTestRequests,
 } from "./lsp_test_api.ts";
 import {
   beginLspTestGeneration,
@@ -368,12 +368,12 @@ Deno.test("RustLspResourceOwner abort cancels document sync before disposal", as
   );
 });
 
-const syntaxTreeExposureIsGuarded = (source: string) => {
+const analyzerTestRequestsExposureIsGuarded = (source: string) => {
   const guard = source.indexOf(
     'if (import.meta.env.VITE_RUBRC_LSP_TEST === "1")',
   );
   const exposure = source.indexOf(
-    "exposeSyntaxTreeRequest(testGeneration, client)",
+    "exposeAnalyzerTestRequests(testGeneration, client)",
   );
   if (guard < 0 || exposure < 0) return false;
   const open = source.indexOf("{", guard);
@@ -387,10 +387,10 @@ const syntaxTreeExposureIsGuarded = (source: string) => {
   return false;
 };
 
-const syntaxTreeExposureFollowsStartup = (source: string) => {
+const analyzerTestRequestsExposureFollowsStartup = (source: string) => {
   const startup = source.indexOf("await runRustLspStartup(");
   const exposure = source.indexOf(
-    "exposeSyntaxTreeRequest(testGeneration, client)",
+    "exposeAnalyzerTestRequests(testGeneration, client)",
   );
   if (startup < 0 || exposure < 0) return false;
   const open = source.indexOf("(", startup);
@@ -415,6 +415,13 @@ const ownTestApiDisposable = (
   assert(setDisposable, "test API disposable is not resource-owned");
   setDisposable.call(owner, disposable);
 };
+
+const analyzerTestRequestNames = [
+  "requestSyntaxTree",
+  "requestCrateGraph",
+  "requestCompletion",
+  "requestDefinition",
+] as const;
 
 Deno.test("browser startup uses the non-progress sequencer", async () => {
   const source = await Deno.readTextFile("page/src/rust_lsp_client.ts");
@@ -1166,44 +1173,53 @@ Deno.test("Fetching progress remains attached to resource ownership", async () =
   assert(ownerIndex > recordIndex, "progress listener is not resource-owned");
 });
 
-Deno.test("syntax-tree requests are exposed only in LSP test builds", async () => {
+Deno.test("analyzer test requests are exposed only in LSP test builds", async () => {
   const clientSource = await Deno.readTextFile("page/src/rust_lsp_client.ts");
   const exposureIndex = clientSource.indexOf(
-    "exposeSyntaxTreeRequest(testGeneration, client)",
+    "exposeAnalyzerTestRequests(testGeneration, client)",
   );
   const ownershipIndex = clientSource.indexOf("owner.setTestApiDisposable(");
 
   assert(
-    syntaxTreeExposureIsGuarded(clientSource),
-    "syntax-tree test request is exposed outside its build guard",
+    analyzerTestRequestsExposureIsGuarded(clientSource),
+    "analyzer test requests are exposed outside their build guard",
   );
   assert(
-    !syntaxTreeExposureIsGuarded(
+    !analyzerTestRequestsExposureIsGuarded(
       'if (import.meta.env.VITE_RUBRC_LSP_TEST === "1") {}\n' +
-        "exposeSyntaxTreeRequest(testGeneration, client);",
+        "exposeAnalyzerTestRequests(testGeneration, client);",
     ),
     "guard contract accepts an exposure call outside the guarded block",
   );
   assert(
-    syntaxTreeExposureFollowsStartup(clientSource),
-    "syntax-tree test request is exposed before startup completes",
+    analyzerTestRequestsExposureFollowsStartup(clientSource),
+    "analyzer test requests are exposed before startup completes",
   );
   assert(
-    !syntaxTreeExposureFollowsStartup(
+    !analyzerTestRequestsExposureFollowsStartup(
       "await runRustLspStartup({ start: () => " +
-        "exposeSyntaxTreeRequest(testGeneration, client) });",
+        "exposeAnalyzerTestRequests(testGeneration, client) });",
     ),
     "startup contract accepts exposure from inside startup",
   );
   assert(
     ownershipIndex >= 0 && ownershipIndex < exposureIndex,
-    "syntax-tree test request is not resource-owned",
+    "analyzer test requests are not resource-owned",
   );
 });
 
-Deno.test("syntax-tree callback disposal preserves a newer client", async () => {
+Deno.test("analyzer test callback disposal preserves a newer client", async () => {
   const state: {
     requestSyntaxTree?: (uri: string) => Promise<string>;
+    requestCrateGraph?: () => Promise<string>;
+    requestCompletion?: (
+      uri: string,
+      position: { line: number; character: number },
+    ) => Promise<unknown>;
+    requestDefinition?: (
+      uri: string,
+      position: { line: number; character: number },
+    ) => Promise<unknown>;
   } = {};
   const requests: Array<{ method: string; params: unknown }> = [];
   const client = (name: string) => ({
@@ -1213,10 +1229,24 @@ Deno.test("syntax-tree callback disposal preserves a newer client", async () => 
     },
   });
 
-  const firstDisposable = installSyntaxTreeRequest(state, client("first"));
-  const secondDisposable = installSyntaxTreeRequest(state, client("second"));
-  const secondRequest = state.requestSyntaxTree;
-  const result = await secondRequest?.("file:///src/main.rs");
+  const firstDisposable = installAnalyzerTestRequests(state, client("first"));
+  const secondDisposable = installAnalyzerTestRequests(state, client("second"));
+  const secondRequests = {
+    requestSyntaxTree: state.requestSyntaxTree,
+    requestCrateGraph: state.requestCrateGraph,
+    requestCompletion: state.requestCompletion,
+    requestDefinition: state.requestDefinition,
+  };
+  const result = await secondRequests.requestSyntaxTree?.("file:///src/main.rs");
+  await secondRequests.requestCrateGraph?.();
+  await secondRequests.requestCompletion?.("file:///src/main.rs", {
+    line: 2,
+    character: 7,
+  });
+  await secondRequests.requestDefinition?.("file:///src/main.rs", {
+    line: 3,
+    character: 9,
+  });
   assert(result === "second", "syntax-tree request used the wrong client");
   assert(
     requests[0]?.method === "rust-analyzer/viewSyntaxTree",
@@ -1227,23 +1257,54 @@ Deno.test("syntax-tree callback disposal preserves a newer client", async () => 
       JSON.stringify({ textDocument: { uri: "file:///src/main.rs" } }),
     "syntax-tree request used the wrong parameters",
   );
+  assert(
+    JSON.stringify(requests[1]) === JSON.stringify({
+      method: "rust-analyzer/viewCrateGraph",
+      params: { full: true },
+    }),
+    "crate-graph request used the wrong parameters",
+  );
+  assert(
+    JSON.stringify(requests.at(-2)) === JSON.stringify({
+      method: "textDocument/completion",
+      params: {
+        textDocument: { uri: "file:///src/main.rs" },
+        position: { line: 2, character: 7 },
+      },
+    }),
+    "completion request used the wrong parameters",
+  );
+  assert(
+    JSON.stringify(requests.at(-1)) === JSON.stringify({
+      method: "textDocument/definition",
+      params: {
+        textDocument: { uri: "file:///src/main.rs" },
+        position: { line: 3, character: 9 },
+      },
+    }),
+    "definition request used the wrong parameters",
+  );
 
   firstDisposable.dispose();
-  assert(
-    state.requestSyntaxTree === secondRequest,
-    "disposing an older client cleared the newer callback",
-  );
+  for (const name of analyzerTestRequestNames) {
+    assert(
+      state[name] === secondRequests[name],
+      `disposing an older client cleared the newer ${name} callback`,
+    );
+  }
 
   const owner = new RustLspResourceOwner();
   ownTestApiDisposable(owner, secondDisposable);
   await owner.dispose();
-  assert(
-    state.requestSyntaxTree === undefined,
-    "normal owner disposal retained the syntax-tree callback",
-  );
+  for (const name of analyzerTestRequestNames) {
+    assert(
+      state[name] === undefined,
+      `normal owner disposal retained the ${name} callback`,
+    );
+  }
 });
 
-Deno.test("stale generation cannot install a delayed syntax-tree callback", async () => {
+Deno.test("stale generation cannot install delayed analyzer test callbacks", async () => {
   const state: LspTestGenerationState<object, object, object> = {
     ready: false,
     vfsWrites: [],
@@ -1252,55 +1313,73 @@ Deno.test("stale generation cannot install a delayed syntax-tree callback", asyn
   const stale = captureLspTestGeneration(state);
   beginLspTestGeneration(state, {}, {}, {});
   const current = captureLspTestGeneration(state);
-  const currentDisposable = installGenerationSyntaxTreeRequest(current, {
+  const currentDisposable = installGenerationAnalyzerTestRequests(current, {
     sendRequest: async <TResult>() => "current" as TResult,
   });
-  const currentRequest = state.requestSyntaxTree;
+  const currentRequests = {
+    requestSyntaxTree: state.requestSyntaxTree,
+    requestCrateGraph: state.requestCrateGraph,
+    requestCompletion: state.requestCompletion,
+    requestDefinition: state.requestDefinition,
+  };
 
-  const staleDisposable = installGenerationSyntaxTreeRequest(stale, {
+  const staleDisposable = installGenerationAnalyzerTestRequests(stale, {
     sendRequest: async <TResult>() => "stale" as TResult,
   });
 
-  assert(
-    state.requestSyntaxTree === currentRequest,
-    "stale startup replaced the current syntax-tree callback",
-  );
+  for (const name of analyzerTestRequestNames) {
+    assert(
+      state[name] === currentRequests[name],
+      `stale startup replaced the current ${name} callback`,
+    );
+  }
   staleDisposable.dispose();
-  assert(
-    state.requestSyntaxTree === currentRequest,
-    "stale no-op disposal removed the current callback",
-  );
+  for (const name of analyzerTestRequestNames) {
+    assert(
+      state[name] === currentRequests[name],
+      `stale no-op disposal removed the current ${name} callback`,
+    );
+  }
   currentDisposable.dispose();
 });
 
-Deno.test("older syntax-tree disposal preserves a newer generation callback", async () => {
+Deno.test("older analyzer disposal preserves newer generation callbacks", async () => {
   const state: LspTestGenerationState<object, object, object> = {
     ready: false,
     vfsWrites: [],
   };
   beginLspTestGeneration(state, {}, {}, {});
-  const first = installGenerationSyntaxTreeRequest(
+  const first = installGenerationAnalyzerTestRequests(
     captureLspTestGeneration(state),
     { sendRequest: async <TResult>() => "first" as TResult },
   );
   beginLspTestGeneration(state, {}, {}, {});
-  const second = installGenerationSyntaxTreeRequest(
+  const second = installGenerationAnalyzerTestRequests(
     captureLspTestGeneration(state),
     { sendRequest: async <TResult>() => "second" as TResult },
   );
-  const secondRequest = state.requestSyntaxTree;
+  const secondRequests = {
+    requestSyntaxTree: state.requestSyntaxTree,
+    requestCrateGraph: state.requestCrateGraph,
+    requestCompletion: state.requestCompletion,
+    requestDefinition: state.requestDefinition,
+  };
 
   first.dispose();
 
-  assert(
-    state.requestSyntaxTree === secondRequest,
-    "older generation disposal removed the newer callback",
-  );
+  for (const name of analyzerTestRequestNames) {
+    assert(
+      state[name] === secondRequests[name],
+      `older generation disposal removed the newer ${name} callback`,
+    );
+  }
   second.dispose();
-  assert(
-    state.requestSyntaxTree === undefined,
-    "current generation disposal retained its callback",
-  );
+  for (const name of analyzerTestRequestNames) {
+    assert(
+      state[name] === undefined,
+      `current generation disposal retained its ${name} callback`,
+    );
+  }
 });
 
 Deno.test("RustLspResourceOwner disposes all resources even if one throws", async () => {

@@ -77,7 +77,7 @@ Deno.test("CI preview backfills legacy assets and preserves modern ones", async 
     const fakeDeno = `${fakeBin}/deno`;
     await Deno.writeTextFile(
       fakeDeno,
-      '#!/bin/sh\nset -eu\nprintf "%s\\n" "$PWD" >> "$FAKE_DENO_CWD_FILE"\nfor last do :; done\nprintf "fake-rust-src" > "$last"\n',
+      '#!/bin/sh\nset -eu\ncase " $* " in\n  *" --allow-net "*) ;;\n  *) echo "missing --allow-net" >&2; exit 1 ;;\nesac\nprintf "%s\\n" "$PWD" >> "$FAKE_DENO_CWD_FILE"\nfor last do :; done\nprintf "fake-rust-src" > "$last"\n',
     );
     await Deno.chmod(fakeDeno, 0o755);
 

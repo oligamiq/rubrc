@@ -3,7 +3,7 @@ import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
 import { takeExactSysrootChunk } from "../page/src/sysroot_protocol.ts";
 import { buildPreopenDirectory } from "./build_preopen.ts";
 import { prepareCachedArchive, prepareCachedSysroot } from "./sysroot_cache.ts";
-import { prepareInstalledRustSrcArchive } from "./rust_src_archive.ts";
+import { prepareReleasedRustSrcArchive } from "./rust_src_archive.ts";
 
 const OOM_REGRESSION_ARCHIVE_LEN = 74_096_640;
 
@@ -51,10 +51,10 @@ await Deno.remove(testDir, { recursive: true }).catch((error) => {
 await prepareCachedSysroot({ workspaceSysroot: `${testDir}/sysroot` });
 
 const { archive: rustSrcArchive, source: rustSrcSource } =
-  await prepareInstalledRustSrcArchive();
+  await prepareReleasedRustSrcArchive();
 console.log(
   `${
-    rustSrcSource === "cache" ? "reused" : "generated"
+    rustSrcSource === "cache" ? "reused" : "downloaded"
   } validated rust-src cache`,
 );
 await Deno.mkdir(`${testDir}/src`, { recursive: true });

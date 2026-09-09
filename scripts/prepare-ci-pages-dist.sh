@@ -43,11 +43,11 @@ node "$ROOT_DIR/scripts/prepare-vfs-asset.mjs" "$OUTPUT_DIR"
 # Older production-build artifacts (including runs created before rust-src was
 # bundled by CI) still expect the same-origin /rust-src.tar.vfsbr asset.
 # Preserve an artifact-provided copy when present; otherwise backfill it from
-# the installed toolchain used for local preview preparation.
+# the pinned rust_wasm release download.
 if [ ! -s "$OUTPUT_DIR/rust-src.tar.vfsbr" ]; then
   (
     cd "$ROOT_DIR"
-    deno run --no-lock --allow-read --allow-write --allow-run \
+    deno run --no-lock --allow-read --allow-write --allow-net \
       "$ROOT_DIR/scripts/prepare_rust_src_asset.ts" \
       "$OUTPUT_DIR/rust-src.tar.vfsbr"
   )

@@ -1,4 +1,5 @@
 import { parseTar } from "../lib/src/parse_tar.ts";
+import { rustWasmReleaseArchiveUrl } from "../lib/src/rust_wasm_release.ts";
 
 export type SysrootCacheSource = "cache" | "download";
 
@@ -36,83 +37,11 @@ export interface SysrootCacheOptions {
 const DEFAULT_TRIPLE = "wasm32-wasip1";
 const DEFAULT_CACHE_DIR = ".rubrc-cache/sysroot";
 const DEFAULT_WORKSPACE_SYSROOT = "test_workspace_rustc/sysroot";
-const DEFAULT_BASE_URL = "https://oligamiq.github.io/rust_wasm/v0.2.0";
 const REQUIRED_RUST_SRC_ENTRIES = [
   "core/src/lib.rs",
   "alloc/src/lib.rs",
   "std/src/lib.rs",
 ] as const;
-
-export function rustSrcToolchainIdentity(
-  rustcVerboseVersion: string,
-  sysroot: string,
-): string {
-  return JSON.stringify({
-    schema: 1,
-    rustc: rustcVerboseVersion.trim(),
-    sysroot,
-  });
-}
-
-export function rustSrcCacheMatchesIdentity(
-  expected: string,
-  cached: string,
-): boolean {
-  return expected === cached.trim();
-}
-
-async function archiveSha256(archive: Uint8Array): Promise<string> {
-  const bytes = new Uint8Array(archive.byteLength);
-  bytes.set(archive);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(
-    "",
-  );
-}
-
-export async function createRustSrcCacheMetadata(
-  toolchainIdentity: string,
-  archive: Uint8Array,
-): Promise<string> {
-  return JSON.stringify({
-    schema: 2,
-    toolchainIdentity,
-    archiveSha256: await archiveSha256(archive),
-  });
-}
-
-export async function rustSrcCacheMatchesMetadata(
-  expectedToolchainIdentity: string,
-  archive: Uint8Array,
-  cachedMetadata: string,
-): Promise<boolean> {
-  try {
-    const metadata = JSON.parse(cachedMetadata) as Record<string, unknown>;
-    return metadata.schema === 2 &&
-      metadata.toolchainIdentity === expectedToolchainIdentity &&
-      metadata.archiveSha256 === await archiveSha256(archive);
-  } catch {
-    return false;
-  }
-}
-
-export function deterministicRustSrcTarArgs(libraryPath: string): string[] {
-  return [
-    "--create",
-    "--file",
-    "-",
-    "--sort=name",
-    "--mtime=@0",
-    "--owner=0",
-    "--group=0",
-    "--numeric-owner",
-    "--mode=u+rwX,go+rX,go-w",
-    "--pax-option=delete=atime,delete=ctime",
-    "--directory",
-    libraryPath,
-    ".",
-  ];
-}
 
 type RustSrcArchiveEntryLister = (
   archive: Uint8Array,
@@ -159,7 +88,7 @@ export function sysrootCachePaths(
     sysrootLibDir: `${
       options.workspaceSysroot ?? DEFAULT_WORKSPACE_SYSROOT
     }/lib/rustlib/${triple}/lib`,
-    url: options.url ?? `${DEFAULT_BASE_URL}/${triple}.tar.br`,
+    url: options.url ?? rustWasmReleaseArchiveUrl(triple),
   };
 }
 
@@ -177,7 +106,7 @@ export async function prepareCachedArchive(
   const triple = options.triple ?? DEFAULT_TRIPLE;
   const cacheDir = options.cacheDir ?? DEFAULT_CACHE_DIR;
   const cacheArchive = `${cacheDir}/${triple}.tar.br`;
-  const url = options.url ?? `${DEFAULT_BASE_URL}/${triple}.tar.br`;
+  const url = options.url ?? rustWasmReleaseArchiveUrl(triple);
   const deps = options.deps ?? denoSysrootCacheDeps;
 
   await deps.mkdir(cacheDir);
