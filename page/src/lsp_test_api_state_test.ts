@@ -6,10 +6,13 @@ import {
 } from "./lsp_test_api_state.ts";
 import {
   createRuntimeTestState,
+  createStartupTestState,
   formatRuntimeTestError,
 } from "./lsp_test_api.ts";
 import * as lspTestApi from "./lsp_test_api.ts";
 import type { AppRuntimeState } from "./app_runtime.ts";
+import type { CrateGraphProgress } from "./rust_analyzer_readiness.ts";
+import type { StartupSnapshot } from "./startup_coordinator.ts";
 
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
@@ -29,14 +32,12 @@ Deno.test("test API formats nested runtime cleanup failures", () => {
 
   const formatted = formatRuntimeTestError(error);
 
-  for (
-    const message of [
-      "runtime cleanup failed",
-      "document sync disposal failed",
-      "LSP resource cleanup failed",
-      "AbortError: runtime disposed",
-    ]
-  ) {
+  for (const message of [
+    "runtime cleanup failed",
+    "document sync disposal failed",
+    "LSP resource cleanup failed",
+    "AbortError: runtime disposed",
+  ]) {
     assert(formatted.includes(message), `formatted error omitted ${message}`);
   }
 });
@@ -180,49 +181,61 @@ Deno.test("stale runtime callback cannot alter a newer test generation", () => {
     ready: false,
     vfsWrites: [],
   };
-  beginLspTestGeneration(state, {}, {}, {}, {
-    runtime: {
-      generation: "old",
-      phase: "starting",
-      operation: "idle",
-      queuedTargets: [],
-      completedTargets: [],
-      reloadRequired: false,
-      utilityWorkers: 1,
-      lifecycleWorkers: 1,
-      farmCallbacks: 1,
+  beginLspTestGeneration(
+    state,
+    {},
+    {},
+    {},
+    {
+      runtime: {
+        generation: "old",
+        phase: "starting",
+        operation: "idle",
+        queuedTargets: [],
+        completedTargets: [],
+        reloadRequired: false,
+        utilityWorkers: 1,
+        lifecycleWorkers: 1,
+        farmCallbacks: 1,
+      },
+      startup: {
+        phase: "editor-visible",
+        history: ["editor-visible"],
+        overlayVisible: true,
+        crateGraphReady: false,
+        cargoCallsBeforeProjectActivation: 0,
+      },
     },
-    startup: {
-      phase: "editor-visible",
-      history: ["editor-visible"],
-      overlayVisible: true,
-      crateGraphReady: false,
-      cargoCallsBeforeProjectActivation: 0,
-    },
-  });
+  );
   const old = captureLspTestGeneration(state);
-  beginLspTestGeneration(state, {}, {}, {}, {
-    runtime: {
-      generation: "new",
-      phase: "ready",
-      operation: "idle",
-      queuedTargets: [],
-      completedTargets: ["wasm32-wasip1"],
-      reloadRequired: false,
-      utilityWorkers: 1,
-      lifecycleWorkers: 1,
-      farmCallbacks: 1,
+  beginLspTestGeneration(
+    state,
+    {},
+    {},
+    {},
+    {
+      runtime: {
+        generation: "new",
+        phase: "ready",
+        operation: "idle",
+        queuedTargets: [],
+        completedTargets: ["wasm32-wasip1"],
+        reloadRequired: false,
+        utilityWorkers: 1,
+        lifecycleWorkers: 1,
+        farmCallbacks: 1,
+      },
+      startup: {
+        phase: "ready",
+        history: ["editor-visible", "ready"],
+        overlayVisible: false,
+        crateGraphReady: true,
+        diagnosticsVersion: 2,
+        inlayHintVersion: 2,
+        cargoCallsBeforeProjectActivation: 0,
+      },
     },
-    startup: {
-      phase: "ready",
-      history: ["editor-visible", "ready"],
-      overlayVisible: false,
-      crateGraphReady: true,
-      diagnosticsVersion: 2,
-      inlayHintVersion: 2,
-      cargoCallsBeforeProjectActivation: 0,
-    },
-  });
+  );
 
   old.record((generation) => {
     generation.runtime!.phase = "reload-required";
@@ -260,26 +273,32 @@ Deno.test("completed test generations retain lifecycle evidence without contamin
     ready: false,
     vfsWrites: [],
   };
-  const generation = beginLspTestGeneration(state, {}, {}, {}, {
-    runtime: {
-      generation: "generation-1",
-      phase: "starting",
-      operation: "idle",
-      queuedTargets: [],
-      completedTargets: ["wasm32-wasip1"],
-      reloadRequired: false,
-      utilityWorkers: 1,
-      lifecycleWorkers: 1,
-      farmCallbacks: 1,
+  const generation = beginLspTestGeneration(
+    state,
+    {},
+    {},
+    {},
+    {
+      runtime: {
+        generation: "generation-1",
+        phase: "starting",
+        operation: "idle",
+        queuedTargets: [],
+        completedTargets: ["wasm32-wasip1"],
+        reloadRequired: false,
+        utilityWorkers: 1,
+        lifecycleWorkers: 1,
+        farmCallbacks: 1,
+      },
+      startup: {
+        phase: "editor-visible",
+        history: ["editor-visible"],
+        overlayVisible: true,
+        crateGraphReady: false,
+        cargoCallsBeforeProjectActivation: 0,
+      },
     },
-    startup: {
-      phase: "editor-visible",
-      history: ["editor-visible"],
-      overlayVisible: true,
-      crateGraphReady: false,
-      cargoCallsBeforeProjectActivation: 0,
-    },
-  });
+  );
   const lifecycleState = state as typeof state & {
     lifecycleEvents: string[];
     runtimeHistory: RuntimeTestState[];
@@ -314,23 +333,29 @@ Deno.test("completed test generations retain lifecycle evidence without contamin
     "completed generation lost lifecycle ordering",
   );
 
-  beginLspTestGeneration(state, {}, {}, {}, {
-    runtime: {
-      ...lifecycleState.completedGenerations[0].runtime!,
-      generation: "generation-2",
-      phase: "created",
-      utilityWorkers: 0,
-      lifecycleWorkers: 0,
-      farmCallbacks: 0,
+  beginLspTestGeneration(
+    state,
+    {},
+    {},
+    {},
+    {
+      runtime: {
+        ...lifecycleState.completedGenerations[0].runtime!,
+        generation: "generation-2",
+        phase: "created",
+        utilityWorkers: 0,
+        lifecycleWorkers: 0,
+        farmCallbacks: 0,
+      },
+      startup: {
+        phase: "editor-visible",
+        history: ["editor-visible"],
+        overlayVisible: true,
+        crateGraphReady: false,
+        cargoCallsBeforeProjectActivation: 0,
+      },
     },
-    startup: {
-      phase: "editor-visible",
-      history: ["editor-visible"],
-      overlayVisible: true,
-      crateGraphReady: false,
-      cargoCallsBeforeProjectActivation: 0,
-    },
-  });
+  );
   assert(
     lifecycleState.lifecycleEvents.length === 0,
     "new generation inherited lifecycle events",
@@ -397,12 +422,91 @@ Deno.test("runtime test controls drive one generation and record lifecycle event
     "runtime lifecycle event was not recorded",
   );
   assert(
-    calls.join(",") ===
-      "target:wasm32-wasip2,run:wasm32-wasip2,dispose",
+    calls.join(",") === "target:wasm32-wasip2,run:wasm32-wasip2,dispose",
     "runtime controls bypassed their generation",
   );
   assert(forced === 1, "destroy-timeout control was not invoked once");
   controls.dispose();
   controls.dispose();
   assert(unsubscribes === 1, "runtime lifecycle subscription leaked");
+});
+
+const startupSnapshot = (
+  phase: StartupSnapshot["phase"],
+  projectProgress?: CrateGraphProgress,
+): StartupSnapshot => ({
+  generation: 1,
+  phase,
+  tasks: [
+    {
+      id: "project",
+      label: "Project",
+      state:
+        phase === "failed"
+          ? "failed"
+          : phase === "ready"
+            ? "complete"
+            : "running",
+      ...(projectProgress === undefined ? {} : { projectProgress }),
+    },
+  ],
+  ...(phase === "failed" ? { error: "startup failed" } : {}),
+});
+
+Deno.test("startup test state retains the exact production crate graph event", () => {
+  const projectProgress: CrateGraphProgress = Object.freeze({
+    attempt: 4,
+    elapsedMs: 15_000,
+    remainingMs: 285_000,
+    labels: Object.freeze(["rubrc_main", "core", "alloc", "std"]),
+    ready: true,
+  });
+  const activating = createStartupTestState(
+    undefined,
+    startupSnapshot("project-activating", projectProgress),
+  );
+  const warming = createStartupTestState(
+    activating,
+    startupSnapshot("semantic-warming"),
+  );
+  const ready = createStartupTestState(warming, startupSnapshot("ready"));
+
+  assert(
+    activating.projectProgress === projectProgress,
+    "production event was cloned",
+  );
+  assert(
+    ready.projectProgress === projectProgress,
+    "latest event was discarded",
+  );
+  assert(
+    ready.history.join(",") === "project-activating,semantic-warming,ready",
+    `wrong history: ${ready.history}`,
+  );
+  assert(!ready.overlayVisible, "ready test state retained the overlay");
+});
+
+Deno.test("startup test state preserves project progress on failure", () => {
+  const projectProgress: CrateGraphProgress = Object.freeze({
+    attempt: 24,
+    elapsedMs: 295_000,
+    remainingMs: 5_000,
+    labels: Object.freeze(["rubrc_main", "core", "alloc"]),
+    ready: false,
+  });
+  const failed = createStartupTestState(
+    createStartupTestState(
+      undefined,
+      startupSnapshot("project-activating", projectProgress),
+    ),
+    startupSnapshot("failed", projectProgress),
+  );
+  assert(
+    failed.projectProgress === projectProgress,
+    "failure lost polling progress",
+  );
+  assert(
+    failed.history.join(",") === "project-activating,failed",
+    "wrong failed history",
+  );
 });

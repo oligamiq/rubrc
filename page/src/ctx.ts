@@ -9,6 +9,7 @@ export type Ctx = {
   exec_file_id: string;
   load_additional_sysroot_id: string;
   install_startup_sysroots_id: string;
+  rust_src_fs_id: string;
   input_char_id: string;
   input_string_id: string;
   interrupt_id: string;
@@ -29,6 +30,7 @@ export const gen_ctx = (): Ctx => {
     exec_file_id: uuidv4(),
     load_additional_sysroot_id: uuidv4(),
     install_startup_sysroots_id: uuidv4(),
+    rust_src_fs_id: uuidv4(),
     input_char_id: uuidv4(),
     input_string_id: uuidv4(),
     interrupt_id: uuidv4(),

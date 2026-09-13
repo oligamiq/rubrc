@@ -18,6 +18,7 @@ const CONTENT_TYPES = new Map([
   [".wasm", "application/wasm"],
   [".json", "application/json; charset=utf-8"],
   [".vfsbr", "application/octet-stream"],
+  [".sqfs", "application/octet-stream"],
 ]);
 
 function isMissing(error) {

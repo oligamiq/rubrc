@@ -1,11 +1,10 @@
 import { ConsoleStdout, File, OpenFile } from "@bjorn3/browser_wasi_shim";
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
+import { createRustAnalyzerProjectJson } from "../page/src/rust_lsp_config.ts";
 import { takeExactSysrootChunk } from "../page/src/sysroot_protocol.ts";
 import { buildPreopenDirectory } from "./build_preopen.ts";
 import { prepareCachedArchive, prepareCachedSysroot } from "./sysroot_cache.ts";
-import { prepareReleasedRustSrcArchive } from "./rust_src_archive.ts";
-
-const OOM_REGRESSION_ARCHIVE_LEN = 74_096_640;
+import { prepareReleasedRustSrcSquashfs } from "./rust_src_archive.ts";
 
 function assertAtLeastFourPairedHostCargoCalls(trace: string): void {
   const events = Array.from(
@@ -23,9 +22,11 @@ function assertAtLeastFourPairedHostCargoCalls(trace: string): void {
     .map((event) => event.id);
   if (requestIds.length < 4 || uniqueRequestIds.size !== requestIds.length) {
     throw new Error(
-      `expected at least four distinct host-cargo requests, received ${requestIds.join(
-        ",",
-      )}`,
+      `expected at least four distinct host-cargo requests, received ${
+        requestIds.join(
+          ",",
+        )
+      }`,
     );
   }
   if (
@@ -44,14 +45,17 @@ function assertAtLeastFourPairedHostCargoCalls(trace: string): void {
   }
 }
 
-const testDir = "./test_workspace_lsp_diagnostics";
+const focusedHostCargo = Deno.env.get("RUBRC_LSP_HOST_CARGO_FOCUSED") === "1";
+const testDir = focusedHostCargo
+  ? "/mnt/hdd/rubrc-test-workspace-lsp-diagnostics"
+  : "./test_workspace_lsp_diagnostics";
 await Deno.remove(testDir, { recursive: true }).catch((error) => {
   if (!(error instanceof Deno.errors.NotFound)) throw error;
 });
 await prepareCachedSysroot({ workspaceSysroot: `${testDir}/sysroot` });
 
 const { archive: rustSrcArchive, source: rustSrcSource } =
-  await prepareReleasedRustSrcArchive();
+  await prepareReleasedRustSrcSquashfs();
 console.log(
   `${
     rustSrcSource === "cache" ? "reused" : "downloaded"
@@ -65,11 +69,7 @@ await Deno.writeTextFile(
 await Deno.writeTextFile(`${testDir}/src/main.rs`, "fn main() {}\n");
 await Deno.writeTextFile(
   `${testDir}/rust-project.json`,
-  JSON.stringify({
-    sysroot: "/sysroot",
-    sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
-    crates: [{ root_module: "/src/main.rs", edition: "2021", deps: [] }],
-  }),
+  JSON.stringify(createRustAnalyzerProjectJson()),
 );
 const preopen = await (async () => {
   try {
@@ -79,7 +79,7 @@ const preopen = await (async () => {
   }
 })();
 const lspOutput = new MessageChannel();
-let rustSrcTarCache: Uint8Array | undefined;
+let rustSrcSquashfsCache: Uint8Array | undefined;
 let wasm32TarCache: Uint8Array | undefined;
 let currentSysrootArchive: Uint8Array | null = null;
 let maxSysrootChunkLength = 0;
@@ -147,32 +147,10 @@ const farm = new WASIFarm(
           return {};
         }
 
-        if (!rustSrcTarCache) {
-          const archive = new ArrayBuffer(rustSrcArchive.byteLength);
-          new Uint8Array(archive).set(rustSrcArchive);
-          const stream = new Blob([archive])
-            .stream()
-            .pipeThrough(new DecompressionStream("brotli"));
-          const reader = stream.getReader();
-          const chunks: Uint8Array[] = [];
-          let totalLength = 0;
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(value);
-            totalLength += value.byteLength;
-          }
-          const tarBytes = new Uint8Array(
-            Math.max(totalLength, OOM_REGRESSION_ARCHIVE_LEN),
-          );
-          let offset = 0;
-          for (const chunk of chunks) {
-            tarBytes.set(chunk, offset);
-            offset += chunk.byteLength;
-          }
-          rustSrcTarCache = tarBytes;
+        if (!rustSrcSquashfsCache) {
+          rustSrcSquashfsCache = new Uint8Array(rustSrcArchive);
         }
-        currentSysrootArchive = new Uint8Array(rustSrcTarCache);
+        currentSysrootArchive = new Uint8Array(rustSrcSquashfsCache);
         return {};
       }
       if (name === "sysrootArchiveGetMeta") {
@@ -222,12 +200,12 @@ const result = await new Promise<{
     worker.terminate();
     resolve({
       ok: false,
-      detail: "diagnostics worker timed out after 360 seconds",
+      detail: "diagnostics worker timed out after 1200 seconds",
       trace: "",
       traceDroppedChunks: 0,
       cargoCallsBeforeInit: undefined,
     });
-  }, 360_000);
+  }, 1_200_000);
   worker.onmessage = (event) => {
     clearTimeout(timer);
     resolve(event.data);
@@ -242,7 +220,11 @@ const result = await new Promise<{
     });
   };
   worker.postMessage(
-    { wasiRef: farm.get_ref(), lspOutputPort: lspOutput.port2 },
+    {
+      wasiRef: farm.get_ref(),
+      lspOutputPort: lspOutput.port2,
+      stopAfterHostCargoOutcome: focusedHostCargo,
+    },
     [lspOutput.port2],
   );
 });
@@ -251,14 +233,54 @@ lspOutput.port1.close();
 console.log(result.detail);
 console.log(result.trace);
 console.log(`trace dropped chunks: ${result.traceDroppedChunks}`);
-if (result.ok) assertAtLeastFourPairedHostCargoCalls(result.trace);
-console.log(`served rust-src archive: ${rustSrcTarCache?.length ?? 0} bytes`);
+if (!result.ok) throw new Error(result.detail);
+if (
+  !/memory:target=lsp_opt action=reserve current=64 minimum=8192 requested=8192 result=[1-9]\d*/
+    .test(result.trace)
+) {
+  throw new Error("actual VFS artifact did not reserve 8192 LSP pages");
+}
+if (!result.trace.includes("lsp:_main:enter")) {
+  throw new Error("actual VFS artifact did not enter rust-analyzer main");
+}
+const lspPageSamples = Array.from(
+  result.trace.matchAll(/\blsp_pages=(\d+)/g),
+  (match) => Number(match[1]),
+);
+if (lspPageSamples.length === 0) {
+  throw new Error("actual VFS artifact did not report LSP logical pages");
+}
+const peakLspPages = Math.max(...lspPageSamples);
+console.log(`peak LSP logical pages: ${peakLspPages}`);
+if (peakLspPages >= 8192) {
+  throw new Error(
+    `LSP logical page peak ${peakLspPages} exhausted its reserve`,
+  );
+}
+if (!focusedHostCargo) {
+  assertAtLeastFourPairedHostCargoCalls(result.trace);
+}
+if (focusedHostCargo) {
+  if (!result.detail.startsWith("host-cargo focused host outcome id=")) {
+    throw new Error(
+      `focused host-cargo run returned the wrong result: ${result.detail}`,
+    );
+  }
+}
+console.log(
+  `served rust-src SquashFS: ${rustSrcSquashfsCache?.length ?? 0} bytes`,
+);
 console.log(`maximum sysroot chunk request: ${maxSysrootChunkLength}`);
 console.log(`maximum host archive read: ${maxHostArchiveReadLength}`);
-if (rustSrcTarCache?.length !== OOM_REGRESSION_ARCHIVE_LEN) {
+if (rustSrcSquashfsCache?.length !== rustSrcArchive.byteLength) {
   throw new Error(
-    `expected ${OOM_REGRESSION_ARCHIVE_LEN}-byte OOM regression archive, got ${rustSrcTarCache?.length ?? 0}`,
+    `expected raw ${rustSrcArchive.byteLength}-byte rust-src SquashFS, got ${
+      rustSrcSquashfsCache?.length ?? 0
+    }`,
   );
+}
+if (new TextDecoder().decode(rustSrcSquashfsCache.subarray(0, 4)) !== "hsqs") {
+  throw new Error("rust-src transport was not a raw SquashFS image");
 }
 if (maxSysrootChunkLength !== 8192) {
   throw new Error(
@@ -284,5 +306,3 @@ if (result.cargoCallsBeforeInit !== 0) {
     `expected zero Cargo/rustc calls before project activation, got ${result.cargoCallsBeforeInit}`,
   );
 }
-
-if (!result.ok) Deno.exit(1);

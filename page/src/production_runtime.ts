@@ -29,6 +29,11 @@ import { createChannelOwner } from "./terminal_channel_lifecycle.ts";
 import { routeWasiTerminalWrite } from "./worker_process/lsp_dispatch.ts";
 import type { WorkspaceFileSystem } from "./workspace_fs.ts";
 import {
+  activateRustSrcFsEndpoint,
+  clearRustSrcFsEndpoint,
+  type RustSrcFsEndpoint,
+} from "./rust_src_vfs_rpc.ts";
+import {
   consumeRuntimeDestroyTimeoutForTest,
   recordCargoHostCall,
 } from "./lsp_test_api.ts";
@@ -83,6 +88,7 @@ type GenerationResources = {
   detached: boolean;
   wasiRef?: WASIFarmRefObject;
   target?: (request: unknown) => Promise<number>;
+  rustSrcFs?: RustSrcFsEndpoint;
 };
 
 export function writeFarmTerminal(
@@ -166,6 +172,9 @@ export function createProductionRuntimeDependencies(options: {
           ),
         )
         .proxy<(request: unknown) => Promise<number>>();
+      resources.rustSrcFs = channels
+        .add(sharedObjectFactories.createSharedObjectRef(ctx.rust_src_fs_id))
+        .proxy<RustSrcFsEndpoint>();
 
       const partialOwners: Array<{
         abort(reason?: unknown): void;
@@ -332,10 +341,25 @@ export function createProductionRuntimeDependencies(options: {
       new Worker(options.utilityWorkerUrl, { type: "module" }),
     createLifecycleWorker: () =>
       new Worker(options.lifecycleWorkerUrl, { type: "module" }),
-    createWorkerHandshake: (workerOptions) =>
-      wrapRuntimeWorkerHandshakeForTest(
+    createWorkerHandshake: (workerOptions) => {
+      const handshake = wrapRuntimeWorkerHandshakeForTest(
         createRuntimeWorkerHandshake(workerOptions),
-      ),
+      );
+      return {
+        async initialize(wasiRef, ctx) {
+          await handshake.initialize(wasiRef, ctx);
+          const endpoint = generations.get(workerOptions.generation)?.rustSrcFs;
+          if (endpoint === undefined) {
+            throw new Error("rust-src filesystem endpoint is unavailable");
+          }
+          activateRustSrcFsEndpoint(workerOptions.generation, endpoint);
+        },
+        dispose() {
+          clearRustSrcFsEndpoint(workerOptions.generation);
+          return handshake.dispose();
+        },
+      };
+    },
     targetEndpoint: (request) => {
       const target = activeGeneration === undefined
         ? undefined
@@ -345,6 +369,7 @@ export function createProductionRuntimeDependencies(options: {
         : target(request);
     },
     clearRegistrations: (generation) => {
+      clearRustSrcFsEndpoint(generation);
       generations.delete(generation);
       if (activeGeneration === generation) activeGeneration = undefined;
     },

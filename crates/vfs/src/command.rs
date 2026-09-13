@@ -165,7 +165,13 @@ pub fn handle_command(args: Vec<String>) {
         "cargo" => {
             let _run_guard = crate::CARGO_RUN_LOCK.lock();
             set_cargo_opt_args(&args);
-            crate::run_cargo();
+            let (output, _status) = crate::run_cargo_capture_output();
+            if !output.stdout.is_empty() {
+                let _ = crate::shell::write_current_context_output(false, &output.stdout);
+            }
+            if !output.stderr.is_empty() {
+                let _ = crate::shell::write_current_context_output(true, &output.stderr);
+            }
         }
         "rust-analyzer" => {
             if LSP_START_ONCE.is_started() {

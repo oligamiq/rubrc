@@ -1,8 +1,12 @@
-import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
+import {
+  WASIFarmAnimal,
+  type WASIFarmRefObject,
+} from "@oligami/browser_wasi_shim-threads";
 import { set_fake_worker } from "../page/src/worker_process/vfs_bindings/common.ts";
 import { custom_instantiate } from "../page/src/worker_process/vfs_bindings/inst.ts";
 import { isHttpBridgeMessage } from "../lib/src/http_bridge.ts";
 import { isChildProcessMessage } from "../lib/src/child_process_bridge.ts";
+import { waitForStartupSysroots } from "../page/src/vfs_readiness.ts";
 
 await set_fake_worker();
 
@@ -25,7 +29,24 @@ function hasReturnedToPrompt(output: string): boolean {
     output.indexOf(" $ ", returnIndex + returnMarker.length) !== -1;
 }
 
-globalThis.onmessage = async (event) => {
+type DebugShellStartMessage = {
+  wasiRef: WASIFarmRefObject;
+  commands: string[][];
+  threads: number;
+  timeoutMs: number;
+  preloads?: { path: string; content: string }[];
+  lspInputBytes?: number[];
+  installStartupSysroots?: boolean;
+  env?: string[];
+};
+
+type WorkerScope = {
+  onmessage: ((event: { data: DebugShellStartMessage }) => void | Promise<void>) | null;
+  postMessage(message: unknown): void;
+};
+
+const workerScope = globalThis as unknown as WorkerScope;
+workerScope.onmessage = async (event) => {
   const {
     wasiRef,
     commands,
@@ -33,22 +54,24 @@ globalThis.onmessage = async (event) => {
     timeoutMs,
     preloads = [],
     lspInputBytes = [],
-  }: {
-    wasiRef: unknown;
-    commands: string[][];
-    threads: number;
-    timeoutMs: number;
-    preloads?: { path: string; content: string }[];
-    lspInputBytes?: number[];
+    installStartupSysroots = false,
+    env = [],
   } = event.data;
   let output = "";
+  let terminalOutput = "";
+  const terminalDecoder = new TextDecoder();
 
   try {
     const wasm = await compile("vfs.core.wasm");
     const animal = new WASIFarmAnimal(
       wasiRef,
       ["vfs-debug"],
-      [`VFS_THREADS=${threads}`, "CARGO=cargo"],
+      [
+        `VFS_THREADS=${threads}`,
+        "CARGO=cargo",
+        ...(installStartupSysroots ? ["VFS_DEBUG_TRACE=1"] : []),
+        ...env,
+      ],
       {
         can_thread_spawn: true,
         thread_spawn_worker_url: new URL("thread_spawn.ts", bindingsDir).href,
@@ -73,20 +96,37 @@ globalThis.onmessage = async (event) => {
       animal.wasiImport,
       animal.wasiThreadImport,
       animal.get_share_memory(),
-      (_index, message: { name?: string }) => {
-        if (isHttpBridgeMessage(message) || isChildProcessMessage(message)) {
-          return animal.call_unknown_fn(_index, message);
+      (_index, rawMessage: unknown) => {
+        const message =
+          typeof rawMessage === "object" && rawMessage !== null
+            ? rawMessage as { name?: string }
+            : {};
+        if (isHttpBridgeMessage(rawMessage) || isChildProcessMessage(rawMessage)) {
+          return animal.call_unknown_fn(_index, rawMessage);
         } else if (message.name === "terminalWrite") {
+          if (installStartupSysroots) {
+            const args = (rawMessage as { args?: { data?: unknown } }).args;
+            const data = Array.isArray(args?.data)
+              ? Uint8Array.from(args.data as number[])
+              : new Uint8Array();
+            terminalOutput += terminalDecoder.decode(data, { stream: true });
+          }
           return {};
-        } else if (message.name === "sysrootStartFetch") {
-          return {};
-        } else if (message.name === "sysrootArchiveGetMeta") {
-          return { has_archive: false, data_len: 0 };
-        } else if (message.name === "sysrootReadArchiveChunk") {
-          return { chunk: [] };
+        } else if (
+          message.name === "sysrootStartFetch" ||
+          message.name === "sysrootArchiveGetMeta" ||
+          message.name === "sysrootReadArchiveChunk"
+        ) {
+          if (installStartupSysroots) {
+            return animal.call_unknown_fn(_index, rawMessage);
+          }
+          if (message.name === "sysrootArchiveGetMeta") {
+            return { has_archive: false, data_len: 0 };
+          }
+          return message.name === "sysrootReadArchiveChunk" ? { chunk: [] } : {};
         } else {
           throw new Error(
-            `unexpected host callback: ${message?.name ?? "unknown"}`,
+            `unexpected host callback: ${message.name ?? "unknown"}`,
           );
         }
       },
@@ -94,6 +134,14 @@ globalThis.onmessage = async (event) => {
 
     animal.start(root);
     root.debugSetTerminalCapture(true);
+    if (installStartupSysroots) {
+      root.dispatch(0, 3, 0, 0);
+      const startup = await waitForStartupSysroots(root, {
+        timeoutMs,
+        sleep: () => new Promise((resolve) => setTimeout(resolve, 25)),
+      });
+      if (!startup.ok) throw new Error(startup.error);
+    }
 
     const memory = animal.get_share_memory().memory;
     const dispatchBytes = (
@@ -134,21 +182,31 @@ globalThis.onmessage = async (event) => {
       dispatchBytes(0xffffffff, 6, new Uint8Array(lspInputBytes));
     }
 
-    const sessionId = 1;
-    root.dispatch(sessionId, 3, 0, 0);
-
-    const promptDeadline = performance.now() + timeoutMs;
-    while (performance.now() < promptDeadline && !output.includes(" $ ")) {
-      output += drainOutput();
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    const sessionId = installStartupSysroots ? 0 : 1;
+    if (!installStartupSysroots) {
+      root.dispatch(sessionId, 3, 0, 0);
     }
-    if (!output.includes(" $ ")) {
-      throw new Error(`initial shell prompt timed out after ${timeoutMs}ms`);
+
+    if (installStartupSysroots) {
+      // Startup readiness proves session 0 processed both bootstrap commands.
+      // Its earlier prompt may have fallen out of the bounded debug capture, so
+      // do not use that stale prompt as a second synchronization condition.
+      output += drainOutput();
+    } else {
+      const promptDeadline = performance.now() + timeoutMs;
+      while (performance.now() < promptDeadline && !output.includes(" $ ")) {
+        output += drainOutput();
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      if (!output.includes(" $ ")) {
+        throw new Error(`initial shell prompt timed out after ${timeoutMs}ms`);
+      }
     }
 
     for (let index = 0; index < commands.length; index++) {
       const command = commands[index].join(" ");
       let runOutput = "";
+      const terminalOutputStart = terminalOutput.length;
       output += `\n[vfs-debug-driver] run:${
         index + 1
       }/${commands.length}:enter ${command}\n`;
@@ -163,13 +221,19 @@ globalThis.onmessage = async (event) => {
         const chunk = drainOutput();
         output += chunk;
         runOutput += chunk;
-        if (hasReturnedToPrompt(runOutput)) {
+        const returnedToPrompt = installStartupSysroots
+          ? runOutput.includes("[vfs-debug] command:return")
+          : hasReturnedToPrompt(runOutput);
+        if (returnedToPrompt) {
           cmdDone = true;
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
 
+      if (installStartupSysroots) {
+        output += terminalOutput.slice(terminalOutputStart);
+      }
       if (!cmdDone) {
         output += drainOutput();
         throw new Error(
@@ -186,9 +250,9 @@ globalThis.onmessage = async (event) => {
 
     root.dispatch(sessionId, 5, 0, 0);
     root.debugSetTerminalCapture(false);
-    globalThis.postMessage({ ok: true, output });
+    workerScope.postMessage({ ok: true, output });
   } catch (error) {
-    globalThis.postMessage({
+    workerScope.postMessage({
       ok: false,
       output,
       error: error instanceof Error

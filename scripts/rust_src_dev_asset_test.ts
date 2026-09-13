@@ -15,7 +15,7 @@ Deno.test("development rust-src writer publishes bytes and atomic SHA sidecar", 
   try {
     const sha256 = await writeRustSrcDevAsset(outputDirectory, async () => ({
       archive: new Uint8Array([4, 5, 6]),
-      cacheArchive: ".rubrc-cache/sysroot/rust-src.tar.vfsbr",
+      cacheArchive: ".rubrc-cache/sysroot/rust-src.sqfs",
       source: "cache",
     }));
 
@@ -25,7 +25,7 @@ Deno.test("development rust-src writer publishes bytes and atomic SHA sidecar", 
       "development writer returned the wrong SHA-256",
     );
     const asset = await Deno.readFile(
-      `${outputDirectory}/rust-src-${sha256}.tar.vfsbr`,
+      `${outputDirectory}/rust-src-${sha256}.sqfs`,
     );
     assert(asset.join(",") === "4,5,6", "development asset bytes changed");
     const sidecar = await Deno.readTextFile(
@@ -38,7 +38,7 @@ Deno.test("development rust-src writer publishes bytes and atomic SHA sidecar", 
     }
     assert(
       entries.sort().join(",") ===
-        `rust-src-${sha256}.tar.vfsbr,rust-src.sha256`,
+        `rust-src-${sha256}.sqfs,rust-src.sha256`,
       `temporary sidecar leaked: ${entries.join(",")}`,
     );
   } finally {
@@ -54,19 +54,19 @@ Deno.test("development rust-src writer retains only three immutable versions", a
     for (const byte of [1, 2, 3, 4]) {
       activeSha256 = await writeRustSrcDevAsset(outputDirectory, async () => ({
         archive: new Uint8Array([byte]),
-        cacheArchive: ".rubrc-cache/sysroot/rust-src.tar.vfsbr",
-        source: "download",
+        cacheArchive: ".rubrc-cache/sysroot/rust-src.sqfs",
+        source: "generated",
       }));
     }
     const assets = [];
     for await (const entry of Deno.readDir(outputDirectory)) {
-      if (/^rust-src-[a-f0-9]{64}\.tar\.vfsbr$/.test(entry.name)) {
+      if (/^rust-src-[a-f0-9]{64}\.sqfs$/.test(entry.name)) {
         assets.push(entry.name);
       }
     }
     assert(assets.length === 3, `retained ${assets.length} archive versions`);
     assert(
-      assets.includes(`rust-src-${activeSha256}.tar.vfsbr`),
+      assets.includes(`rust-src-${activeSha256}.sqfs`),
       "active content-addressed archive was pruned",
     );
   } finally {
@@ -165,7 +165,7 @@ Deno.test("same-hash replacement requires a regular destination", async () => {
   const archive = new Uint8Array([4, 5, 6]);
   const prepare = async () => ({
     archive,
-    cacheArchive: ".rubrc-cache/sysroot/rust-src.tar.vfsbr",
+    cacheArchive: ".rubrc-cache/sysroot/rust-src.sqfs",
     source: "cache" as const,
   });
   try {
@@ -176,20 +176,20 @@ Deno.test("same-hash replacement requires a regular destination", async () => {
       "same-hash POSIX replacement changed identity",
     );
     assert(
-      (await Deno.stat(`${outputDirectory}/rust-src-${sha256}.tar.vfsbr`))
+      (await Deno.stat(`${outputDirectory}/rust-src-${sha256}.sqfs`))
         .isFile,
       "same-hash destination stopped being a regular file",
     );
 
     const emptySha256 =
       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-    const blockingDirectory = `${outputDirectory}/rust-src-${emptySha256}.tar.vfsbr`;
+    const blockingDirectory = `${outputDirectory}/rust-src-${emptySha256}.sqfs`;
     await Deno.mkdir(blockingDirectory);
     let rejection: unknown;
     try {
       await writeRustSrcDevAsset(outputDirectory, async () => ({
         archive: new Uint8Array(),
-        cacheArchive: ".rubrc-cache/sysroot/rust-src.tar.vfsbr",
+        cacheArchive: ".rubrc-cache/sysroot/rust-src.sqfs",
         source: "cache",
       }));
     } catch (error) {
@@ -215,8 +215,12 @@ Deno.test("development rust-src lifecycle stays ignored and outside production",
 
   assert(
     rootPackage.scripts["rust-src:prepare-dev-asset"] ===
-      "deno run --no-lock --allow-read --allow-write --allow-net scripts/prepare_rust_src_dev_asset.ts",
+      "deno run --no-lock --allow-read --allow-write --allow-net --allow-run=mksquashfs,unsquashfs scripts/prepare_rust_src_dev_asset.ts",
     "root development preparation command changed",
+  );
+  assert(
+    prepareSource.includes("prepare = prepareReleasedRustSrcSquashfs"),
+    "development writer must convert the pinned release rather than rename tar or use the host toolchain",
   );
   assert(
     pagePackage.scripts.predev ===
@@ -233,7 +237,7 @@ Deno.test("development rust-src lifecycle stays ignored and outside production",
     prepareSource.includes("export const DEV_RUST_SRC_DIRECTORY") &&
       prepareSource.includes('".rubrc-cache/dev"') &&
       prepareSource.includes("const { archive } = await prepare()") &&
-      prepareSource.includes("rust-src-${sha256}.tar.vfsbr") &&
+      prepareSource.includes("rust-src-${sha256}.sqfs") &&
       prepareSource.includes("DEV_RUST_SRC_RETAINED_ASSETS = 3") &&
       prepareSource.includes(
         "await pruneDevelopmentRustSrcAssets(directory, sha256)",
@@ -268,13 +272,13 @@ Deno.test("Vite development identity and middleware are hash-bound", async () =>
   );
   assert(
     vite.includes("rust-src.sha256") &&
-      vite.includes("rust-src-${sha256}.tar.vfsbr") &&
+      vite.includes("rust-src-${sha256}.sqfs") &&
       vite.includes("developmentRustSrcAsset?.sha256") &&
       vite.includes('process.env.SOURCE_SHA ?? "development"'),
     "Vite source revision does not separate development hash from production SHA",
   );
   assert(
-    vite.includes('requestUrl.pathname !== "/rust-src.tar.vfsbr"') &&
+    vite.includes('requestUrl.pathname !== "/rust-src.sqfs"') &&
       vite.includes('request.method !== "GET" && request.method !== "HEAD"') &&
       vite.includes('requestUrl.searchParams.get("v") !== asset.sha256') &&
       vite.includes("response.statusCode = 409") &&

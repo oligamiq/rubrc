@@ -1,3 +1,5 @@
+import type { CrateGraphProgress } from "./rust_analyzer_readiness.ts";
+
 export type StartupPhase =
   | "editor-visible"
   | "vfs-starting"
@@ -23,6 +25,7 @@ export type StartupSnapshot = {
     label: string;
     state: "pending" | "running" | "complete" | "failed";
     progress?: number;
+    projectProgress?: CrateGraphProgress;
   }>;
   error?: string;
 };
@@ -34,6 +37,7 @@ export type StagedAnalyzerSession = {
     model: StartupModel,
     signal: AbortSignal,
     semanticWarming: () => void,
+    reportProjectProgress: (progress: CrateGraphProgress) => void,
   ): Promise<void>;
   flush(): Promise<void>;
   dispose(): Promise<void>;
@@ -68,12 +72,14 @@ const freezeSnapshot = (
   tasks: ReadonlyArray<StartupTask>,
   error?: string,
 ): StartupSnapshot => {
-  const frozenTasks = Object.isFrozen(tasks) &&
-      tasks.every((task) => Object.isFrozen(task))
-    ? tasks
-    : Object.freeze(
-      tasks.map((task) => Object.isFrozen(task) ? task : Object.freeze(task)),
-    );
+  const frozenTasks =
+    Object.isFrozen(tasks) && tasks.every((task) => Object.isFrozen(task))
+      ? tasks
+      : Object.freeze(
+          tasks.map((task) =>
+            Object.isFrozen(task) ? task : Object.freeze(task),
+          ),
+        );
   return Object.freeze({
     generation,
     phase,
@@ -92,26 +98,30 @@ const taskStateForPhase = (
       state = task.id === "editor" ? "complete" : "pending";
       break;
     case "vfs-starting":
-      state = task.id === "editor"
-        ? "complete"
-        : task.id === "rust-src" || task.id === "target-sysroot"
-        ? "running"
-        : "pending";
+      state =
+        task.id === "editor"
+          ? "complete"
+          : task.id === "rust-src" || task.id === "target-sysroot"
+            ? "running"
+            : "pending";
       break;
     case "analyzer-initializing":
-      state = task.id === "editor"
-        ? "complete"
-        : task.id === "analyzer" || task.id === "rust-src" ||
-            task.id === "target-sysroot"
-        ? "running"
-        : "pending";
+      state =
+        task.id === "editor"
+          ? "complete"
+          : task.id === "analyzer" ||
+              task.id === "rust-src" ||
+              task.id === "target-sysroot"
+            ? "running"
+            : "pending";
       break;
     case "sysroots-loading":
-      state = task.id === "editor" || task.id === "analyzer"
-        ? "complete"
-        : task.id === "rust-src" || task.id === "target-sysroot"
-        ? "running"
-        : "pending";
+      state =
+        task.id === "editor" || task.id === "analyzer"
+          ? "complete"
+          : task.id === "rust-src" || task.id === "target-sysroot"
+            ? "running"
+            : "pending";
       break;
     case "project-activating":
     case "semantic-warming":
@@ -121,7 +131,21 @@ const taskStateForPhase = (
       state = "complete";
       break;
   }
-  return task.state === state ? task : { ...task, state };
+  const clearProjectProgress =
+    task.id === "project" &&
+    (phase === "semantic-warming" || phase === "ready");
+
+  if (
+    task.state === state &&
+    (!clearProjectProgress || task.projectProgress === undefined)
+  )
+    return task;
+
+  return {
+    ...task,
+    state,
+    ...(clearProjectProgress ? { projectProgress: undefined } : {}),
+  };
 };
 
 const errorMessage = (error: unknown): string => {
@@ -227,6 +251,7 @@ export class StartupCoordinator {
         model,
         signal,
         () => this.#setPhase(generation, "semantic-warming"),
+        (progress) => this.#reportProjectProgress(generation, progress),
       );
       signal.throwIfAborted();
       this.#setPhase(generation, "ready");
@@ -243,27 +268,27 @@ export class StartupCoordinator {
     }
   }
 
-  #setPhase(
-    generation: number,
-    phase: Exclude<StartupPhase, "failed">,
-  ): void {
+  #setPhase(generation: number, phase: Exclude<StartupPhase, "failed">): void {
     if (
-      generation !== this.#generation || this.#snapshot.phase === "ready" ||
+      generation !== this.#generation ||
+      this.#snapshot.phase === "ready" ||
       this.#snapshot.phase === "failed"
-    ) return;
+    )
+      return;
     const updatedTasks = this.#snapshot.tasks.map((task) =>
-      taskStateForPhase(task, phase)
+      taskStateForPhase(task, phase),
     );
-    const tasks =
-      updatedTasks.every((task, index) => task === this.#snapshot.tasks[index])
-        ? this.#snapshot.tasks
-        : updatedTasks;
+    const tasks = updatedTasks.every(
+      (task, index) => task === this.#snapshot.tasks[index],
+    )
+      ? this.#snapshot.tasks
+      : updatedTasks;
     this.#publish(freezeSnapshot(generation, phase, tasks));
   }
 
   #setFailed(generation: number, error: unknown): void {
     const tasks = this.#snapshot.tasks.map((task) =>
-      task.state === "running" ? { ...task, state: "failed" as const } : task
+      task.state === "running" ? { ...task, state: "failed" as const } : task,
     );
     this.#publish(
       freezeSnapshot(generation, "failed", tasks, errorMessage(error)),
@@ -276,15 +301,35 @@ export class StartupCoordinator {
     progress?: number,
   ): void {
     if (
-      generation !== this.#generation || this.#controller.signal.aborted ||
-      this.#snapshot.phase === "ready" || this.#snapshot.phase === "failed"
-    ) return;
+      generation !== this.#generation ||
+      this.#controller.signal.aborted ||
+      this.#snapshot.phase === "ready" ||
+      this.#snapshot.phase === "failed"
+    )
+      return;
     const tasks = this.#snapshot.tasks.map((task) =>
-      task.id === id ? { ...task, state: "running" as const, progress } : task
+      task.id === id ? { ...task, state: "running" as const, progress } : task,
     );
-    this.#publish(
-      freezeSnapshot(generation, this.#snapshot.phase, tasks),
+    this.#publish(freezeSnapshot(generation, this.#snapshot.phase, tasks));
+  }
+
+  #reportProjectProgress(
+    generation: number,
+    projectProgress: CrateGraphProgress,
+  ): void {
+    if (
+      generation !== this.#generation ||
+      this.#controller.signal.aborted ||
+      this.#snapshot.phase !== "project-activating"
+    )
+      return;
+
+    const tasks = this.#snapshot.tasks.map((task) =>
+      task.id === "project"
+        ? { ...task, state: "running" as const, projectProgress }
+        : task,
     );
+    this.#publish(freezeSnapshot(generation, this.#snapshot.phase, tasks));
   }
 
   #publish(snapshot: StartupSnapshot): void {
@@ -308,9 +353,7 @@ export class StartupCoordinator {
 
   async #dispose(): Promise<void> {
     ++this.#generation;
-    this.abort(
-      new DOMException("Startup coordinator disposed", "AbortError"),
-    );
+    this.abort(new DOMException("Startup coordinator disposed", "AbortError"));
 
     let disposalError: unknown;
     let disposalFailed = false;

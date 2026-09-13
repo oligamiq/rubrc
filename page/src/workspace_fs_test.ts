@@ -1,4 +1,5 @@
 import { Directory, File } from "@bjorn3/browser_wasi_shim";
+import { createRustAnalyzerProjectJson } from "./rust_lsp_config.ts";
 import { WorkspaceFileSystem, WorkspaceFsError } from "./workspace_fs.ts";
 
 const assert = (condition: unknown, message: string) => {
@@ -24,6 +25,24 @@ Deno.test("workspace initializes the WASI project tree once", () => {
   assert(
     workspace.rootDirectory.contents === workspace.rootContents,
     "root contents differ",
+  );
+});
+
+Deno.test("workspace rust-project uses the same sysroot discovery settings as activation", () => {
+  const workspace = new WorkspaceFileSystem("fn main() {}\n");
+  const project = JSON.parse(decode(workspace.readFile("/rust-project.json")));
+  assert(
+    JSON.stringify(project) === JSON.stringify(createRustAnalyzerProjectJson()),
+    "startup rust-project diverged from the activated project",
+  );
+  assert(
+    project.sysroot === "/sysroot" &&
+      project.sysroot_src === "/sysroot/lib/rustlib/src/rust/library",
+    "startup rust-project omitted the installed sysroot discovery paths",
+  );
+  assert(
+    !("sysroot_project" in project),
+    "startup rust-project overrides rust-analyzer sysroot discovery",
   );
 });
 
@@ -128,22 +147,18 @@ Deno.test("workspace rejects paths outside the POSIX root", () => {
   }
 });
 
-Deno.test("terminal consumes the shared preopen instead of constructing a private root", async () => {
-  const source = await Deno.readTextFile("page/src/xterm.tsx");
+Deno.test("runtime consumes the shared workspace preopen instead of constructing a private root", async () => {
+  const source = await Deno.readTextFile("page/src/production_runtime.ts");
   assert(
-    source.includes("workspaceFileSystem.preopen"),
+    source.includes("[options.workspaceFileSystem.preopen]"),
     "shared preopen missing",
   );
   assert(
-    source.includes("workspaceFileSystem.rootDirectory"),
-    "shared child root missing",
-  );
-  assert(
-    source.includes("workspaceFileSystem.sysrootContents"),
-    "shared sysroot missing",
+    source.includes("filesystemRoot: workspace.rootDirectory"),
+    "shared child-process root missing",
   );
   assert(
     !source.includes("new PreopenDirectory("),
-    "terminal still constructs a private preopen",
+    "runtime still constructs a private preopen",
   );
 });

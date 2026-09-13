@@ -39,6 +39,28 @@ thread_local! {
     pub static CURRENT_SESSION_ID: std::cell::Cell<u32> = std::cell::Cell::new(0);
 }
 
+pub(crate) fn write_current_context_output(
+    stderr: bool,
+    buf: &[u8],
+) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+    let Some(id) = CURRENT_CONTEXT_ID.with(|id| id.get()) else {
+        return Err(wasi_virt_layer::__private::wasip1::ERRNO_BADF);
+    };
+    let len = u32::try_from(buf.len())
+        .map_err(|_| wasi_virt_layer::__private::wasip1::ERRNO_OVERFLOW)?;
+    let shell_ptr = unsafe { vfs_shell_alloc_buf(len) };
+    vfs_shell::memcpy(shell_ptr as *mut u8, buf);
+    let written = unsafe {
+        if stderr {
+            vfs_shell_write_stderr(id, shell_ptr, len)
+        } else {
+            vfs_shell_write_stdout(id, shell_ptr, len)
+        }
+    };
+    unsafe { vfs_shell_free_buf(shell_ptr, len) };
+    Ok(written as usize)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn vfs_set_current_session_id(session_id: u32) {
     CURRENT_SESSION_ID.with(|id| id.set(session_id));

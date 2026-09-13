@@ -15,16 +15,15 @@ import {
   STARTUP_SYSROOT_TIMEOUT_MS,
   type VfsReadyResult,
 } from "../vfs_readiness.ts";
-import {
-  startVfsDebugTracePump,
-  traceVfsHostCall,
-} from "../vfs_debug_trace.ts";
+import { startVfsDebugTracePump } from "../vfs_debug_trace.ts";
 import { observeAsyncFailure } from "../terminal_channel_lifecycle.ts";
 import {
   createUtilityWorkerMessageHandler,
   createUtilityWorkerStateMachine,
   type UtilityWorkerInbound,
 } from "../runtime_worker_protocol.ts";
+import { createRustSrcFsEndpoint } from "../rust_src_vfs_rpc.ts";
+import { VFS_THREAD_INITIAL_CAPACITY } from "../runtime_parallelism.ts";
 
 import thread_spawn_path from "./vfs_bindings/thread_spawn.ts?worker&url";
 import worker_background_worker_url from "./vfs_bindings/worker_background_worker.ts?worker&url";
@@ -433,7 +432,7 @@ function createUtilityAnimal(
   message: Extract<UtilityWorkerInbound, { type: "initialize" }>,
   threadSpawnModule: WebAssembly.Module,
 ): WASIFarmAnimal {
-  const vfs_threads = 8;
+  const vfs_threads = VFS_THREAD_INITIAL_CAPACITY;
   return new WASIFarmAnimal(
     message.wasiRef,
     [], // args
@@ -480,7 +479,6 @@ async function startUtilityGuest(
     console.debug("[vfs-stall-trace]", chunk);
   };
   const sharedMemory = animal.get_share_memory();
-  let hostCallId = 0;
   prebindWasiMemory(animal, sharedMemory.memory);
   const vfs_root = await custom_instantiate(
     vfs_wasm,
@@ -501,13 +499,6 @@ async function startUtilityGuest(
               console.error,
             );
           },
-        );
-      } else if (debugTraceEnabled && unknown.name === "hostRunCargo") {
-        return traceVfsHostCall(
-          ++hostCallId,
-          "hostRunCargo",
-          emitDebugTrace,
-          () => animal.call_unknown_fn(idx, unknown),
         );
       }
       return animal.call_unknown_fn(idx, unknown);
@@ -564,6 +555,13 @@ async function startUtilityGuest(
     new SharedObject(
       createAdditionalSysrootStatusEndpoint(vfs_root),
       ctx.load_additional_sysroot_id,
+    ),
+  );
+
+  shared.push(
+    new SharedObject(
+      createRustSrcFsEndpoint(vfs_root, sharedMemory.memory),
+      ctx.rust_src_fs_id,
     ),
   );
 

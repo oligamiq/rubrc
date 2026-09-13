@@ -5,6 +5,7 @@ import {
   PreopenDirectory,
 } from "@bjorn3/browser_wasi_shim";
 import { default_value } from "./config.ts";
+import { createRustAnalyzerProjectJson } from "./rust_lsp_config.ts";
 
 export type WorkspaceChange = {
   kind: "added" | "updated" | "deleted";
@@ -64,10 +65,7 @@ export class WorkspaceFileSystem {
       ],
       [
         "rust-project.json",
-        new File(bytes(JSON.stringify({
-          sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
-          crates: [{ root_module: "/src/main.rs", edition: "2021", deps: [] }],
-        }))),
+        new File(bytes(JSON.stringify(createRustAnalyzerProjectJson()))),
       ],
     ]);
     this.preopen = new PreopenDirectory("/", this.rootContents);

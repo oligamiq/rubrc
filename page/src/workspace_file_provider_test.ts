@@ -1,9 +1,15 @@
 import type { URI as ResourceUri } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri";
 import { WorkspaceFileSystem } from "./workspace_fs.ts";
 import { WasiWorkspaceFileProvider } from "./workspace_file_provider.ts";
+import {
+  activateRustSrcFsEndpoint,
+  clearRustSrcFsEndpoint,
+  RUST_SRC_MOUNT_PATH,
+  type RustSrcFsEndpoint,
+} from "./rust_src_vfs_rpc.ts";
 
 const FileChangeType = { UPDATED: 0 };
-const FileType = { File: 1 };
+const FileType = { File: 1, Directory: 2 };
 const URI = {
   parse(value: string): ResourceUri {
     const parsed = new URL(value);
@@ -137,4 +143,81 @@ Deno.test("workspace provider registration precedes Monaco API startup", async (
     "provider registered after wrapper construction",
   );
   assert(startIndex > wrapperIndex, "wrapper startup missing");
+});
+
+Deno.test("provider resolves rust-src lazily without populating workspace sysroot bytes", async () => {
+  const workspace = new WorkspaceFileSystem("main");
+  const source = new TextEncoder().encode("pub const CORE: &str = \"lazy\";\n");
+  const endpoint: RustSrcFsEndpoint = (request) => {
+    if (request.operation === "stat") {
+      if (request.path === "" || request.path === "core" || request.path === "core/src") {
+        return {
+          operation: "stat",
+          stat: { type: "directory", size: 0, mtime: 1000 },
+        };
+      }
+      if (request.path === "core/src/lib.rs") {
+        return {
+          operation: "stat",
+          stat: { type: "file", size: source.length, mtime: 2000 },
+        };
+      }
+    }
+    if (request.operation === "readFile" && request.path === "core/src/lib.rs") {
+      return { operation: "readFile", data: source };
+    }
+    if (request.operation === "readdir") {
+      const entries = request.path === "" ? ["core"] :
+        request.path === "core" ? ["src"] :
+        request.path === "core/src" ? ["lib.rs"] : [];
+      return { operation: "readdir", entries };
+    }
+    throw new Error(`unexpected rust-src request ${request.operation}:${request.path}`);
+  };
+  activateRustSrcFsEndpoint("provider-lazy-test", endpoint);
+  try {
+    const provider = new WasiWorkspaceFileProvider(workspace);
+    const fileUri = URI.parse(`file://${RUST_SRC_MOUNT_PATH}/core/src/lib.rs`);
+    const stat = await provider.stat(fileUri);
+    assert(stat.type === FileType.File, "lazy rust-src stat was not a file");
+    assert(stat.size === source.length, "lazy rust-src size mismatch");
+    assert(
+      new TextDecoder().decode(await provider.readFile(fileUri)) ===
+        new TextDecoder().decode(source),
+      "lazy rust-src bytes mismatch",
+    );
+    const listing = await provider.readdir(
+      URI.parse(`file://${RUST_SRC_MOUNT_PATH}/core/src`),
+    );
+    assert(
+      listing.length === 1 && listing[0][0] === "lib.rs" &&
+        listing[0][1] === FileType.File,
+      "lazy rust-src listing mismatch",
+    );
+    const ancestor = await provider.readdir(
+      URI.parse("file:///sysroot/lib/rustlib/src/rust"),
+    );
+    assert(
+      ancestor.some(([name, type]) => name === "library" && type === FileType.Directory),
+      "rust-src mount ancestor was not synthesized",
+    );
+    assert(workspace.sysrootContents.size === 0, "workspace sysroot was eagerly populated");
+  } finally {
+    clearRustSrcFsEndpoint("provider-lazy-test");
+  }
+});
+
+Deno.test("provider rejects writes into the rust-src namespace", async () => {
+  const provider = new WasiWorkspaceFileProvider(new WorkspaceFileSystem("main"));
+  let rejected = false;
+  try {
+    await provider.writeFile(
+      URI.parse(`file://${RUST_SRC_MOUNT_PATH}/core/src/lib.rs`),
+      new Uint8Array([1]),
+      { create: true, overwrite: true, unlock: false, atomic: false },
+    );
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "rust-src write was accepted");
 });

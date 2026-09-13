@@ -23,7 +23,7 @@ Deno.test("browser static server confines paths and serves GET/HEAD with explici
     new Uint8Array([0, 97, 115, 109]),
   );
   await Deno.writeFile(
-    `${directory}/rust-src.tar.vfsbr`,
+    `${directory}/rust-src.sqfs`,
     new Uint8Array([1, 2, 3]),
   );
   const server = await startBrowserStaticServer({
@@ -44,7 +44,7 @@ Deno.test("browser static server confines paths and serves GET/HEAD with explici
       ["/assets/app.js", "text/javascript; charset=utf-8"],
       ["/assets/app.css", "text/css; charset=utf-8"],
       ["/assets/worker.wasm", "application/wasm"],
-      ["/rust-src.tar.vfsbr", "application/octet-stream"],
+      ["/rust-src.sqfs", "application/octet-stream"],
     ]) {
       const response = await fetch(`${base}${path}`);
       assert(response.status === 200, `${path} returned ${response.status}`);
@@ -65,7 +65,7 @@ Deno.test("browser static server confines paths and serves GET/HEAD with explici
       await response.body?.cancel();
     }
 
-    const head = await fetch(`${base}/rust-src.tar.vfsbr`, { method: "HEAD" });
+    const head = await fetch(`${base}/rust-src.sqfs`, { method: "HEAD" });
     assert(head.status === 200, `HEAD returned ${head.status}`);
     assert(
       head.headers.get("content-length") === "3",
@@ -83,7 +83,7 @@ Deno.test("browser static server confines paths and serves GET/HEAD with explici
       "SPA fallback did not serve index.html",
     );
 
-    const post = await fetch(`${base}/rust-src.tar.vfsbr`, { method: "POST" });
+    const post = await fetch(`${base}/rust-src.sqfs`, { method: "POST" });
     assert(post.status === 405, `POST returned ${post.status}`);
     assert(
       post.headers.get("allow") === "GET, HEAD",

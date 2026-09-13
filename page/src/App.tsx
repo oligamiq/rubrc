@@ -94,16 +94,19 @@ const App = (props: {
   const archiveProgress = retainArchiveProgress(
     runtime.archiveStore,
     (progress) => {
-      const id = progress.triple === "rust-src"
-        ? "rust-src"
-        : progress.triple === "wasm32-wasip1"
-        ? "target-sysroot"
-        : undefined;
+      const id =
+        progress.triple === "rust-src"
+          ? "rust-src"
+          : progress.triple === "wasm32-wasip1"
+            ? "target-sysroot"
+            : undefined;
       if (id === undefined) return;
-      const percent = progress.loaded === undefined ||
-          progress.total === undefined || progress.total === 0
-        ? undefined
-        : (progress.loaded / progress.total) * 100;
+      const percent =
+        progress.loaded === undefined ||
+        progress.total === undefined ||
+        progress.total === 0
+          ? undefined
+          : (progress.loaded / progress.total) * 100;
       reportStartupProgress?.(id, percent);
     },
   );
@@ -132,12 +135,18 @@ const App = (props: {
         model as monaco.editor.ITextModel,
       );
       return {
-        activateProject: async (activationModel, activationSignal, warming) => {
+        activateProject: async (
+          activationModel,
+          activationSignal,
+          warming,
+          reportProjectProgress,
+        ) => {
           await yieldAnimationFrame(activationSignal);
           await session.activateProject(
             activationModel,
             activationSignal,
             warming,
+            reportProjectProgress,
           );
         },
         flush: () => session.flush(),
@@ -180,10 +189,12 @@ const App = (props: {
     const uri = mountedMonaco.Uri.parse("file:///src/main.rs");
     const temporaryModel = mountedEditor.getModel();
     const existingModel = mountedMonaco.editor.getModel(uri);
-    const initialText = existingModel === null
-      ? new TextDecoder().decode(workspaceFileSystem.readFile("/src/main.rs"))
-      : "";
-    const model = existingModel ??
+    const initialText =
+      existingModel === null
+        ? new TextDecoder().decode(workspaceFileSystem.readFile("/src/main.rs"))
+        : "";
+    const model =
+      existingModel ??
       mountedMonaco.editor.createModel(initialText, "rust", uri);
     mountedEditor.setModel(model);
     if (temporaryModel !== null && temporaryModel !== model) {
@@ -197,7 +208,8 @@ const App = (props: {
           workspaceModel.uri.scheme !== "file" ||
           workspaceModel.uri.authority !== "" ||
           !workspaceModel.uri.path.startsWith("/")
-        ) continue;
+        )
+          continue;
         workspaceFileSystem.writeFile(
           workspaceModel.uri.path,
           new TextEncoder().encode(workspaceModel.getValue()),
@@ -216,10 +228,11 @@ const App = (props: {
     recordStartupTestState(testApiGeneration, coordinator.snapshot());
     const runtimeStartup = runtime.start();
     void runtimeStartup.catch((error) =>
-      console.error("Runtime startup failed:", error)
+      console.error("Runtime startup failed:", error),
     );
-    void coordinator.start(model).catch((error) =>
-      console.error("Staged startup failed:", error)
+    const stagedStartup = coordinator.start(model);
+    void stagedStartup.catch((error) =>
+      console.error("Staged startup failed:", error),
     );
   };
 
@@ -246,9 +259,14 @@ const App = (props: {
     mountedMonacoRef = undefined;
     const generation = testApiGeneration;
     testApiGeneration = undefined;
-    void runtime.dispose()
-      .catch((error) => console.error("Runtime cleanup failed:", error))
-      .finally(() => generation?.dispose());
+    const runtimeDisposal = runtime.dispose();
+    void runtimeDisposal
+      .catch((error) => {
+        console.error("Runtime cleanup failed:", error);
+      })
+      .finally(() => {
+        generation?.dispose();
+      });
   });
 
   const addTerminalToPane = (paneId: number) => {
@@ -258,11 +276,11 @@ const App = (props: {
       panes().map((pane) =>
         pane.id === paneId
           ? {
-            ...pane,
-            tabs: [...pane.tabs, sessionId],
-            activeTab: sessionId,
-          }
-          : pane
+              ...pane,
+              tabs: [...pane.tabs, sessionId],
+              activeTab: sessionId,
+            }
+          : pane,
       ),
     );
   };
@@ -293,9 +311,8 @@ const App = (props: {
         .map((pane) => {
           if (pane.id !== paneId) return pane;
           const tabs = pane.tabs.filter((tab) => tab !== sessionId);
-          const activeTab = pane.activeTab === sessionId
-            ? tabs.at(-1) ?? -1
-            : pane.activeTab;
+          const activeTab =
+            pane.activeTab === sessionId ? (tabs.at(-1) ?? -1) : pane.activeTab;
           return { ...pane, tabs, activeTab };
         })
         .filter((pane) => pane.tabs.length > 0 || pane.id === panes()[0].id),
@@ -305,7 +322,7 @@ const App = (props: {
   const setActiveTab = (paneId: number, sessionId: number) => {
     setPanes(
       panes().map((pane) =>
-        pane.id === paneId ? { ...pane, activeTab: sessionId } : pane
+        pane.id === paneId ? { ...pane, activeTab: sessionId } : pane,
       ),
     );
   };
@@ -324,9 +341,10 @@ const App = (props: {
         .map((pane) => {
           if (pane.id === dragged.paneId) {
             const tabs = pane.tabs.filter((tab) => tab !== dragged.sessionId);
-            const activeTab = pane.activeTab === dragged.sessionId
-              ? tabs.at(-1) ?? -1
-              : pane.activeTab;
+            const activeTab =
+              pane.activeTab === dragged.sessionId
+                ? (tabs.at(-1) ?? -1)
+                : pane.activeTab;
             return { ...pane, tabs, activeTab };
           }
           if (pane.id === targetPaneId) {
@@ -376,7 +394,8 @@ const App = (props: {
               handleMount(
                 mountedMonaco as unknown as typeof import("monaco-editor"),
                 mountedEditor as unknown as monaco.editor.IStandaloneCodeEditor,
-              )}
+              )
+            }
           />
         </Suspense>
         {startup().phase !== "ready" && <StartupOverlay state={startup()} />}
@@ -398,7 +417,8 @@ const App = (props: {
                     <div
                       draggable={true}
                       onDragStart={(event) =>
-                        onDragStart(event, pane.id, sessionId)}
+                        onDragStart(event, pane.id, sessionId)
+                      }
                       class={`flex items-center transition-colors border-r border-gray-700 whitespace-nowrap cursor-pointer ${
                         pane.activeTab === sessionId
                           ? "bg-gray-900 border-b-2 border-b-green-500"
@@ -421,7 +441,8 @@ const App = (props: {
                           type="button"
                           class="pr-3 text-gray-500 hover:text-red-400 focus:outline-none"
                           onClick={(event) =>
-                            removeTerminal(event, pane.id, sessionId)}
+                            removeTerminal(event, pane.id, sessionId)
+                          }
                           title="Close Tab"
                         >
                           ✕
@@ -514,7 +535,8 @@ const App = (props: {
             completedTargets={runtimeState().completedTargets}
             disabled={controlsDisabled() || runtimeState().operation === "run"}
             loadTarget={(triple) =>
-              targetErrors.load(triple, () => runtime.loadTarget(triple))}
+              targetErrors.load(triple, () => runtime.loadTarget(triple))
+            }
           />
           {targetError() && (
             <p class="mt-1 text-xs text-red-400" role="alert">

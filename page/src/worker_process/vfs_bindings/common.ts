@@ -11,10 +11,10 @@ const set_fake_worker = async () => {
 		const { Worker, isMainThread, parentPort } = _worker;
 
         class FakeWorker {
-            worker;
-            onmessage;
+            worker: any;
+            onmessage?: (event: { data: unknown }) => void;
 
-            constructor(url) {
+            constructor(url: string | URL) {
                 let absolute_url;
                 if (url instanceof URL) {
                     absolute_url = url;
@@ -25,13 +25,13 @@ const set_fake_worker = async () => {
                     type: "module",
                 });
 
-                this.worker.on("message", (message) => {
+                this.worker.on("message", (message: unknown) => {
                     if (this.onmessage) {
                         this.onmessage({ data: message });
                     }
                 });
             }
-            postMessage(message) {
+            postMessage(message: unknown) {
                 this.worker.postMessage(message);
             }
         }

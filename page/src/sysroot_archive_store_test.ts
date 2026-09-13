@@ -2,7 +2,6 @@ import {
   type SysrootArchiveProgress,
   SysrootArchiveStore,
 } from "./sysroot_archive_store.ts";
-import type { SysrootArchiveEntry } from "./sysroot_archive.ts";
 
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
@@ -39,25 +38,31 @@ const deferred = <T>() => {
   return { promise, resolve, reject };
 };
 
-const coreEntry = (data = new Uint8Array([1])): SysrootArchiveEntry => ({
-  name: new TextEncoder().encode("core/src/lib.rs"),
-  data,
-  isDirectory: false,
+Deno.test("rust-src prefetch keeps raw archive bytes without eager archive parsing", async () => {
+  const store = new SysrootArchiveStore({
+    loadBytes: async () => new Uint8Array([1, 2, 3]),
+    maintainRustSrcCache: () => {},
+  });
+
+  await store.prefetch(["rust-src"], new AbortController().signal);
+  store.beginRead("rust-src");
+  assertEquals(store.archiveLength(), 3, "raw rust-src archive bytes were not retained");
+  assertEquals(
+    Array.from(store.readChunk(3)).join(","),
+    "1,2,3",
+    "rust-src raw bytes changed before VFS mount",
+  );
+  store.dispose();
 });
 
 Deno.test("sysroot store starts keyed prefetches concurrently and reuses them", async () => {
   const rustSrc = deferred<Uint8Array<ArrayBuffer>>();
   const target = deferred<Uint8Array<ArrayBuffer>>();
   const calls: string[] = [];
-  let parseCalls = 0;
   const store = new SysrootArchiveStore({
     loadBytes: (triple) => {
       calls.push(triple);
       return triple === "rust-src" ? rustSrc.promise : target.promise;
-    },
-    parseEntries: async () => {
-      parseCalls++;
-      return [coreEntry()];
     },
     maintainRustSrcCache: () => {},
   });
@@ -77,73 +82,34 @@ Deno.test("sysroot store starts keyed prefetches concurrently and reuses them", 
   target.resolve(new Uint8Array([3, 4]));
   await Promise.all([first, duplicate]);
 
-  assertEquals(parseCalls, 1, "rust-src was parsed more than once");
   store.beginRead("rust-src");
   assertEquals(store.archiveLength(), 2, "wrong prefetched archive length");
   store.dispose();
 });
 
-Deno.test("sysroot store rejects rust-src without a non-empty core root", async () => {
-  for (const entries of [
-    [] as SysrootArchiveEntry[],
-    [coreEntry(new Uint8Array())],
-    [{ ...coreEntry(), isDirectory: true }],
-    [{ ...coreEntry(), name: new TextEncoder().encode("./core/src/lib.rs") }],
-  ]) {
-    const store = new SysrootArchiveStore({
-      loadBytes: async () => new Uint8Array([1]),
-      parseEntries: async () => entries,
-    });
-    const error = await store
-      .prefetch(["rust-src"], new AbortController().signal)
-      .then(
-        () => undefined,
-        (reason) => reason,
-      );
-    assert(
-      error instanceof Error &&
-        error.message.includes("rust-src archive is missing core/src/lib.rs"),
-      `unexpected missing-core rejection: ${String(error)}`,
-    );
-    store.dispose();
-  }
-});
-
-Deno.test("rust-src cache maintenance follows parse and core validation", async () => {
-  let parseAttempt = 0;
+Deno.test("rust-src cache maintenance follows a successful raw-byte fetch", async () => {
+  let attempts = 0;
   let maintenanceCalls = 0;
   const store = new SysrootArchiveStore({
-    loadBytes: async () => new Uint8Array([1]),
-    parseEntries: async () => {
-      parseAttempt++;
-      if (parseAttempt === 1) throw new Error("malformed rust-src archive");
-      if (parseAttempt === 2) return [];
-      return [coreEntry()];
+    loadBytes: async () => {
+      attempts++;
+      if (attempts === 1) throw new Error("network failed");
+      return new Uint8Array([1]);
     },
     maintainRustSrcCache: () => maintenanceCalls++,
   });
   const signal = new AbortController().signal;
 
   await store.prefetch(["rust-src"], signal).catch(() => undefined);
-  assertEquals(
-    maintenanceCalls,
-    0,
-    "malformed rust-src archive started cache maintenance",
-  );
-
-  await store.prefetch(["rust-src"], signal).catch(() => undefined);
-  assertEquals(
-    maintenanceCalls,
-    0,
-    "missing-core rust-src archive started cache maintenance",
-  );
+  assertEquals(maintenanceCalls, 0, "failed fetch started cache maintenance");
 
   await store.prefetch(["rust-src"], signal);
   await store.prefetch(["rust-src"], signal);
+  assertEquals(attempts, 2, "successful rust-src prefetch was downloaded twice");
   assertEquals(
     maintenanceCalls,
     1,
-    "validated rust-src archive did not maintain its cache exactly once",
+    "successful rust-src fetch did not maintain its cache exactly once",
   );
   store.dispose();
 });
@@ -166,7 +132,6 @@ Deno.test("sysroot store evicts failed and aborted prefetches for retry", async 
       }
       return Promise.resolve(new Uint8Array([7]));
     },
-    parseEntries: async () => [],
   });
 
   const failed = await store
@@ -197,7 +162,6 @@ Deno.test("sysroot store emits exact read progress and releases final buffer", a
   const progress: SysrootArchiveProgress[] = [];
   const store = new SysrootArchiveStore({
     loadBytes: async () => bytes,
-    parseEntries: async () => [],
   });
   store.subscribe((event) => progress.push(event));
 
@@ -245,7 +209,6 @@ Deno.test("beginRead resets a triple and switching triples cannot inherit an off
   ]);
   const store = new SysrootArchiveStore({
     loadBytes: async (triple) => archives.get(triple)!,
-    parseEntries: async () => [coreEntry()],
     maintainRustSrcCache: () => {},
   });
   await store.prefetch(
@@ -277,7 +240,6 @@ Deno.test("beginRead resets a triple and switching triples cannot inherit an off
 Deno.test("sysroot store read completion waits for extraction and preserves abort", async () => {
   const store = new SysrootArchiveStore({
     loadBytes: async () => new Uint8Array([1, 2]),
-    parseEntries: async () => [],
   });
   const controller = new AbortController();
   await store.prefetch(["wasm32-wasip2"], controller.signal);
@@ -326,7 +288,6 @@ Deno.test("disposing a sysroot store aborts loads and clears archives", async ()
         );
       });
     },
-    parseEntries: async () => [],
   });
   const prefetch = store.prefetch(
     ["wasm32-wasip1"],

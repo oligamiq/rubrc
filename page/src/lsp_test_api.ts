@@ -9,6 +9,7 @@ import {
   captureLspTestGeneration,
   type LspTestGenerationState,
   type RuntimeTestState,
+  type StartupTestState,
 } from "./lsp_test_api_state";
 import type { AppRuntime, AppRuntimeState } from "./app_runtime.ts";
 import type { AppRuntimeLifecycleEvent } from "./app_runtime.ts";
@@ -107,15 +108,14 @@ export function recordRuntimeRemountPhase(
 ): void {
   if (!enabled) return;
   window.__rubrcLspTest ??= { ready: false, vfsWrites: [] };
-  const disposeError = phase === "disposing"
-    ? undefined
-    : window.__rubrcLspTest.remount?.disposeError;
+  const disposeError =
+    phase === "disposing"
+      ? undefined
+      : window.__rubrcLspTest.remount?.disposeError;
   window.__rubrcLspTest.remount = {
     phase,
     ...(disposeError === undefined ? {} : { disposeError }),
-    ...(error === undefined
-      ? {}
-      : { error: formatRuntimeTestError(error) }),
+    ...(error === undefined ? {} : { error: formatRuntimeTestError(error) }),
   };
 }
 
@@ -127,11 +127,12 @@ export function formatRuntimeTestError(
   if (!(error instanceof Error)) return String(error);
   seen.add(error);
   const label = `${error.name}: ${error.message}`;
-  const nested = error instanceof AggregateError
-    ? error.errors
-    : error.cause === undefined
-    ? []
-    : [error.cause];
+  const nested =
+    error instanceof AggregateError
+      ? error.errors
+      : error.cause === undefined
+        ? []
+        : [error.cause];
   return nested.length === 0
     ? label
     : `${label} [${nested.map((item) => formatRuntimeTestError(item, seen)).join(", ")}]`;
@@ -155,11 +156,7 @@ export function recordRuntimeMountFailure(failure: {
   window.__rubrcLspTest.mountFailure = { ...failure };
 }
 
-export function bindRuntimeTestControls<
-  TMonaco,
-  TEditor,
-  TModel,
->(
+export function bindRuntimeTestControls<TMonaco, TEditor, TModel>(
   state: LspTestGenerationState<TMonaco, TEditor, TModel>,
   record: ReturnType<
     typeof captureLspTestGeneration<TMonaco, TEditor, TModel>
@@ -354,9 +351,35 @@ export function recordCargoHostCall(): void {
       state.startup.phase === "project-activating" ||
       state.startup.phase === "semantic-warming" ||
       state.startup.phase === "ready"
-    ) return;
+    )
+      return;
     state.startup.cargoCallsBeforeProjectActivation++;
   });
+}
+
+export function createStartupTestState(
+  previous: StartupTestState | undefined,
+  snapshot: StartupSnapshot,
+): StartupTestState {
+  const projectProgress =
+    snapshot.tasks.find((task) => task.id === "project")?.projectProgress ??
+    previous?.projectProgress;
+  const history = previous?.history ?? [];
+
+  return {
+    phase: snapshot.phase,
+    history:
+      history.at(-1) === snapshot.phase
+        ? [...history]
+        : [...history, snapshot.phase],
+    overlayVisible: snapshot.phase !== "ready",
+    crateGraphReady: previous?.crateGraphReady ?? false,
+    diagnosticsVersion: previous?.diagnosticsVersion,
+    inlayHintVersion: previous?.inlayHintVersion,
+    cargoCallsBeforeProjectActivation:
+      previous?.cargoCallsBeforeProjectActivation ?? 0,
+    ...(projectProgress === undefined ? {} : { projectProgress }),
+  };
 }
 
 export function recordStartupTestState(
@@ -365,20 +388,7 @@ export function recordStartupTestState(
 ): void {
   if (!enabled) return;
   generation.record((state) => {
-    const previous = state.startup;
-    const history = previous?.history ?? [];
-    state.startup = {
-      phase: snapshot.phase,
-      history: history.at(-1) === snapshot.phase
-        ? [...history]
-        : [...history, snapshot.phase],
-      overlayVisible: snapshot.phase !== "ready",
-      crateGraphReady: previous?.crateGraphReady ?? false,
-      diagnosticsVersion: previous?.diagnosticsVersion,
-      inlayHintVersion: previous?.inlayHintVersion,
-      cargoCallsBeforeProjectActivation:
-        previous?.cargoCallsBeforeProjectActivation ?? 0,
-    };
+    state.startup = createStartupTestState(state.startup, snapshot);
   });
 }
 

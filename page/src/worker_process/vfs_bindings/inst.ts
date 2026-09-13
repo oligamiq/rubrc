@@ -4,12 +4,13 @@ import {
   type SysrootArchiveMetaResponse,
   validateExactSysrootChunk,
 } from "../../sysroot_protocol.ts";
+import { traceVfsHostCall } from "../../vfs_debug_trace.ts";
 import { createChildProcessImports } from "./child_process_import.ts";
 import { createHttpImports } from "./http_import.ts";
-import { type ImportObject, instantiate } from "./vfs.js";function snakeToCamel(snakeCaseString) {
+import { type ImportObject, type Root, instantiate } from "./vfs.js";function snakeToCamel(snakeCaseString: string) {
 	return snakeCaseString
 		.toLowerCase()
-		.replace(/_([a-z])/g, (match, letter) => letter.toUpperCase());
+		.replace(/_([a-z])/g, (_match: string, letter: string) => letter.toUpperCase());
 }
 
 // call_unknown_fn serializes Uint8Array as plain objects {0: v, 1: v, ...}.
@@ -31,6 +32,23 @@ function _toUint8Array(data: unknown): Uint8Array {
 	return new Uint8Array();
 }
 
+type VfsInstanceExports = WebAssembly.Exports & {
+	memory: WebAssembly.Memory;
+	_start: () => unknown;
+	wasi_thread_start: (tid: number, arg: number) => unknown;
+};
+
+export type VfsInstance = WebAssembly.Instance & Root & {
+	exports: VfsInstanceExports;
+};
+
+const tracedHostCallNames = new Set([
+  "sysrootStartFetch",
+  "sysrootArchiveGetMeta",
+  "sysrootReadArchiveChunk",
+  "hostRunCargo",
+]);
+
 export const custom_instantiate = async (
 	wasm_module: WebAssembly.Module,
 	wasiImport: {
@@ -45,15 +63,36 @@ export const custom_instantiate = async (
   call_unknown_fn: (idx: number, unknown: unknown) => unknown = (idx, unknown) => {
     console.warn("call_unknown_fn is not set", idx, unknown);
   },
-): Promise<WebAssembly.Instance> => {
-	const imports = {};
+): Promise<VfsInstance> => {
+  const debugTraceEnabled = import.meta.env.VITE_RUBRC_LSP_TEST === "1";
+  let hostCallId = 0;
+  const tracedCallUnknownFn = (idx: number, unknown: unknown): unknown => {
+    const name =
+      typeof unknown === "object" && unknown !== null
+        ? (unknown as { name?: unknown }).name
+        : undefined;
+    if (
+      debugTraceEnabled &&
+      typeof name === "string" &&
+      tracedHostCallNames.has(name)
+    ) {
+      return traceVfsHostCall(
+        ++hostCallId,
+        name,
+        (line) => console.debug("[vfs-stall-trace]", line),
+        () => call_unknown_fn(idx, unknown),
+      );
+    }
+    return call_unknown_fn(idx, unknown);
+  };
+	const imports: Record<string, (...args: unknown[]) => unknown> = {};
 	for (const key in wasiImport) {
 		const inner_key = `${snakeToCamel(key)}Import`;
 		imports[inner_key] = wasiImport[key];
 	}
 
 	const threadSpawnImports = {
-		threadSpawnImport: (start_arg) => {
+		threadSpawnImport: (start_arg: number) => {
 			const tid = wasiThreadImport["thread-spawn"](start_arg);
 			return tid;
 		},
@@ -104,13 +143,13 @@ export const custom_instantiate = async (
             const bytes = new Uint8Array(view); // copy
             const triple = new TextDecoder().decode(bytes);
             console.log("Sysroot fetch start", { triple });
-            call_unknown_fn(0, {
+            tracedCallUnknownFn(0, {
               name: "sysrootStartFetch",
               args: { triple },
             });
           },
           sysrootGetArchiveMeta: (data_len_ptr: number): number => {
-            const res = call_unknown_fn(0, {
+            const res = tracedCallUnknownFn(0, {
               name: "sysrootArchiveGetMeta",
               args: {},
             }) as SysrootArchiveMetaResponse;
@@ -124,7 +163,7 @@ export const custom_instantiate = async (
             return status;
           },
           sysrootReadArchiveChunk: (data_ptr: number, chunk_len: number): void => {
-            const res = call_unknown_fn(0, {
+            const res = tracedCallUnknownFn(0, {
               name: "sysrootReadArchiveChunk",
               args: { chunk_len },
             }) as { chunk: unknown };
@@ -152,7 +191,7 @@ export const custom_instantiate = async (
           hostRunCargo: (req_ptr: number, req_len: number, out_stdout_ptr: number, out_stdout_len: number, out_stderr_ptr: number, out_stderr_len: number, out_status: number): number => {
             const view = new Uint8Array(memory.memory.buffer, req_ptr >>> 0, req_len >>> 0);
             const req = new TextDecoder().decode(view);
-            const res = call_unknown_fn(0, {
+            const res = tracedCallUnknownFn(0, {
               name: "hostRunCargo",
               args: { req },
             }) as { stdout: unknown, stderr: unknown, status: number };
@@ -189,7 +228,7 @@ export const custom_instantiate = async (
           }
         }
       },
-		} as ImportObject,
+		} as unknown as ImportObject,
 		async (module, imports) => {
 			imports.env = {
 				...memory,
@@ -200,40 +239,32 @@ export const custom_instantiate = async (
 		},
 	);
 
-	if (inst === undefined) {
+	const coreInstance = inst as WebAssembly.Instance | undefined;
+	if (coreInstance === undefined) {
 		throw new Error("inst is not an instance");
 	}
-	inst = inst as WebAssembly.Instance;
+	const coreExports = coreInstance.exports as WebAssembly.Exports & {
+		memory: WebAssembly.Memory;
+	};
 
 	const fake = {
 		exports: {
-			memory: inst.exports.memory as WebAssembly.Memory,
+			memory: coreExports.memory,
 			_start: () => {
-				// init only
-				if (root.main) {
-					root.main();
-				} else if (root._start) {
-					root._start();
-				} else if (inst.exports._start) {
-					(inst.exports._start as Function)();
-				} else if (inst.exports.main) {
-					(inst.exports.main as Function)();
-				}
+				root.main();
 				console.log("[WASI main] done.");
 			},
-			wasi_thread_start: (tid, arg) => {
+			wasi_thread_start: (tid: number, arg: number) => {
 				console.log("[WASI wasi_thread_start] tid", tid, "arg", arg);
 				root.virtualFileSystemWasip1ThreadsExport.wasiThreadStart(tid, arg);
 			},
 		},
-	};
+	} as VfsInstance;
 
-    for (const key in root) {
-        if (typeof root[key] !== "function") {
-            continue;
-        }
-        fake[key] = root[key].bind(root);
-    }
+	for (const [key, value] of Object.entries(root)) {
+		(fake as unknown as Record<string, unknown>)[key] =
+			typeof value === "function" ? value.bind(root) : value;
+	}
 
 	return fake;
 };

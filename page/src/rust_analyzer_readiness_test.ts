@@ -1,4 +1,7 @@
-import { RustAnalyzerReadiness } from "./rust_analyzer_readiness.ts";
+import {
+  type CrateGraphProgress,
+  RustAnalyzerReadiness,
+} from "./rust_analyzer_readiness.ts";
 
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
@@ -37,7 +40,8 @@ Deno.test("crate graph recognizes exact RA node labels only", async () => {
       '  _1[label="core"][shape="box"];\n' +
       '  _2[label="alloc"][shape="box"];\n' +
       '  _3[label="std"][shape="box"];\n' +
-      '  _0 -> _1 [label="core", color="blue"];',
+      '  _0 -> _1 [label="core", color="blue"];\n' +
+      '  _0 -> _3 [label="std", color="blue"];',
   );
   let requests = 0;
   let now = 0;
@@ -65,6 +69,9 @@ Deno.test("crate graph recognizes exact RA node labels only", async () => {
 
 Deno.test("crate graph polling requires main, core, alloc, and std in the full graph", async () => {
   const responses = [
+    graph(""),
+    graph(mainNode),
+    graph(`${mainNode}\n${coreNode}`),
     graph(`${coreNode}\n${allocNode}\n${stdNode}`),
     graph(`${mainNode}\n${allocNode}\n${stdNode}`),
     graph(`${mainNode}\n${coreNode}\n${stdNode}`),
@@ -85,11 +92,12 @@ Deno.test("crate graph polling requires main, core, alloc, and std in the full g
 
   await readiness.waitForCrateGraph(new AbortController().signal);
 
-  assert(requests.length === 5, `resolved after ${requests.length} polls`);
+  assert(requests.length === 8, `resolved after ${requests.length} polls`);
   assert(
-    requests.every((request) =>
-      request.method === "rust-analyzer/viewCrateGraph" &&
-      JSON.stringify(request.params) === JSON.stringify({ full: true })
+    requests.every(
+      (request) =>
+        request.method === "rust-analyzer/viewCrateGraph" &&
+        JSON.stringify(request.params) === JSON.stringify({ full: true }),
     ),
     `wrong graph request: ${JSON.stringify(requests)}`,
   );
@@ -111,6 +119,155 @@ Deno.test("crate graph retries only ContentModified request failures", async () 
 
   await readiness.waitForCrateGraph(new AbortController().signal);
   assert(requests === 2, `crate graph issued ${requests} requests`);
+});
+
+Deno.test("crate graph progress numbers attempts and filters required labels in stable order", async () => {
+  let now = 100;
+  const responses = [
+    graph(`${stdNode}\n  _4 [label="serde"];\n${coreNode}`),
+    graph(
+      `${stdNode}\n${allocNode}\n${mainNode}\n${coreNode}\n` +
+        '  _4 [label="serde"];',
+    ),
+  ];
+  const progress: CrateGraphProgress[] = [];
+  const readiness = new RustAnalyzerReadiness(
+    {
+      async sendRequest<R>(): Promise<R> {
+        return responses.shift() as R;
+      },
+    },
+    uri,
+    {
+      now: () => now,
+      sleep: async () => {
+        now += 5_000;
+      },
+      timeoutMs: 20_000,
+    },
+  );
+
+  await readiness.waitForCrateGraph(new AbortController().signal, (event) =>
+    progress.push(event),
+  );
+
+  assert(progress.length === 2, `emitted ${progress.length} progress events`);
+  assert(progress[0].attempt === 1, "first attempt was not numbered one");
+  assert(progress[1].attempt === 2, "second attempt was not numbered two");
+  assert(
+    progress[0].elapsedMs === 0,
+    `wrong first elapsed: ${progress[0].elapsedMs}`,
+  );
+  assert(
+    progress[1].elapsedMs === 5_000,
+    `wrong second elapsed: ${progress[1].elapsedMs}`,
+  );
+  assert(
+    progress[0].remainingMs === 20_000 && progress[1].remainingMs === 15_000,
+    `wrong remaining times: ${progress.map((event) => event.remainingMs)}`,
+  );
+  assert(
+    progress[0].labels.join(",") === "core,std",
+    `unstable partial labels: ${progress[0].labels}`,
+  );
+  assert(
+    progress[1].labels.join(",") === "rubrc_main,core,alloc,std",
+    `unstable ready labels: ${progress[1].labels}`,
+  );
+  assert(!progress[0].ready, "partial graph was reported ready");
+  assert(progress[1].ready, "complete graph was reported incomplete");
+  assert(Object.isFrozen(progress[0]), "progress event is mutable");
+  assert(Object.isFrozen(progress[0].labels), "progress labels are mutable");
+});
+
+Deno.test("ContentModified emits incomplete crate graph progress before retry", async () => {
+  let requests = 0;
+  let now = 0;
+  const progress: CrateGraphProgress[] = [];
+  const readiness = new RustAnalyzerReadiness(
+    {
+      async sendRequest<R>(): Promise<R> {
+        requests++;
+        if (requests === 1) throw { code: -32801, message: "Content modified" };
+        return graph(`${mainNode}\n${coreNode}\n${allocNode}\n${stdNode}`) as R;
+      },
+    },
+    uri,
+    {
+      now: () => now,
+      sleep: async () => {
+        now += 5_000;
+      },
+      timeoutMs: 20_000,
+    },
+  );
+
+  await readiness.waitForCrateGraph(new AbortController().signal, (event) =>
+    progress.push(event),
+  );
+
+  assert(requests === 2, `issued ${requests} graph requests`);
+  assert(progress.length === 2, `emitted ${progress.length} progress events`);
+  assert(
+    progress[0].attempt === 1 &&
+      progress[0].labels.length === 0 &&
+      !progress[0].ready,
+    `wrong ContentModified progress: ${JSON.stringify(progress[0])}`,
+  );
+  assert(
+    progress[1].attempt === 2 && progress[1].ready,
+    "retry did not report readiness",
+  );
+});
+
+Deno.test("crate graph progress observer failures cannot interrupt readiness", async () => {
+  let requests = 0;
+  const readiness = new RustAnalyzerReadiness(
+    {
+      async sendRequest<R>(): Promise<R> {
+        requests++;
+        return graph(
+          requests === 1
+            ? mainNode
+            : `${mainNode}\n${coreNode}\n${allocNode}\n${stdNode}`,
+        ) as R;
+      },
+    },
+    uri,
+    { sleep: async () => {} },
+  );
+
+  await readiness.waitForCrateGraph(new AbortController().signal, () => {
+    throw new Error("observer failed");
+  });
+
+  assert(
+    requests === 2,
+    `observer stopped readiness after ${requests} requests`,
+  );
+});
+
+Deno.test("ordinary crate graph failures do not emit progress", async () => {
+  const expected = new Error("crate graph request failed");
+  let events = 0;
+  const readiness = new RustAnalyzerReadiness(
+    {
+      async sendRequest(): Promise<never> {
+        throw expected;
+      },
+    },
+    uri,
+  );
+
+  const caught = await readiness
+    .waitForCrateGraph(new AbortController().signal, () => events++)
+    .then(
+      () => undefined,
+      (error) => error,
+    );
+
+  assert(caught === expected, "ordinary graph error identity changed");
+  assert(events === 0, `ordinary error emitted ${events} progress events`);
 });
 
 Deno.test("semantic readiness rejects pre-graph diagnostics and converts the full range", async () => {
@@ -160,19 +317,20 @@ Deno.test("semantic readiness rejects pre-graph diagnostics and converts the ful
     new AbortController().signal,
   );
 
-  const hints = requests.filter((request) =>
-    request.method === "textDocument/inlayHint"
+  const hints = requests.filter(
+    (request) => request.method === "textDocument/inlayHint",
   );
   assert(sleeps === 2, `pre-graph diagnostics counted after ${sleeps} sleeps`);
   assert(hints.length === 1, `issued ${hints.length} hint requests`);
   assert(
-    JSON.stringify(hints[0].params) === JSON.stringify({
-      textDocument: { uri },
-      range: {
-        start: { line: 0, character: 0 },
-        end: { line: 3, character: 8 },
-      },
-    }),
+    JSON.stringify(hints[0].params) ===
+      JSON.stringify({
+        textDocument: { uri },
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 3, character: 8 },
+        },
+      }),
     `wrong hint range: ${JSON.stringify(hints[0].params)}`,
   );
 });
@@ -582,7 +740,7 @@ Deno.test("abort and dispose promptly interrupt pending sleeps", async () => {
 Deno.test("abort interrupts a never-settling inlay-hint request", async () => {
   const controller = new AbortController();
   let inlayStarted!: () => void;
-  const started = new Promise<void>((resolve) => inlayStarted = resolve);
+  const started = new Promise<void>((resolve) => (inlayStarted = resolve));
   const readiness = new RustAnalyzerReadiness(
     {
       async sendRequest<R>(method: string): Promise<R> {

@@ -27,8 +27,6 @@ export async function pruneRustSrcCacheVariants(
   dependencies: RustSrcCacheDependencies,
 ): Promise<void> {
   try {
-    const cacheStorage = dependencies.cacheStorage;
-    if (!cacheStorage) return;
     const current = new URL(
       archiveUrl,
       typeof location === "undefined"
@@ -36,6 +34,10 @@ export async function pruneRustSrcCacheVariants(
         : location.href,
     );
     const currentBuildEpoch = cacheBuildEpoch(current);
+    if (currentBuildEpoch === undefined || currentBuildEpoch <= 0) return;
+
+    const cacheStorage = dependencies.cacheStorage;
+    if (!cacheStorage) return;
     const cache = await cacheStorage.open("rubrc-assets-v1");
     const requests = await cache.keys();
     const metadataUrl = new URL(".rubrc-pages-build.json", current);
@@ -43,6 +45,19 @@ export async function pruneRustSrcCacheVariants(
       cache: "no-store",
     });
     if (!response.ok) return;
+    const contentType = response.headers
+      .get("content-type")
+      ?.split(";", 1)[0]
+      .trim()
+      .toLowerCase();
+    if (
+      contentType !== "application/json" &&
+      !(
+        contentType?.startsWith("application/") && contentType.endsWith("+json")
+      )
+    ) {
+      return;
+    }
     const metadata: unknown = await response.json();
     if (
       typeof metadata !== "object" ||

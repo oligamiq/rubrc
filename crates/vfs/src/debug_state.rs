@@ -33,6 +33,8 @@ pub fn is_lifecycle_event(event: &str) -> bool {
         || event.starts_with("debug-reserve-self:")
         || event.starts_with("debug-reserve-rustc:")
         || event.starts_with("write_cargo_result: stdout=")
+        || event.starts_with("memory:target=")
+        || event.starts_with("lsp:")
 }
 
 #[derive(Clone, Copy)]
@@ -71,6 +73,7 @@ pub struct DebugState {
     limit: usize,
     dropped_events: usize,
     ra_boundary_dropped: usize,
+    lsp_pages: usize,
     cargo: Option<usize>,
     rustc: Option<usize>,
     stdout: Option<PipeState>,
@@ -86,6 +89,7 @@ impl DebugState {
             limit,
             dropped_events: 0,
             ra_boundary_dropped: 0,
+            lsp_pages: 0,
             cargo: None,
             rustc: None,
             stdout: None,
@@ -127,6 +131,10 @@ impl DebugState {
 
     pub fn set_ra_boundary_dropped(&mut self, dropped: usize) {
         self.ra_boundary_dropped = dropped;
+    }
+
+    pub fn set_lsp_pages(&mut self, pages: usize) {
+        self.lsp_pages = pages;
     }
 
     pub fn drain(&mut self, max_bytes: usize) -> Vec<u8> {
@@ -196,7 +204,7 @@ impl DebugState {
         let stdout = self.stdout.unwrap_or_default();
         let stderr = self.stderr.unwrap_or_default();
         format!(
-            "snapshot cargo={} rustc={} stdout_id={} stdout_bytes={} stdout_eof={} stderr_id={} stderr_bytes={} stderr_eof={} wait={} dropped_events={} ra_boundary_dropped={} capacity={} worker_count={} queued_task_count={} in_flight_runs={} run_enqueued={} run_started={} run_completed={} add_thread_requested={} add_thread_completed={} add_thread_disconnected={} terminate_requested={} terminate_completed={} terminate_disconnected={}",
+            "snapshot cargo={} rustc={} stdout_id={} stdout_bytes={} stdout_eof={} stderr_id={} stderr_bytes={} stderr_eof={} wait={} dropped_events={} ra_boundary_dropped={} lsp_pages={} capacity={} worker_count={} queued_task_count={} in_flight_runs={} run_enqueued={} run_started={} run_completed={} add_thread_requested={} add_thread_completed={} add_thread_disconnected={} terminate_requested={} terminate_completed={} terminate_disconnected={}",
             Self::optional_id(self.cargo),
             Self::optional_id(self.rustc),
             Self::optional_pipe_id(self.stdout, stdout.invocation_id),
@@ -208,6 +216,7 @@ impl DebugState {
             self.wait.as_deref().unwrap_or("none"),
             self.dropped_events,
             self.ra_boundary_dropped,
+            self.lsp_pages,
             thread_pool.capacity,
             thread_pool.worker_count,
             Self::optional_count(thread_pool.queued_task_count),
@@ -236,7 +245,7 @@ impl DebugState {
         let stdout = self.stdout.unwrap_or_default();
         let stderr = self.stderr.unwrap_or_default();
         format!(
-            "snapshot cargo={} rustc={} stdout_id={} stdout_bytes={} stdout_eof={} stderr_id={} stderr_bytes={} stderr_eof={} wait={} dropped_events={} ra_boundary_dropped={} thread_pool={thread_pool_status}",
+            "snapshot cargo={} rustc={} stdout_id={} stdout_bytes={} stdout_eof={} stderr_id={} stderr_bytes={} stderr_eof={} wait={} dropped_events={} ra_boundary_dropped={} lsp_pages={} thread_pool={thread_pool_status}",
             Self::optional_id(self.cargo),
             Self::optional_id(self.rustc),
             Self::optional_pipe_id(self.stdout, stdout.invocation_id),
@@ -248,6 +257,7 @@ impl DebugState {
             self.wait.as_deref().unwrap_or("none"),
             self.dropped_events,
             self.ra_boundary_dropped,
+            self.lsp_pages,
         )
     }
 
@@ -415,6 +425,9 @@ mod tests {
             "host-cargo:reject id=42 status=1",
             "host-run-cargo:cargo:run_cargo id=41",
             "debug-rustc:return run=4",
+            "memory:target=lsp_opt action=reserve current=64 minimum=4096 requested=4096 result=4096",
+            "lsp:thread:start",
+            "lsp:_main:enter",
         ] {
             assert!(
                 is_lifecycle_event(event),
@@ -434,6 +447,17 @@ mod tests {
     }
 
     #[test]
+    fn wait_snapshots_sample_lsp_own_memory_pages() {
+        let source = include_str!("lib.rs");
+        assert_eq!(
+            source
+                .matches("state.set_lsp_pages(memory_size::<lsp_opt>() as usize);")
+                .count(),
+            3,
+        );
+    }
+
+    #[test]
     fn matching_returns_clear_active_lifecycle_state() {
         let mut state = DebugState::new(1024);
         state.cargo_enter(7);
@@ -444,6 +468,7 @@ mod tests {
         state.cargo_return(8);
         state.rustc_return(12);
         let active = state.snapshot_line(ThreadPoolState::default());
+        assert!(active.contains("lsp_pages=0"));
         assert!(active.contains("cargo=7"));
         assert!(active.contains("rustc=11"));
         assert!(active.contains("stdout_bytes=24"));

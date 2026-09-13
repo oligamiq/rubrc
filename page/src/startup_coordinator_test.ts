@@ -1,5 +1,6 @@
 // deno-lint-ignore-file require-await
 
+import type { CrateGraphProgress } from "./rust_analyzer_readiness.ts";
 import {
   type StagedAnalyzerSession,
   StartupCoordinator,
@@ -31,11 +32,29 @@ const tick = async () => {
   await Promise.resolve();
 };
 
+const crateProgress = (
+  attempt: number,
+  labels: readonly string[],
+  ready = false,
+): CrateGraphProgress =>
+  Object.freeze({
+    attempt,
+    elapsedMs: attempt * 5_000,
+    remainingMs: 300_000 - attempt * 5_000,
+    labels: Object.freeze([...labels]),
+    ready,
+  });
+
 const fakeSession = (
   order: string[] = [],
   overrides: Partial<StagedAnalyzerSession> = {},
 ): StagedAnalyzerSession => ({
-  async activateProject(_model, _signal, semanticWarming) {
+  async activateProject(
+    _model,
+    _signal,
+    semanticWarming,
+    _reportProjectProgress,
+  ) {
     order.push("activate:start");
     semanticWarming();
     order.push("activate:ready");
@@ -178,7 +197,7 @@ Deno.test("synchronous startup dependency throws keep both branches observed", a
   );
   vfs.reject(lateVfsError);
   assert(
-    await started === lateVfsError,
+    (await started) === lateVfsError,
     "synchronous prefetch throw abandoned or reordered the VFS branch",
   );
 });
@@ -203,17 +222,17 @@ Deno.test("coordinator publishes immutable progress and ignores stale callbacks"
     },
   });
 
-  const started = coordinator.start({ getValue: () => "edited" }).catch((
-    error,
-  ) => error);
+  const started = coordinator
+    .start({ getValue: () => "edited" })
+    .catch((error) => error);
   const beforeProgress = coordinator.snapshot();
   reportProgress("rust-src", 35);
   const afterProgress = coordinator.snapshot();
-  const oldRustSrc = beforeProgress.tasks.find((task) =>
-    task.id === "rust-src"
+  const oldRustSrc = beforeProgress.tasks.find(
+    (task) => task.id === "rust-src",
   );
-  const currentRustSrc = afterProgress.tasks.find((task) =>
-    task.id === "rust-src"
+  const currentRustSrc = afterProgress.tasks.find(
+    (task) => task.id === "rust-src",
   );
 
   assert(
@@ -236,8 +255,8 @@ Deno.test("coordinator publishes immutable progress and ignores stale callbacks"
     "progress task was not running",
   );
   for (const oldTask of beforeProgress.tasks) {
-    const currentTask = afterProgress.tasks.find((task) =>
-      task.id === oldTask.id
+    const currentTask = afterProgress.tasks.find(
+      (task) => task.id === oldTask.id,
     );
     assert(
       Object.isFrozen(currentTask),
@@ -261,6 +280,137 @@ Deno.test("coordinator publishes immutable progress and ignores stale callbacks"
   vfs.resolve();
   await disposal;
   await started;
+});
+
+Deno.test("coordinator publishes project progress and clears it after crate graph activation", async () => {
+  const entered = deferred<void>();
+  const activation = deferred<void>();
+  let semanticWarming!: () => void;
+  let reportProjectProgress!: (progress: CrateGraphProgress) => void;
+  const session = fakeSession([], {
+    async activateProject(_model, _signal, warming, report) {
+      semanticWarming = warming;
+      reportProjectProgress = report;
+      entered.resolve();
+      await activation.promise;
+    },
+  });
+  const coordinator = new StartupCoordinator(immediateDependencies(session));
+  const startup = coordinator.start({ getValue: () => "edited" });
+  await entered.promise;
+
+  const before = coordinator.snapshot();
+  const progress = crateProgress(3, ["rubrc_main", "core"]);
+  reportProjectProgress(progress);
+  const during = coordinator.snapshot();
+  const projectDuring = during.tasks.find((task) => task.id === "project");
+
+  assert(before !== during, "project progress did not publish a snapshot");
+  assert(
+    projectDuring?.projectProgress === progress,
+    "project progress identity changed",
+  );
+  assert(projectDuring?.state === "running", "Project task stopped running");
+
+  semanticWarming();
+  assertEquals(
+    coordinator.snapshot().phase,
+    "semantic-warming",
+    "warming phase missing",
+  );
+  assertEquals(
+    coordinator.snapshot().tasks.find((task) => task.id === "project")
+      ?.projectProgress,
+    undefined,
+    "semantic warming retained crate graph progress",
+  );
+
+  activation.resolve();
+  await startup;
+  assertEquals(coordinator.snapshot().phase, "ready", "startup did not finish");
+  assertEquals(
+    coordinator.snapshot().tasks.find((task) => task.id === "project")
+      ?.projectProgress,
+    undefined,
+    "ready snapshot restored crate graph progress",
+  );
+});
+
+Deno.test("coordinator preserves the last project progress when activation fails", async () => {
+  const original = new Error("crate graph timed out after 300000ms");
+  const progress = crateProgress(24, ["rubrc_main", "core", "alloc"]);
+  const coordinator = new StartupCoordinator(
+    immediateDependencies(
+      fakeSession([], {
+        async activateProject(
+          _model,
+          _signal,
+          _semanticWarming,
+          reportProjectProgress,
+        ) {
+          reportProjectProgress(progress);
+          throw original;
+        },
+      }),
+    ),
+  );
+
+  const caught = await coordinator.start({ getValue: () => "edited" }).then(
+    () => undefined,
+    (error) => error,
+  );
+  const snapshot = coordinator.snapshot();
+  const project = snapshot.tasks.find((task) => task.id === "project");
+
+  assert(caught === original, "activation failure identity changed");
+  assertEquals(snapshot.phase, "failed", "failure phase missing");
+  assertEquals(project?.state, "failed", "Project task did not fail");
+  assert(
+    project?.projectProgress === progress,
+    "failure discarded project progress",
+  );
+  assertEquals(snapshot.error, original.message, "timeout message changed");
+});
+
+Deno.test("coordinator ignores project progress after abort and generation disposal", async () => {
+  for (const cancellation of ["abort", "dispose"] as const) {
+    const entered = deferred<void>();
+    const activation = deferred<void>();
+    let reportProjectProgress!: (progress: CrateGraphProgress) => void;
+    const coordinator = new StartupCoordinator(
+      immediateDependencies(
+        fakeSession([], {
+          async activateProject(_model, _signal, _semanticWarming, report) {
+            reportProjectProgress = report;
+            entered.resolve();
+            await activation.promise;
+          },
+        }),
+      ),
+    );
+    const startup = coordinator
+      .start({ getValue: () => "edited" })
+      .catch(() => {});
+    await entered.promise;
+
+    let disposal: Promise<void> | undefined;
+    if (cancellation === "abort") {
+      coordinator.abort(new Error("startup aborted"));
+    } else {
+      disposal = coordinator.dispose();
+    }
+
+    const cancelledSnapshot = coordinator.snapshot();
+    reportProjectProgress(crateProgress(9, ["rubrc_main", "core"]));
+    assert(
+      coordinator.snapshot() === cancelledSnapshot,
+      `${cancellation} accepted late project progress`,
+    );
+
+    activation.resolve();
+    await startup;
+    await disposal;
+  }
 });
 
 Deno.test("coordinator preserves startup failures and disposes the session", async () => {
@@ -300,11 +450,13 @@ Deno.test("unformattable failures cannot bypass analyzer disposal", async () => 
   const original = Object.create(null);
   let disposed = false;
   const coordinator = new StartupCoordinator({
-    ...immediateDependencies(fakeSession([], {
-      async dispose() {
-        disposed = true;
-      },
-    })),
+    ...immediateDependencies(
+      fakeSession([], {
+        async dispose() {
+          disposed = true;
+        },
+      }),
+    ),
     async installSysroots() {
       throw original;
     },
@@ -467,15 +619,13 @@ Deno.test("late callbacks cannot overwrite a failed snapshot", async () => {
 });
 
 Deno.test("coordinator checks cancellation after each phase await", async () => {
-  for (
-    const checkpoint of [
-      "vfs",
-      "analyzer",
-      "prefetch",
-      "install",
-      "activate",
-    ] as const
-  ) {
+  for (const checkpoint of [
+    "vfs",
+    "analyzer",
+    "prefetch",
+    "install",
+    "activate",
+  ] as const) {
     const order: string[] = [];
     const vfs = deferred<void>();
     const prefetch = deferred<void>();
@@ -515,9 +665,9 @@ Deno.test("coordinator checks cancellation after each phase await", async () => 
       },
     });
 
-    const startup = coordinator.start({ getValue: () => "edited" }).catch(
-      () => {},
-    );
+    const startup = coordinator
+      .start({ getValue: () => "edited" })
+      .catch(() => {});
     if (checkpoint === "vfs") {
       await vfsEntered.promise;
     } else {
@@ -552,22 +702,23 @@ Deno.test("coordinator checks cancellation after each phase await", async () => 
       checkpoint === "analyzer"
         ? "vfs"
         : checkpoint === "prefetch"
-        ? "prefetch"
-        : checkpoint === "activate"
-        ? "activate"
-        : checkpoint
+          ? "prefetch"
+          : checkpoint === "activate"
+            ? "activate"
+            : checkpoint
     ].resolve();
     if (checkpoint === "analyzer") analyzer.resolve(session);
     await startup;
     await disposal;
 
-    const forbidden = checkpoint === "vfs"
-      ? "analyzer"
-      : checkpoint === "analyzer" || checkpoint === "prefetch"
-      ? "install"
-      : checkpoint === "install"
-      ? "activate"
-      : undefined;
+    const forbidden =
+      checkpoint === "vfs"
+        ? "analyzer"
+        : checkpoint === "analyzer" || checkpoint === "prefetch"
+          ? "install"
+          : checkpoint === "install"
+            ? "activate"
+            : undefined;
     assert(
       forbidden === undefined || !order.includes(forbidden),
       `${checkpoint} cancellation continued into ${forbidden}: ${order}`,
@@ -642,24 +793,26 @@ Deno.test("dispose reports late session cleanup failure", async () => {
       throw new Error("installation must not start after disposal");
     },
   });
-  const startup = coordinator.start({ getValue: () => "edited" }).catch(
-    () => {},
-  );
+  const startup = coordinator
+    .start({ getValue: () => "edited" })
+    .catch(() => {});
   await analyzerEntered.promise;
 
   const disposal = coordinator.dispose().then(
     () => undefined,
     (error) => error,
   );
-  analyzer.resolve(fakeSession([], {
-    async dispose() {
-      throw cleanupError;
-    },
-  }));
+  analyzer.resolve(
+    fakeSession([], {
+      async dispose() {
+        throw cleanupError;
+      },
+    }),
+  );
 
   await startup;
   assert(
-    await disposal === cleanupError,
+    (await disposal) === cleanupError,
     "dispose swallowed the late cleanup failure",
   );
 });

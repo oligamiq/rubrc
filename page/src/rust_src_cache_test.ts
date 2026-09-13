@@ -4,27 +4,24 @@ const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
 };
 
-const archiveUrl =
-  "https://example.test/rubrc/rust-src.tar.vfsbr?v=new&build=10";
+const archiveUrl = "https://example.test/rubrc/rust-src.sqfs?v=new&build=10";
 
 function dependencies(sourceSha: string | Error, buildEpoch = 10) {
   const deleted: string[] = [];
   const requests = [
-    new Request("https://example.test/rubrc/rust-src.tar.vfsbr"),
-    new Request("https://example.test/rubrc/rust-src.tar.vfsbr?v=legacy"),
-    new Request("https://example.test/rubrc/rust-src.tar.vfsbr?v=old&build=9"),
+    new Request("https://example.test/rubrc/rust-src.sqfs"),
+    new Request("https://example.test/rubrc/rust-src.sqfs?v=legacy"),
+    new Request("https://example.test/rubrc/rust-src.sqfs?v=old&build=9"),
     new Request(archiveUrl),
     new Request(
-      "https://example.test/rubrc/rust-src.tar.vfsbr?v=same-epoch&build=10",
+      "https://example.test/rubrc/rust-src.sqfs?v=same-epoch&build=10",
     ),
+    new Request("https://example.test/rubrc/rust-src.sqfs?v=newer&build=11"),
     new Request(
-      "https://example.test/rubrc/rust-src.tar.vfsbr?v=newer&build=11",
-    ),
-    new Request(
-      "https://example.test/rubrc/rust-src.tar.vfsbr?v=malformed&build=nope",
+      "https://example.test/rubrc/rust-src.sqfs?v=malformed&build=nope",
     ),
     new Request("https://example.test/rubrc/other.wasm?v=old&build=9"),
-    new Request("https://other.test/rubrc/rust-src.tar.vfsbr?v=old&build=9"),
+    new Request("https://other.test/rubrc/rust-src.sqfs?v=old&build=9"),
   ];
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
   return {
@@ -48,7 +45,10 @@ function dependencies(sourceSha: string | Error, buildEpoch = 10) {
         if (sourceSha instanceof Error) throw sourceSha;
         return new Response(
           JSON.stringify({ version: 1, sourceSha, buildEpoch }),
-          { status: 200 },
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json; charset=utf-8" },
+          },
         );
       },
       reportError: (_error: unknown) => {},
@@ -71,7 +71,7 @@ Deno.test("matching deployment prunes only older same-path variants", async () =
   );
   assert(
     test.deleted.join(",") ===
-      "https://example.test/rubrc/rust-src.tar.vfsbr,https://example.test/rubrc/rust-src.tar.vfsbr?v=legacy,https://example.test/rubrc/rust-src.tar.vfsbr?v=old&build=9",
+      "https://example.test/rubrc/rust-src.sqfs,https://example.test/rubrc/rust-src.sqfs?v=legacy,https://example.test/rubrc/rust-src.sqfs?v=old&build=9",
     `wrong cache entries deleted: ${test.deleted}`,
   );
 });
@@ -79,14 +79,14 @@ Deno.test("matching deployment prunes only older same-path variants", async () =
 Deno.test("older metadata never deletes a newer revision already in the snapshot", async () => {
   const deleted: string[] = [];
   const oldArchiveUrl =
-    "https://example.test/rubrc/rust-src.tar.vfsbr?v=old&build=10";
+    "https://example.test/rubrc/rust-src.sqfs?v=old&build=10";
   await pruneRustSrcCacheVariants(oldArchiveUrl, "old", {
     cacheStorage: {
       open: async () => ({
         keys: async () => [
           new Request(oldArchiveUrl),
           new Request(
-            "https://example.test/rubrc/rust-src.tar.vfsbr?v=newer&build=11",
+            "https://example.test/rubrc/rust-src.sqfs?v=newer&build=11",
           ),
         ],
         delete: async (request) => {
@@ -98,6 +98,7 @@ Deno.test("older metadata never deletes a newer revision already in the snapshot
     fetch: async () =>
       new Response(
         JSON.stringify({ version: 1, sourceSha: "old", buildEpoch: 10 }),
+        { headers: { "Content-Type": "application/json" } },
       ),
     reportError: (_error: unknown) => {},
   });
@@ -131,13 +132,18 @@ Deno.test("bad deployment metadata never prunes cache entries", async () => {
     new Response("unavailable", { status: 503 }),
     new Response(JSON.stringify({ version: 2, sourceSha: "new" }), {
       status: 200,
+      headers: { "Content-Type": "application/json" },
     }),
     new Response(JSON.stringify({ version: 1, sourceSha: "new" }), {
       status: 200,
+      headers: { "Content-Type": "application/json" },
     }),
     new Response(
       JSON.stringify({ version: 1, sourceSha: "new", buildEpoch: "10" }),
-      { status: 200 },
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
     ),
   ]) {
     const test = dependencies("new");
@@ -162,4 +168,83 @@ Deno.test("CacheStorage access failures are best-effort", async () => {
     },
   });
   assert(reported === securityError, "CacheStorage failure was not reported");
+});
+
+Deno.test("non-positive current build epochs skip every cache dependency", async () => {
+  for (const url of [
+    "https://example.test/rubrc/rust-src.sqfs",
+    "https://example.test/rubrc/rust-src.sqfs?v=new",
+    "https://example.test/rubrc/rust-src.sqfs?v=new&build=0",
+    "https://example.test/rubrc/rust-src.sqfs?v=new&build=-1",
+    "https://example.test/rubrc/rust-src.sqfs?v=new&build=malformed",
+    "https://example.test/rubrc/rust-src.sqfs?v=new&build=1&build=2",
+  ]) {
+    let dependencyAccessed = false;
+    await pruneRustSrcCacheVariants(url, "new", {
+      get cacheStorage(): never {
+        dependencyAccessed = true;
+        throw new Error("cacheStorage should not be accessed");
+      },
+      fetch: async () => {
+        dependencyAccessed = true;
+        throw new Error("fetch should not be called");
+      },
+      reportError: () => {
+        dependencyAccessed = true;
+      },
+    });
+    assert(!dependencyAccessed, `dependencies were accessed for ${url}`);
+  }
+});
+
+Deno.test("positive epoch HTML metadata fallback is an unreported no-op", async () => {
+  const test = dependencies("new");
+  let reported: unknown;
+  test.value.fetch = async () =>
+    new Response("<!DOCTYPE html><title>Rubrc</title>", {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  test.value.reportError = (error) => {
+    reported = error;
+  };
+
+  await pruneRustSrcCacheVariants(archiveUrl, "new", test.value);
+
+  assert(reported === undefined, `HTML fallback reported ${reported}`);
+  assert(test.deleted.length === 0, "HTML fallback deleted cache entries");
+});
+
+Deno.test("positive epoch application suffix JSON metadata is parsed", async () => {
+  const test = dependencies("new");
+  test.value.fetch = async () =>
+    new Response(
+      JSON.stringify({ version: 1, sourceSha: "new", buildEpoch: 10 }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/merge-patch+json" },
+      },
+    );
+
+  await pruneRustSrcCacheVariants(archiveUrl, "new", test.value);
+
+  assert(test.deleted.length === 3, "+json metadata was not parsed");
+});
+
+Deno.test("malformed declared JSON is reported without pruning", async () => {
+  const test = dependencies("new");
+  let reported: unknown;
+  test.value.fetch = async () =>
+    new Response("not-json", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  test.value.reportError = (error) => {
+    reported = error;
+  };
+
+  await pruneRustSrcCacheVariants(archiveUrl, "new", test.value);
+
+  assert(reported instanceof SyntaxError, "declared JSON failure was hidden");
+  assert(test.deleted.length === 0, "malformed JSON deleted cache entries");
 });

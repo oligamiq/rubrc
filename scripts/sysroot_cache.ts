@@ -1,5 +1,5 @@
 import { parseTar } from "../lib/src/parse_tar.ts";
-import { rustWasmReleaseArchiveUrl } from "../lib/src/rust_wasm_release.ts";
+import { RUST_WASM_RELEASE_VERSION, rustWasmReleaseArchiveUrl } from "../lib/src/rust_wasm_release.ts";
 
 export type SysrootCacheSource = "cache" | "download";
 
@@ -35,13 +35,114 @@ export interface SysrootCacheOptions {
 }
 
 const DEFAULT_TRIPLE = "wasm32-wasip1";
-const DEFAULT_CACHE_DIR = ".rubrc-cache/sysroot";
+const DEFAULT_CACHE_DIR = `.rubrc-cache/sysroot/rust_wasm/${RUST_WASM_RELEASE_VERSION}`;
 const DEFAULT_WORKSPACE_SYSROOT = "test_workspace_rustc/sysroot";
 const REQUIRED_RUST_SRC_ENTRIES = [
   "core/src/lib.rs",
   "alloc/src/lib.rs",
   "std/src/lib.rs",
 ] as const;
+
+export function rustSrcToolchainIdentity(
+  rustcVerboseVersion: string,
+  sysroot: string,
+): string {
+  return JSON.stringify({
+    schema: 1,
+    rustc: rustcVerboseVersion.trim(),
+    sysroot,
+  });
+}
+
+export function rustSrcCacheMatchesIdentity(
+  expected: string,
+  cached: string,
+): boolean {
+  return expected === cached.trim();
+}
+
+async function archiveSha256(archive: Uint8Array): Promise<string> {
+  const bytes = new Uint8Array(archive.byteLength);
+  bytes.set(archive);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+export async function createRustSrcCacheMetadata(
+  toolchainIdentity: string,
+  archive: Uint8Array,
+): Promise<string> {
+  return JSON.stringify({
+    schema: 2,
+    toolchainIdentity,
+    archiveSha256: await archiveSha256(archive),
+  });
+}
+
+export async function rustSrcCacheMatchesMetadata(
+  expectedToolchainIdentity: string,
+  archive: Uint8Array,
+  cachedMetadata: string,
+): Promise<boolean> {
+  try {
+    const metadata = JSON.parse(cachedMetadata) as Record<string, unknown>;
+    return metadata.schema === 2 &&
+      metadata.toolchainIdentity === expectedToolchainIdentity &&
+      metadata.archiveSha256 === await archiveSha256(archive);
+  } catch {
+    return false;
+  }
+}
+
+export function deterministicRustSrcTarArgs(libraryPath: string): string[] {
+  return [
+    "--create",
+    "--file",
+    "-",
+    "--sort=name",
+    "--mtime=@0",
+    "--owner=0",
+    "--group=0",
+    "--numeric-owner",
+    "--mode=u+rwX,go+rX,go-w",
+    "--pax-option=delete=atime,delete=ctime",
+    "--directory",
+    libraryPath,
+    ".",
+  ];
+}
+
+export function deterministicRustSrcSquashfsArgs(
+  libraryPath: string,
+  outputPath: string,
+): string[] {
+  return [
+    libraryPath,
+    outputPath,
+    "-noappend",
+    "-comp",
+    "zstd",
+    "-Xcompression-level",
+    "22",
+    "-b",
+    "262144",
+    "-repro-time",
+    "0",
+    "-all-root",
+    "-force-file-mode",
+    "0644",
+    "-force-dir-mode",
+    "0755",
+    "-no-xattrs",
+    "-no-exports",
+    "-no-progress",
+    "-quiet",
+    "-processors",
+    "1",
+  ];
+}
 
 type RustSrcArchiveEntryLister = (
   archive: Uint8Array,

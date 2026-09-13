@@ -14,6 +14,7 @@ import {
 import { mergeVersionedPublishDiagnostics } from "./rust_lsp_client_capabilities.ts";
 import { activateRustProject } from "./rust_lsp_startup.ts";
 import { RustDocumentSync } from "./rust_document_sync.ts";
+import type { CrateGraphProgress } from "./rust_analyzer_readiness.ts";
 
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
@@ -490,8 +491,20 @@ Deno.test("project activation preserves the staged readiness order", async () =>
       });
     },
   };
+  const graphProgress: CrateGraphProgress = Object.freeze({
+    attempt: 1,
+    elapsedMs: 5_000,
+    remainingMs: 295_000,
+    labels: Object.freeze(["rubrc_main", "core"]),
+    ready: false,
+  });
   const readiness = {
-    waitForCrateGraph: async (_signal: AbortSignal) => {
+    waitForCrateGraph: async (
+      _signal: AbortSignal,
+      observeProgress?: (progress: CrateGraphProgress) => void,
+    ) => {
+      order.push("crate graph request");
+      observeProgress?.(graphProgress);
       order.push("crate graph ready");
     },
     noteDocumentChanged: (version: number) => {
@@ -515,7 +528,10 @@ Deno.test("project activation preserves the staged readiness order", async () =>
       order.push("didChangeConfiguration(full settings)");
     },
     sendRequest: async (method: string, params: unknown) => {
-      assert(method === "rust-analyzer/reloadWorkspace", `wrong request: ${method}`);
+      assert(
+        method === "rust-analyzer/reloadWorkspace",
+        `wrong request: ${method}`,
+      );
       assert(params === undefined, "workspace reload unexpectedly sent params");
       order.push("reloadWorkspace complete");
     },
@@ -537,6 +553,10 @@ Deno.test("project activation preserves the staged readiness order", async () =>
       order.push(`setModelLanguage(${language})`);
     },
     semanticWarming: () => order.push("semanticWarming"),
+    reportProjectProgress: (progress) => {
+      assert(progress === graphProgress, "activation cloned project progress");
+      order.push("project progress:1");
+    },
   });
 
   assert(
@@ -544,6 +564,8 @@ Deno.test("project activation preserves the staged readiness order", async () =>
       [
         "latest snapshot",
         "didChangeConfiguration(full settings)",
+        "crate graph request",
+        "project progress:1",
         "crate graph ready",
         "VFS write complete",
         "diagnostics listener armed:7",
@@ -608,6 +630,7 @@ Deno.test("project activation rejects a different model before side effects", as
     },
     setModelLanguage: () => effects.push("language"),
     semanticWarming: () => effects.push("warming"),
+    reportProjectProgress: () => {},
   }).catch((error) => {
     received = error;
   });
@@ -659,6 +682,7 @@ Deno.test("project activation rechecks abort after snapshot before VFS mutation"
     },
     setModelLanguage: () => {},
     semanticWarming: () => {},
+    reportProjectProgress: () => {},
   }).catch((error) => {
     received = error;
   });
@@ -742,6 +766,7 @@ Deno.test("activation didOpen mirrors an edit made after its initial snapshot", 
       );
     },
     semanticWarming: () => order.push("semantic-warming"),
+    reportProjectProgress: () => {},
   });
   await didOpenDispatch;
 
@@ -807,6 +832,7 @@ Deno.test("project activation stops at every aborted barrier", async () => {
       },
       setModelLanguage: () => step("language"),
       semanticWarming: () => step("warming"),
+      reportProjectProgress: () => {},
     }).catch((error) => {
       received = error;
     });
@@ -866,6 +892,7 @@ Deno.test("project activation settles direct mutations before rejecting abort", 
       },
       setModelLanguage: () => order.push("language"),
       semanticWarming: () => order.push("warming"),
+      reportProjectProgress: () => {},
     })
       .catch((error) => {
         received = error;
@@ -938,6 +965,7 @@ Deno.test("project activation promptly aborts pending observation waiters", asyn
       },
       setModelLanguage: () => {},
       semanticWarming: () => {},
+      reportProjectProgress: () => {},
     })
       .catch((error) => {
         received = error;
@@ -990,6 +1018,7 @@ Deno.test("project activation observes a late rejection after synchronous observ
     },
     setModelLanguage: () => {},
     semanticWarming: () => {},
+    reportProjectProgress: () => {},
   }).catch((error) => {
     received = error;
   });
@@ -1033,6 +1062,7 @@ Deno.test("project activation observes a late didOpen rejection after synchronou
     },
     setModelLanguage: () => {},
     semanticWarming: () => {},
+    reportProjectProgress: () => {},
   }).catch((error) => {
     received = error;
   });
@@ -1073,6 +1103,7 @@ Deno.test("project activation checks abort after semantic readiness", async () =
     },
     setModelLanguage: () => {},
     semanticWarming: () => {},
+    reportProjectProgress: () => {},
   }).catch((error) => {
     received = error;
   });

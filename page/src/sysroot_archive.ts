@@ -36,7 +36,7 @@ type ParseArchiveOptions = {
   ) => Promise<void>;
 };
 
-const RUST_SRC_ASSET = "rust-src.tar.vfsbr";
+const RUST_SRC_ASSET = "rust-src.sqfs";
 declare const __RUBRC_SOURCE_REVISION__: string;
 declare const __RUBRC_BUILD_EPOCH__: string;
 const SOURCE_REVISION = typeof __RUBRC_SOURCE_REVISION__ === "undefined"
@@ -112,8 +112,9 @@ export async function loadSysrootArchiveBytes(
     }
   };
   const operation = (async () => {
-    const fetchStream = options.fetchStream ??
-      (await import("../../lib/src/brotli_stream.ts")).fetch_compressed_stream;
+    const fetchStream = options.fetchStream ?? (triple === "rust-src"
+      ? (await import("../../lib/src/fetch_binary_stream.ts")).fetch_binary_stream
+      : (await import("../../lib/src/brotli_stream.ts")).fetch_compressed_stream);
     const archiveUrl = sysrootArchiveUrl(triple);
     const stream = await fetchStream(archiveUrl, controller.signal);
     const reader = stream.getReader();

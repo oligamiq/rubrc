@@ -16,6 +16,7 @@ use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
 mod debug_state;
 mod filesystem_sync;
 pub mod memory_manager;
+mod rust_src_squashfs;
 #[cfg(feature = "debugging")]
 use debug_state::ThreadPoolState;
 use debug_state::{DebugState, PipeKind, is_lifecycle_event};
@@ -30,6 +31,19 @@ const EVENT_TYPE_LSP: u32 = 6;
 const EVENT_TYPE_WRITE_FILE: u32 = 7;
 const EVENT_TYPE_BOOTSTRAP_RUST_SRC: u32 = 8;
 const EVENT_TYPE_BOOTSTRAP_TARGET: u32 = 9;
+const EVENT_TYPE_RUST_SRC_FS_RPC: u32 = 10;
+const RUST_SRC_FS_RPC_HEADER_LEN: usize = 48;
+const RUST_SRC_FS_RPC_STAT: u32 = 1;
+const RUST_SRC_FS_RPC_READ: u32 = 2;
+const RUST_SRC_FS_RPC_READDIR: u32 = 3;
+const RUST_SRC_FS_RPC_OK: u32 = 0;
+const RUST_SRC_FS_RPC_INVALID: u32 = 1;
+const RUST_SRC_FS_RPC_NOT_MOUNTED: u32 = 2;
+const RUST_SRC_FS_RPC_ERROR: u32 = 3;
+const RUST_SRC_FS_RPC_BUFFER_TOO_SMALL: u32 = 4;
+const RUST_SRC_FS_RPC_KIND_FILE: u32 = 1;
+const RUST_SRC_FS_RPC_KIND_DIRECTORY: u32 = 2;
+const RUST_SRC_FS_RPC_KIND_SYMLINK: u32 = 3;
 const SHELL_EVENT_BOOTSTRAP_RUST_SRC: u32 = 6;
 const SHELL_EVENT_BOOTSTRAP_TARGET: u32 = 7;
 const EVENT_TYPE_DEBUG_FIXED_RUSTC: u32 = 1007;
@@ -224,6 +238,8 @@ thread_local! {
     static CARGO_OUTPUT: RefCell<Option<CargoOutput>> = const { RefCell::new(None) };
     static RUSTC_ACTIVE: Cell<bool> = const { Cell::new(false) };
 }
+static HOST_CARGO_OUTPUT: std::sync::LazyLock<parking_lot::Mutex<Option<CargoOutput>>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
 
 pub(crate) static CARGO_RUN_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 pub(crate) static CARGO_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
@@ -363,6 +379,19 @@ pub(crate) fn run_cargo() {
     debug_trace("cargo:_main:return");
 }
 
+pub(crate) fn run_cargo_capture_output() -> (CargoOutput, i32) {
+    *HOST_CARGO_OUTPUT.lock() = Some(CargoOutput::default());
+    run_cargo();
+    let output = HOST_CARGO_OUTPUT.lock().take().unwrap_or_default();
+    let status = CARGO_EXIT_STATUS.load(Ordering::SeqCst);
+    debug_trace(&format!(
+        "host-cargo:capture-return stdout={} stderr={} status={status}",
+        output.stdout.len(),
+        output.stderr.len(),
+    ));
+    (output, status)
+}
+
 pub(crate) fn run_rustc() {
     RUSTC_EXIT_STATUS.store(0, Ordering::SeqCst);
     if RUSTC_ACTIVE.with(|active| active.replace(true)) {
@@ -409,6 +438,19 @@ fn capture_cargo_output(stderr: bool, buf: &[u8]) -> bool {
         }
         true
     })
+}
+
+fn capture_host_cargo_output(stderr: bool, buf: &[u8]) -> bool {
+    let mut output = HOST_CARGO_OUTPUT.lock();
+    let Some(output) = output.as_mut() else {
+        return false;
+    };
+    if stderr {
+        output.stderr.extend_from_slice(buf);
+    } else {
+        output.stdout.extend_from_slice(buf);
+    }
+    true
 }
 
 fn next_debug_invocation_id() -> Option<usize> {
@@ -709,12 +751,20 @@ impl Guest for Wit {
             if LSP_START_ONCE.try_start() {
                 MEMORY_MANAGER.reserve_for_thread();
                 std::thread::spawn(move || {
+                    crate::debug_trace("lsp:thread:start");
                     crate::shell::vfs_set_current_session_id(LSP_SESSION_ID);
                     crate::command::set_lsp_opt_args(&["rust-analyzer"]);
                     MEMORY_MANAGER.ensure_once::<lsp_opt>(&LSP_RESERVE_ONCE, LSP_CONFIG);
+                    crate::debug_trace("lsp:_reset:enter");
                     lsp_opt::_reset();
+                    crate::debug_trace("lsp:_reset:return");
+                    crate::debug_trace("lsp:_start:enter");
                     lsp_opt::_start();
+                    crate::debug_trace("lsp:_start:return");
+                    crate::debug_trace("lsp:_main:enter");
                     lsp_opt::_main();
+                    crate::debug_trace("lsp:_main:return");
+                    crate::debug_trace("lsp:thread:return");
                 });
             }
         }
@@ -798,6 +848,14 @@ impl Guest for Wit {
                         }
                     }
                 }
+            }
+            return;
+        } else if event_type == EVENT_TYPE_RUST_SRC_FS_RPC {
+            if arg1 != 0 && arg2 as usize >= RUST_SRC_FS_RPC_HEADER_LEN {
+                let buffer = unsafe {
+                    std::slice::from_raw_parts_mut(arg1 as *mut u8, arg2 as usize)
+                };
+                VIRTUAL_FILE_SYSTEM.handle_rust_src_fs_rpc(buffer);
             }
             return;
         } else if let Some(shell_event_type) = startup_sysroot_shell_event(event_type) {
@@ -919,6 +977,7 @@ impl Guest for Wit {
         {
             if !THREAD_POOL.is_initialized() {
                 let mut state = DEBUG_TERMINAL_OUTPUT.lock();
+                state.set_lsp_pages(memory_size::<lsp_opt>() as usize);
                 state.set_ra_boundary_dropped(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed));
                 let snapshot = state.snapshot_line_thread_pool_uninitialized();
                 state.push_snapshot(&snapshot);
@@ -926,6 +985,7 @@ impl Guest for Wit {
             }
             let trace = THREAD_POOL.trace_snapshot();
             let mut state = DEBUG_TERMINAL_OUTPUT.lock();
+            state.set_lsp_pages(memory_size::<lsp_opt>() as usize);
             state.set_ra_boundary_dropped(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed));
             let snapshot = state.snapshot_line(ThreadPoolState {
                 capacity: trace.capacity,
@@ -948,6 +1008,7 @@ impl Guest for Wit {
         #[cfg(not(feature = "debugging"))]
         {
             let mut state = DEBUG_TERMINAL_OUTPUT.lock();
+            state.set_lsp_pages(memory_size::<lsp_opt>() as usize);
             state.set_ra_boundary_dropped(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed));
             let snapshot = state.snapshot_line_trace_disabled();
             state.push_snapshot(&snapshot);
@@ -1010,6 +1071,10 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
                     return Ok(written);
                 }
             }
+        }
+
+        if capture_host_cargo_output(false, buf) {
+            return Ok(buf.len());
         }
 
         if capture_cargo_output(false, buf) {
@@ -1087,6 +1152,10 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
             }
         }
 
+        if capture_host_cargo_output(true, buf) {
+            return Ok(buf.len());
+        }
+
         if capture_cargo_output(true, buf) {
             return Ok(buf.len());
         }
@@ -1159,6 +1228,7 @@ pub struct CwdAwareFileSystem<F> {
     target_cwds: parking_lot::RwLock<HashMap<TypeId, TargetCwdEntry>>,
     fd_allocation: parking_lot::Mutex<()>,
     append_write: parking_lot::Mutex<()>,
+    rust_src: parking_lot::RwLock<Option<rust_src_squashfs::RustSrcMount>>,
 }
 
 impl<F> CwdAwareFileSystem<F> {
@@ -1170,6 +1240,7 @@ impl<F> CwdAwareFileSystem<F> {
             target_cwds: parking_lot::RwLock::new(HashMap::new()),
             fd_allocation: parking_lot::Mutex::new(()),
             append_write: parking_lot::Mutex::new(()),
+            rust_src: parking_lot::RwLock::new(None),
         }
     }
 }
@@ -1305,6 +1376,244 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         })
     }
 
+    fn mount_rust_src(&self, bytes: Vec<u8>) -> Result<(usize, usize, u64), String> {
+        let mut slot = self.rust_src.write();
+        if let Some(mount) = slot.as_ref() {
+            return Ok((
+                mount.file_count(),
+                mount.directory_count(),
+                mount.total_bytes(),
+            ));
+        }
+        let mount = rust_src_squashfs::RustSrcMount::mount(&self.inner.lfs, self.root_inode, bytes)?;
+        let summary = (
+            mount.file_count(),
+            mount.directory_count(),
+            mount.total_bytes(),
+        );
+        *slot = Some(mount);
+        Ok(summary)
+    }
+
+    fn inode_for_fd(&self, fd: Fd) -> Option<InodeId> {
+        self.inner.fd_map.get(&fd).map(|entry| *entry.inode_id())
+    }
+
+    fn rust_src_fd_is_mounted(&self, fd: Fd) -> bool {
+        let Some(inode) = self.inode_for_fd(fd) else {
+            return false;
+        };
+        self.rust_src
+            .read()
+            .as_ref()
+            .is_some_and(|mount| mount.is_mounted_inode(inode))
+    }
+
+    fn rust_src_path_inode<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        path_ptr: *const u8,
+        path_len: usize,
+    ) -> Option<InodeId> {
+        let dir_inode = self.inode_for_fd(fd)?;
+        self.inner
+            .lfs
+            .get_inode_for_path::<Wasm>(&dir_inode, path_ptr, path_len)
+    }
+
+    fn rust_src_path_touches_mount<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        fd: Fd,
+        path_ptr: *const u8,
+        path_len: usize,
+    ) -> bool {
+        let mount = self.rust_src.read();
+        let Some(mount) = mount.as_ref() else {
+            return false;
+        };
+        let Some(mut inode) = self.inode_for_fd(fd) else {
+            return false;
+        };
+        if mount.is_mounted_inode(inode) {
+            return true;
+        }
+        for component in WasmPathAccess::<Wasm>::new(path_ptr, path_len).components() {
+            if component.as_cur_dir() {
+                continue;
+            }
+            if component.as_root_dir() {
+                inode = self.root_inode;
+            } else if component.as_parent_dir() {
+                let Ok(entries) = self.inner.lfs.read_dir(inode) else {
+                    return false;
+                };
+                let Some(parent) = entries
+                    .into_iter()
+                    .find_map(|(name, inode)| (name == "..").then_some(inode))
+                else {
+                    return false;
+                };
+                inode = parent;
+            } else if let Some(normal) = component.as_normal() {
+                let name = normal.into_iter().collect::<Vec<_>>();
+                let Ok(entries) = self.inner.lfs.read_dir(inode) else {
+                    return false;
+                };
+                let Some(child) = entries.into_iter().find_map(|(entry_name, inode)| {
+                    (entry_name.as_bytes() == name.as_slice()).then_some(inode)
+                }) else {
+                    return mount.is_mounted_inode(inode);
+                };
+                inode = child;
+            } else {
+                return false;
+            }
+            if mount.is_mounted_inode(inode) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn rust_src_filestat<Wasm: WasmAccess + WasmAccessName + 'static>(
+        &self,
+        inode: InodeId,
+    ) -> Option<wasip1::Filestat> {
+        let mount = self.rust_src.read();
+        let mount = mount.as_ref()?;
+        let size = mount.file_size(inode)?;
+        let mtime = mount.file_mtime_secs(inode)? as u64 * 1_000_000_000;
+        let stat = self.inner.lfs.fd_filestat_get_raw::<Wasm>(&inode).ok()?;
+        Some(wasip1::Filestat {
+            dev: 0,
+            ino: stat.ino,
+            filetype: stat.filetype,
+            nlink: stat.nlink,
+            size,
+            atim: mtime,
+            mtim: mtime,
+            ctim: mtime,
+        })
+    }
+
+    fn handle_rust_src_fs_rpc(&self, buffer: &mut [u8]) {
+        fn read_u32(buffer: &[u8], offset: usize) -> Option<u32> {
+            Some(u32::from_le_bytes(
+                buffer.get(offset..offset + 4)?.try_into().ok()?,
+            ))
+        }
+        fn read_u64(buffer: &[u8], offset: usize) -> Option<u64> {
+            Some(u64::from_le_bytes(
+                buffer.get(offset..offset + 8)?.try_into().ok()?,
+            ))
+        }
+        fn write_u32(buffer: &mut [u8], offset: usize, value: u32) {
+            if let Some(slot) = buffer.get_mut(offset..offset + 4) {
+                slot.copy_from_slice(&value.to_le_bytes());
+            }
+        }
+        fn write_u64(buffer: &mut [u8], offset: usize, value: u64) {
+            if let Some(slot) = buffer.get_mut(offset..offset + 8) {
+                slot.copy_from_slice(&value.to_le_bytes());
+            }
+        }
+
+        if buffer.len() < RUST_SRC_FS_RPC_HEADER_LEN {
+            return;
+        }
+        write_u32(buffer, 20, RUST_SRC_FS_RPC_INVALID);
+        write_u32(buffer, 24, 0);
+        write_u32(buffer, 28, 0);
+        write_u64(buffer, 32, 0);
+        write_u64(buffer, 40, 0);
+
+        let Some(operation) = read_u32(buffer, 0) else {
+            return;
+        };
+        let Some(path_len) = read_u32(buffer, 4).map(|value| value as usize) else {
+            return;
+        };
+        let Some(offset) = read_u64(buffer, 8) else {
+            return;
+        };
+        let Some(output_capacity) = read_u32(buffer, 16).map(|value| value as usize) else {
+            return;
+        };
+        let Some(path_end) = RUST_SRC_FS_RPC_HEADER_LEN.checked_add(path_len) else {
+            return;
+        };
+        let Some(output_end) = path_end.checked_add(output_capacity) else {
+            return;
+        };
+        if output_end > buffer.len() {
+            return;
+        }
+        let path = match std::str::from_utf8(&buffer[RUST_SRC_FS_RPC_HEADER_LEN..path_end]) {
+            Ok(path) => path.to_owned(),
+            Err(_) => return,
+        };
+
+        let mount = self.rust_src.read();
+        let Some(mount) = mount.as_ref() else {
+            write_u32(buffer, 20, RUST_SRC_FS_RPC_NOT_MOUNTED);
+            return;
+        };
+
+        match operation {
+            RUST_SRC_FS_RPC_STAT => match mount.stat_path(&path) {
+                Ok(stat) => {
+                    let kind = match stat.kind {
+                        rust_src_squashfs::RustSrcNodeKind::File => RUST_SRC_FS_RPC_KIND_FILE,
+                        rust_src_squashfs::RustSrcNodeKind::Directory => {
+                            RUST_SRC_FS_RPC_KIND_DIRECTORY
+                        }
+                        rust_src_squashfs::RustSrcNodeKind::Symlink => {
+                            RUST_SRC_FS_RPC_KIND_SYMLINK
+                        }
+                    };
+                    write_u32(buffer, 20, RUST_SRC_FS_RPC_OK);
+                    write_u32(buffer, 24, kind);
+                    write_u64(buffer, 32, stat.size);
+                    write_u64(buffer, 40, stat.mtime_secs as u64 * 1_000);
+                }
+                Err(_) => write_u32(buffer, 20, RUST_SRC_FS_RPC_ERROR),
+            },
+            RUST_SRC_FS_RPC_READ => {
+                let output = &mut buffer[path_end..output_end];
+                match mount.read_path(&path, offset, output) {
+                    Ok(read) => {
+                        write_u32(buffer, 20, RUST_SRC_FS_RPC_OK);
+                        write_u32(buffer, 28, read as u32);
+                    }
+                    Err(_) => write_u32(buffer, 20, RUST_SRC_FS_RPC_ERROR),
+                }
+            }
+            RUST_SRC_FS_RPC_READDIR => match mount.read_dir_path(&path) {
+                Ok(entries) => match serde_json::to_vec(&entries) {
+                    Ok(encoded) => {
+                        let required = match u32::try_from(encoded.len()) {
+                            Ok(required) => required,
+                            Err(_) => {
+                                write_u32(buffer, 20, RUST_SRC_FS_RPC_ERROR);
+                                return;
+                            }
+                        };
+                        write_u32(buffer, 28, required);
+                        if encoded.len() > output_capacity {
+                            write_u32(buffer, 20, RUST_SRC_FS_RPC_BUFFER_TOO_SMALL);
+                        } else {
+                            buffer[path_end..path_end + encoded.len()].copy_from_slice(&encoded);
+                            write_u32(buffer, 20, RUST_SRC_FS_RPC_OK);
+                        }
+                    }
+                    Err(_) => write_u32(buffer, 20, RUST_SRC_FS_RPC_ERROR),
+                },
+                Err(_) => write_u32(buffer, 20, RUST_SRC_FS_RPC_ERROR),
+            },
+            _ => {}
+        }
+    }
+
     fn prepare_fd_allocation(&self) -> Result<(), ()> {
         let mut next_fd = self.inner.next_fd.load(Ordering::SeqCst);
         while next_fd != u32::MAX && self.inner.fd_map.contains_key(&next_fd) {
@@ -1385,6 +1694,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
                 .inner
                 .fd_write_raw::<Wasm>(fd, iovs_ptr, iovs_len, nwritten);
         }
+        if self.rust_src_fd_is_mounted(fd) {
+            return wasip1::ERRNO_ROFS;
+        }
 
         let Some(mut entry) = self.inner.fd_map.get_mut(&fd) else {
             return wasip1::ERRNO_BADF;
@@ -1429,6 +1741,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         offset: u64,
         nwritten: *mut Size,
     ) -> wasip1::Errno {
+        if self.rust_src_fd_is_mounted(fd) {
+            return wasip1::ERRNO_ROFS;
+        }
         self.inner
             .fd_pwrite_raw::<Wasm>(fd, iovs_ptr, iovs_len, offset, nwritten)
     }
@@ -1449,6 +1764,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         offset: u64,
         len: u64,
     ) -> wasip1::Errno {
+        if self.rust_src_fd_is_mounted(fd) {
+            return wasip1::ERRNO_ROFS;
+        }
         self.inner.fd_allocate_raw::<Wasm>(fd, offset, len)
     }
 
@@ -1494,6 +1812,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         fd: Fd,
         size: u64,
     ) -> wasip1::Errno {
+        if self.rust_src_fd_is_mounted(fd) {
+            return wasip1::ERRNO_ROFS;
+        }
         self.inner.fd_filestat_set_size_raw::<Wasm>(fd, size)
     }
 
@@ -1504,6 +1825,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         mtim: wasip1::Timestamp,
         fst_flags: wasip1::Fstflags,
     ) -> wasip1::Errno {
+        if self.rust_src_fd_is_mounted(fd) {
+            return wasip1::ERRNO_ROFS;
+        }
         self.inner
             .fd_filestat_set_times_raw::<Wasm>(fd, atim, mtim, fst_flags)
     }
@@ -1520,6 +1844,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
     ) -> wasip1::Errno {
         let target_cwds = self.target_cwds.read();
         let fd = self.routed_fd::<Wasm>(&target_cwds, fd, path_ptr, path_len);
+        if self.rust_src_path_touches_mount::<Wasm>(fd, path_ptr, path_len) {
+            return wasip1::ERRNO_ROFS;
+        }
         self.inner.path_filestat_set_times_raw::<Wasm>(
             fd, flags, path_ptr, path_len, atim, mtim, fst_flags,
         )
@@ -1535,6 +1862,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
     ) -> wasip1::Errno {
         let target_cwds = self.target_cwds.read();
         let fd = self.routed_fd::<Wasm>(&target_cwds, fd, new_path_ptr, new_path_len);
+        if self.rust_src_path_touches_mount::<Wasm>(fd, new_path_ptr, new_path_len) {
+            return wasip1::ERRNO_ROFS;
+        }
         self.inner.path_symlink_raw::<Wasm>(
             old_path_ptr,
             old_path_len,
@@ -1582,6 +1912,12 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
     ) -> wasip1::Errno {
         let target_cwds = self.target_cwds.read();
         let fd = self.routed_fd::<Wasm>(&target_cwds, fd, path_ptr, path_len);
+        if let Some(inode) = self.rust_src_path_inode::<Wasm>(fd, path_ptr, path_len)
+            && let Some(stat) = self.rust_src_filestat::<Wasm>(inode)
+        {
+            Wasm::store_le(filestat, stat);
+            return wasip1::ERRNO_SUCCESS;
+        }
         self.inner
             .path_filestat_get_raw::<Wasm>(fd, flags, path_ptr, path_len, filestat)
     }
@@ -1617,6 +1953,12 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         fd: Fd,
         filestat: *mut wasip1::Filestat,
     ) -> wasip1::Errno {
+        if let Some(inode) = self.inode_for_fd(fd)
+            && let Some(stat) = self.rust_src_filestat::<Wasm>(inode)
+        {
+            Wasm::store_le(filestat, stat);
+            return wasip1::ERRNO_SUCCESS;
+        }
         self.inner.fd_filestat_get_raw::<Wasm>(fd, filestat)
     }
 
@@ -1635,8 +1977,48 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         iovs_len: usize,
         nread: *mut Size,
     ) -> wasip1::Errno {
-        self.inner
-            .fd_read_raw::<Wasm>(fd, iovs_ptr, iovs_len, nread)
+        if fd <= 2 || !self.rust_src_fd_is_mounted(fd) {
+            return self.inner.fd_read_raw::<Wasm>(fd, iovs_ptr, iovs_len, nread);
+        }
+        let Some(inode) = self.inode_for_fd(fd) else {
+            return wasip1::ERRNO_BADF;
+        };
+        let is_rust_src_file = self
+            .rust_src
+            .read()
+            .as_ref()
+            .is_some_and(|mount| mount.is_file_inode(inode));
+        if !is_rust_src_file {
+            return self.inner.fd_read_raw::<Wasm>(fd, iovs_ptr, iovs_len, nread);
+        }
+        let Some(mut entry) = self.inner.fd_map.get_mut(&fd) else {
+            return wasip1::ERRNO_BADF;
+        };
+        let open_fd = entry.value_mut();
+        let mount = self.rust_src.read();
+        let Some(mount) = mount.as_ref() else {
+            return wasip1::ERRNO_BADF;
+        };
+        let mut cursor = open_fd.cursor();
+        let mut total_read = 0usize;
+        for iov in Wasm::as_array(iovs_ptr, iovs_len) {
+            let mut buffer = vec![0u8; iov.buf_len];
+            let Ok(count) = mount.read_file(inode, cursor as u64, &mut buffer) else {
+                return wasip1::ERRNO_IO;
+            };
+            if count == 0 {
+                break;
+            }
+            Wasm::memcpy(iov.buf as *mut u8, &buffer[..count]);
+            total_read += count;
+            cursor += count;
+            if count < iov.buf_len {
+                break;
+            }
+        }
+        open_fd.set_cursor(cursor);
+        Wasm::store_le(nread, total_read as Size);
+        wasip1::ERRNO_SUCCESS
     }
 
     fn fd_pread_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
@@ -1647,8 +2029,38 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         offset: u64,
         nread: *mut Size,
     ) -> wasip1::Errno {
-        self.inner
-            .fd_pread_raw::<Wasm>(fd, iovs_ptr, iovs_len, offset, nread)
+        if fd <= 2 || !self.rust_src_fd_is_mounted(fd) {
+            return self.inner.fd_pread_raw::<Wasm>(fd, iovs_ptr, iovs_len, offset, nread);
+        }
+        let Some(inode) = self.inode_for_fd(fd) else {
+            return wasip1::ERRNO_BADF;
+        };
+        let mount = self.rust_src.read();
+        let Some(mount) = mount.as_ref() else {
+            return wasip1::ERRNO_BADF;
+        };
+        if !mount.is_file_inode(inode) {
+            return self.inner.fd_pread_raw::<Wasm>(fd, iovs_ptr, iovs_len, offset, nread);
+        }
+        let mut total_read = 0usize;
+        let mut current_offset = offset;
+        for iov in Wasm::as_array(iovs_ptr, iovs_len) {
+            let mut buffer = vec![0u8; iov.buf_len];
+            let Ok(count) = mount.read_file(inode, current_offset, &mut buffer) else {
+                return wasip1::ERRNO_IO;
+            };
+            if count == 0 {
+                break;
+            }
+            Wasm::memcpy(iov.buf as *mut u8, &buffer[..count]);
+            total_read += count;
+            current_offset = current_offset.saturating_add(count as u64);
+            if count < iov.buf_len {
+                break;
+            }
+        }
+        Wasm::store_le(nread, total_read as Size);
+        wasip1::ERRNO_SUCCESS
     }
 
     fn fd_seek_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
@@ -1658,8 +2070,45 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         whence: wasip1::Whence,
         new_offset_ptr: *mut i64,
     ) -> wasip1::Errno {
-        self.inner
-            .fd_seek_raw::<Wasm>(fd, offset, whence, new_offset_ptr)
+        if !self.rust_src_fd_is_mounted(fd) {
+            return self.inner.fd_seek_raw::<Wasm>(fd, offset, whence, new_offset_ptr);
+        }
+        let Some(inode) = self.inode_for_fd(fd) else {
+            return wasip1::ERRNO_BADF;
+        };
+        let size = self
+            .rust_src
+            .read()
+            .as_ref()
+            .and_then(|mount| mount.file_size(inode));
+        let Some(size) = size else {
+            return self.inner.fd_seek_raw::<Wasm>(fd, offset, whence, new_offset_ptr);
+        };
+        let Some(mut entry) = self.inner.fd_map.get_mut(&fd) else {
+            return wasip1::ERRNO_BADF;
+        };
+        let open_fd = entry.value_mut();
+        let base = match whence {
+            wasip1::WHENCE_SET => 0,
+            wasip1::WHENCE_CUR => match i64::try_from(open_fd.cursor()) {
+                Ok(value) => value,
+                Err(_) => return wasip1::ERRNO_INVAL,
+            },
+            wasip1::WHENCE_END => match i64::try_from(size) {
+                Ok(value) => value,
+                Err(_) => return wasip1::ERRNO_INVAL,
+            },
+            _ => return wasip1::ERRNO_INVAL,
+        };
+        let Some(new_offset) = base.checked_add(offset) else {
+            return wasip1::ERRNO_INVAL;
+        };
+        if new_offset < 0 {
+            return wasip1::ERRNO_INVAL;
+        }
+        open_fd.set_cursor(new_offset as usize);
+        Wasm::store_le(new_offset_ptr, new_offset);
+        wasip1::ERRNO_SUCCESS
     }
 
     fn path_open_raw<Wasm: WasmAccess + WasmAccessName + 'static>(
@@ -1680,6 +2129,18 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
             return wasip1::ERRNO_MFILE;
         }
         let dir_fd = self.routed_fd::<Wasm>(&target_cwds, dir_fd, path_ptr, path_len);
+        if self.rust_src_path_touches_mount::<Wasm>(dir_fd, path_ptr, path_len) {
+            if o_flags & wasip1::OFLAGS_TRUNC != 0 {
+                return wasip1::ERRNO_ROFS;
+            }
+            if o_flags & wasip1::OFLAGS_CREAT != 0
+                && self
+                    .rust_src_path_inode::<Wasm>(dir_fd, path_ptr, path_len)
+                    .is_none()
+            {
+                return wasip1::ERRNO_ROFS;
+            }
+        }
         let result = self.inner.path_open_raw::<Wasm>(
             dir_fd,
             dir_flags,
@@ -1723,6 +2184,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
     ) -> wasip1::Errno {
         let target_cwds = self.target_cwds.read();
         let fd = self.routed_fd::<Wasm>(&target_cwds, fd, path_ptr, path_len);
+        if self.rust_src_path_touches_mount::<Wasm>(fd, path_ptr, path_len) {
+            return wasip1::ERRNO_ROFS;
+        }
         self.inner
             .path_create_directory_raw::<Wasm>(fd, path_ptr, path_len)
     }
@@ -1740,6 +2204,11 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         let target_cwds = self.target_cwds.read();
         let old_fd = self.routed_fd::<Wasm>(&target_cwds, old_fd, old_path_ptr, old_path_len);
         let new_fd = self.routed_fd::<Wasm>(&target_cwds, new_fd, new_path_ptr, new_path_len);
+        if self.rust_src_path_touches_mount::<Wasm>(old_fd, old_path_ptr, old_path_len)
+            || self.rust_src_path_touches_mount::<Wasm>(new_fd, new_path_ptr, new_path_len)
+        {
+            return wasip1::ERRNO_ROFS;
+        }
         self.inner.path_link_raw::<Wasm>(
             old_fd,
             old_flags,
@@ -1759,6 +2228,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
     ) -> wasip1::Errno {
         let target_cwds = self.target_cwds.read();
         let fd = self.routed_fd::<Wasm>(&target_cwds, fd, path_ptr, path_len);
+        if self.rust_src_path_touches_mount::<Wasm>(fd, path_ptr, path_len) {
+            return wasip1::ERRNO_ROFS;
+        }
         self.inner
             .path_remove_directory_raw::<Wasm>(fd, path_ptr, path_len)
     }
@@ -1775,6 +2247,11 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         let target_cwds = self.target_cwds.read();
         let old_fd = self.routed_fd::<Wasm>(&target_cwds, old_fd, old_path_ptr, old_path_len);
         let new_fd = self.routed_fd::<Wasm>(&target_cwds, new_fd, new_path_ptr, new_path_len);
+        if self.rust_src_path_touches_mount::<Wasm>(old_fd, old_path_ptr, old_path_len)
+            || self.rust_src_path_touches_mount::<Wasm>(new_fd, new_path_ptr, new_path_len)
+        {
+            return wasip1::ERRNO_ROFS;
+        }
         self.inner.path_rename_raw::<Wasm>(
             old_fd,
             old_path_ptr,
@@ -1793,6 +2270,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
     ) -> wasip1::Errno {
         let target_cwds = self.target_cwds.read();
         let fd = self.routed_fd::<Wasm>(&target_cwds, fd, path_ptr, path_len);
+        if self.rust_src_path_touches_mount::<Wasm>(fd, path_ptr, path_len) {
+            return wasip1::ERRNO_ROFS;
+        }
         self.inner
             .path_unlink_file_raw::<Wasm>(fd, path_ptr, path_len)
     }
@@ -2168,6 +2648,16 @@ fn rustc_root_path_hints(argv: &[String]) -> Vec<Vec<String>> {
             }
             offset = end + 1;
         }
+    }
+    hints
+}
+
+fn cargo_root_path_hints(argv: &[String], cwd: &str) -> Vec<Vec<String>> {
+    let mut hints = rustc_root_path_hints(argv);
+    if let Some(cwd_hint) = normalize_root_path_hint(cwd)
+        && !hints.contains(&cwd_hint)
+    {
+        hints.push(cwd_hint);
     }
     hints
 }
@@ -2792,8 +3282,137 @@ fn write_cargo_owned_spawn_result(
     cargo_opt::memcpy(out_stderr_len as *mut u8, &stderr_len.to_ne_bytes());
 }
 
+const MAX_RUST_SRC_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Debug)]
+struct RustSrcArchiveDownload {
+    expected_len: usize,
+    bytes: Vec<u8>,
+    error: Option<String>,
+}
+
+static RUST_SRC_ARCHIVE_DOWNLOAD: std::sync::LazyLock<
+    parking_lot::Mutex<Option<RustSrcArchiveDownload>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+
+fn rust_src_archive_download_abort() {
+    RUST_SRC_ARCHIVE_DOWNLOAD.lock().take();
+}
+
+fn rust_src_archive_download_begin(archive_len: i32) -> Result<(), String> {
+    let expected_len = usize::try_from(archive_len)
+        .map_err(|_| format!("invalid rust-src archive length: {archive_len}"))?;
+    if expected_len == 0 || expected_len > MAX_RUST_SRC_ARCHIVE_BYTES {
+        return Err(format!(
+            "rust-src archive length {expected_len} is outside 1..={MAX_RUST_SRC_ARCHIVE_BYTES}"
+        ));
+    }
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(expected_len)
+        .map_err(|error| format!("failed to reserve rust-src archive buffer: {error}"))?;
+    *RUST_SRC_ARCHIVE_DOWNLOAD.lock() = Some(RustSrcArchiveDownload {
+        expected_len,
+        bytes,
+        error: None,
+    });
+    Ok(())
+}
+
+fn rust_src_archive_download_append(chunk: &[u8]) {
+    let mut slot = RUST_SRC_ARCHIVE_DOWNLOAD.lock();
+    let Some(download) = slot.as_mut() else {
+        return;
+    };
+    if download.error.is_some() {
+        return;
+    }
+    let Some(next_len) = download.bytes.len().checked_add(chunk.len()) else {
+        download.error = Some("rust-src archive length overflow".to_string());
+        return;
+    };
+    if next_len > download.expected_len {
+        download.error = Some(format!(
+            "rust-src archive exceeded reported length {}",
+            download.expected_len
+        ));
+        return;
+    }
+    download.bytes.extend_from_slice(chunk);
+}
+
+fn rust_src_archive_download_take() -> Result<Vec<u8>, String> {
+    let download = RUST_SRC_ARCHIVE_DOWNLOAD
+        .lock()
+        .take()
+        .ok_or_else(|| "rust-src archive download was not started".to_string())?;
+    if let Some(error) = download.error {
+        return Err(error);
+    }
+    if download.bytes.len() != download.expected_len {
+        return Err(format!(
+            "rust-src archive length mismatch: expected {}, received {}",
+            download.expected_len,
+            download.bytes.len()
+        ));
+    }
+    Ok(download.bytes)
+}
+
+#[cfg(test)]
+mod rust_src_archive_download_tests {
+    use super::*;
+
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        let guard = TEST_LOCK.lock().unwrap();
+        rust_src_archive_download_abort();
+        guard
+    }
+
+    #[test]
+    fn accumulator_accepts_exact_sequential_chunks() {
+        let _guard = test_guard();
+        rust_src_archive_download_begin(4).unwrap();
+        rust_src_archive_download_append(b"ab");
+        rust_src_archive_download_append(b"cd");
+        assert_eq!(rust_src_archive_download_take().unwrap(), b"abcd");
+    }
+
+    #[test]
+    fn accumulator_rejects_short_and_overrun_downloads() {
+        let _guard = test_guard();
+        rust_src_archive_download_begin(4).unwrap();
+        rust_src_archive_download_append(b"ab");
+        let short = rust_src_archive_download_take().unwrap_err();
+        assert!(short.contains("expected 4, received 2"), "{short}");
+
+        rust_src_archive_download_begin(3).unwrap();
+        rust_src_archive_download_append(b"abcd");
+        let overrun = rust_src_archive_download_take().unwrap_err();
+        assert!(overrun.contains("exceeded reported length 3"), "{overrun}");
+    }
+
+    #[test]
+    fn accumulator_abort_clears_state_and_bounds_length() {
+        let _guard = test_guard();
+        assert!(rust_src_archive_download_begin(0).is_err());
+        assert!(rust_src_archive_download_begin(-1).is_err());
+        assert!(
+            rust_src_archive_download_begin((MAX_RUST_SRC_ARCHIVE_BYTES + 1) as i32).is_err()
+        );
+
+        rust_src_archive_download_begin(2).unwrap();
+        rust_src_archive_download_append(b"ab");
+        rust_src_archive_download_abort();
+        assert!(rust_src_archive_download_take().is_err());
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn sysroot_start_fetch(vfs_shell_triple_ptr: i32, triple_len: i32) {
+    rust_src_archive_download_abort();
     let triple_data = vfs_shell::get_array(vfs_shell_triple_ptr as *const u8, triple_len as usize);
     crate::vfs::host::bridge::Downloader::sysroot_start_fetch(
         triple_data.as_ptr() as i32,
@@ -2819,7 +3438,62 @@ pub extern "C" fn sysroot_read_archive_chunk(vfs_shell_data_ptr: i32, chunk_len:
         local_buf.as_mut_ptr() as i32,
         chunk_len,
     );
+    rust_src_archive_download_append(&local_buf);
     vfs_shell::memcpy(vfs_shell_data_ptr as *mut u8, local_buf.as_slice());
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sysroot_rust_src_mount_begin(archive_len: i32) -> i32 {
+    match rust_src_archive_download_begin(archive_len) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("failed to begin rust-src SquashFS mount: {error}");
+            -1
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sysroot_rust_src_mount_abort() {
+    rust_src_archive_download_abort();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sysroot_rust_src_mount_finish(
+    vfs_shell_file_count_ptr: i32,
+    vfs_shell_total_bytes_ptr: i32,
+) -> i32 {
+    let bytes = match rust_src_archive_download_take() {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("failed to finish rust-src archive download: {error}");
+            return -1;
+        }
+    };
+    let (file_count, _directory_count, total_bytes) =
+        match VIRTUAL_FILE_SYSTEM.mount_rust_src(bytes) {
+            Ok(summary) => summary,
+            Err(error) => {
+                eprintln!("failed to mount rust-src SquashFS: {error}");
+                return -2;
+            }
+        };
+    let file_count = match u32::try_from(file_count) {
+        Ok(file_count) => file_count,
+        Err(_) => {
+            eprintln!("rust-src file count exceeds u32::MAX");
+            return -3;
+        }
+    };
+    vfs_shell::memcpy(
+        vfs_shell_file_count_ptr as *mut u8,
+        &file_count.to_ne_bytes(),
+    );
+    vfs_shell::memcpy(
+        vfs_shell_total_bytes_ptr as *mut u8,
+        &total_bytes.to_ne_bytes(),
+    );
+    0
 }
 
 #[unsafe(no_mangle)]
@@ -3036,7 +3710,8 @@ enum LspHostProgram {
 }
 
 fn lsp_host_program(args: &[String]) -> Option<LspHostProgram> {
-    match args.first().map(String::as_str) {
+    let program = args.first()?;
+    match Path::new(program).file_name().and_then(OsStr::to_str) {
         Some("cargo") => Some(LspHostProgram::Cargo),
         Some("rustc") => Some(LspHostProgram::Rustc),
         _ => None,
@@ -3175,36 +3850,35 @@ pub extern "C" fn host_run_cargo(
     };
     let (output, status) = match program {
         LspHostProgram::Cargo => {
-            let old_cwd = std::env::current_dir().ok();
-            if let Some(cwd) = request.get("cwd").and_then(serde_json::Value::as_str)
-                && let Err(error) = std::env::set_current_dir(cwd)
+            let cwd = request
+                .get("cwd")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let cwd_guard = match VIRTUAL_FILE_SYSTEM
+                .enter_target_cwd::<cargo_opt>(cwd.as_bytes(), cargo_root_path_hints(&args, cwd))
             {
-                VIRTUAL_SHELL_ENV.lock().env = old_env;
-                return write_cargo_result(
-                    debug_invocation_id,
-                    Vec::new(),
-                    format!("failed to set cwd `{cwd}`: {error}").into_bytes(),
-                    1,
-                    out_stdout_ptr,
-                    out_stdout_len,
-                    out_stderr_ptr,
-                    out_stderr_len,
-                    out_status,
-                );
-            }
+                Ok(guard) => guard,
+                Err(error) => {
+                    VIRTUAL_SHELL_ENV.lock().env = old_env;
+                    return write_cargo_result(
+                        debug_invocation_id,
+                        Vec::new(),
+                        format!("failed to set virtual cwd `{cwd}`: {error}").into_bytes(),
+                        1,
+                        out_stdout_ptr,
+                        out_stdout_len,
+                        out_stderr_ptr,
+                        out_stderr_len,
+                        out_status,
+                    );
+                }
+            };
 
             command::set_cargo_opt_args(&args);
-            CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
             trace_host_run_cargo(debug_invocation_id, "cargo:run_cargo");
-            run_cargo();
+            let (output, status) = run_cargo_capture_output();
             trace_host_run_cargo(debug_invocation_id, "cargo:run_cargo completed");
-            let output = CARGO_OUTPUT
-                .with(|output| output.borrow_mut().take())
-                .unwrap_or_default();
-            let status = CARGO_EXIT_STATUS.load(Ordering::SeqCst);
-            if let Some(old_cwd) = old_cwd {
-                let _ = std::env::set_current_dir(old_cwd);
-            }
+            drop(cwd_guard);
             (output, status)
         }
         LspHostProgram::Rustc => {
@@ -3418,6 +4092,10 @@ mod cwd_aware_fs_tests {
 
     type TestLfs = StandardDynamicLFS<ShellVirtualStdIO>;
     type TestFs = CwdAwareFileSystem<StandardDynamicFileSystem<TestLfs>>;
+    const RUST_SRC_FIXTURE: &[u8] = include_bytes!("../testdata/rust-src-zstd256k.sqfs");
+    const CORE_SOURCE: &[u8] = b"pub const CORE_SENTINEL: &str = \"core-from-squashfs\";\n";
+    const CORE_SOURCE_PATH: &[u8] =
+        b"/sysroot/lib/rustlib/src/rust/library/core/src/lib.rs";
 
     struct Fixture {
         fs: TestFs,
@@ -3459,6 +4137,17 @@ mod cwd_aware_fs_tests {
         }
     }
 
+    fn rust_src_fixture() -> Fixture {
+        let fixture = fixture();
+        let counts = fixture
+            .fs
+            .mount_rust_src(RUST_SRC_FIXTURE.to_vec())
+            .unwrap();
+        assert_eq!(counts.0, 5);
+        assert!(counts.1 >= 10);
+        fixture
+    }
+
     fn stat_size<Wasm: WasmAccess + WasmAccessName + 'static>(
         fs: &TestFs,
         fd: Fd,
@@ -3476,6 +4165,290 @@ mod cwd_aware_fs_tests {
             wasip1::ERRNO_SUCCESS,
         );
         stat.size
+    }
+
+    fn rust_src_rpc_request(operation: u32, path: &str, offset: u64, capacity: usize) -> Vec<u8> {
+        let mut request = vec![0u8; RUST_SRC_FS_RPC_HEADER_LEN + path.len() + capacity];
+        request[0..4].copy_from_slice(&operation.to_le_bytes());
+        request[4..8].copy_from_slice(&(path.len() as u32).to_le_bytes());
+        request[8..16].copy_from_slice(&offset.to_le_bytes());
+        request[16..20].copy_from_slice(&(capacity as u32).to_le_bytes());
+        request[RUST_SRC_FS_RPC_HEADER_LEN..RUST_SRC_FS_RPC_HEADER_LEN + path.len()]
+            .copy_from_slice(path.as_bytes());
+        request
+    }
+
+    fn rpc_u32(request: &[u8], offset: usize) -> u32 {
+        u32::from_le_bytes(request[offset..offset + 4].try_into().unwrap())
+    }
+
+    fn rpc_u64(request: &[u8], offset: usize) -> u64 {
+        u64::from_le_bytes(request[offset..offset + 8].try_into().unwrap())
+    }
+
+    #[test]
+    fn rust_src_rpc_reports_not_mounted_before_bootstrap() {
+        let fixture = fixture();
+        let mut request = rust_src_rpc_request(RUST_SRC_FS_RPC_STAT, "core/src/lib.rs", 0, 0);
+        fixture.fs.handle_rust_src_fs_rpc(&mut request);
+        assert_eq!(rpc_u32(&request, 20), RUST_SRC_FS_RPC_NOT_MOUNTED);
+    }
+
+    #[test]
+    fn rust_src_rpc_stat_read_and_readdir_use_squashfs_backing() {
+        let fixture = rust_src_fixture();
+
+        let mut stat = rust_src_rpc_request(RUST_SRC_FS_RPC_STAT, "core/src/lib.rs", 0, 0);
+        fixture.fs.handle_rust_src_fs_rpc(&mut stat);
+        assert_eq!(rpc_u32(&stat, 20), RUST_SRC_FS_RPC_OK);
+        assert_eq!(rpc_u32(&stat, 24), RUST_SRC_FS_RPC_KIND_FILE);
+        assert_eq!(rpc_u64(&stat, 32), CORE_SOURCE.len() as u64);
+
+        let mut read = rust_src_rpc_request(RUST_SRC_FS_RPC_READ, "core/src/lib.rs", 4, 9);
+        fixture.fs.handle_rust_src_fs_rpc(&mut read);
+        assert_eq!(rpc_u32(&read, 20), RUST_SRC_FS_RPC_OK);
+        assert_eq!(rpc_u32(&read, 28), 9);
+        let output = RUST_SRC_FS_RPC_HEADER_LEN + "core/src/lib.rs".len();
+        assert_eq!(&read[output..output + 9], b"const COR");
+
+        let mut probe = rust_src_rpc_request(RUST_SRC_FS_RPC_READDIR, "", 0, 0);
+        fixture.fs.handle_rust_src_fs_rpc(&mut probe);
+        assert_eq!(rpc_u32(&probe, 20), RUST_SRC_FS_RPC_BUFFER_TOO_SMALL);
+        let required = rpc_u32(&probe, 28) as usize;
+        assert!(required > 0);
+        let mut readdir = rust_src_rpc_request(RUST_SRC_FS_RPC_READDIR, "", 0, required);
+        fixture.fs.handle_rust_src_fs_rpc(&mut readdir);
+        assert_eq!(rpc_u32(&readdir, 20), RUST_SRC_FS_RPC_OK);
+        assert_eq!(rpc_u32(&readdir, 28) as usize, required);
+        let output = RUST_SRC_FS_RPC_HEADER_LEN;
+        let entries: Vec<String> = serde_json::from_slice(&readdir[output..output + required]).unwrap();
+        assert!(entries.iter().any(|entry| entry == "core"));
+        assert!(entries.iter().any(|entry| entry == "portable-simd"));
+    }
+
+    #[test]
+    fn rust_src_mount_is_idempotent_after_first_valid_mount() {
+        let fixture = rust_src_fixture();
+        let first = fixture
+            .fs
+            .rust_src
+            .read()
+            .as_ref()
+            .map(|mount| (mount.file_count(), mount.directory_count(), mount.total_bytes()))
+            .unwrap();
+        assert_eq!(
+            fixture
+                .fs
+                .mount_rust_src(RUST_SRC_FIXTURE.to_vec())
+                .unwrap(),
+            first,
+        );
+    }
+
+    #[test]
+    fn rust_src_wasi_stat_read_pread_and_seek_stay_lazy() {
+        let fixture = rust_src_fixture();
+        assert_eq!(
+            stat_size::<MappedWasm>(&fixture.fs, fixture.root_fd, CORE_SOURCE_PATH),
+            CORE_SOURCE.len() as u64,
+        );
+
+        let mut fd = 0;
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                CORE_SOURCE_PATH.as_ptr(),
+                CORE_SOURCE_PATH.len(),
+                0,
+                !0,
+                !0,
+                0,
+                &mut fd,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        let inode = *fixture.fs.fd_map.get(&fd).unwrap().inode_id();
+        assert!(fixture.fs.lfs.read_file(inode).unwrap().is_empty());
+
+        let mut stat: wasip1::Filestat = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            fixture
+                .fs
+                .fd_filestat_get_raw::<MappedWasm>(fd, &mut stat),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(stat.size, CORE_SOURCE.len() as u64);
+        assert!(fixture.fs.lfs.read_file(inode).unwrap().is_empty());
+
+        let mut partial = [0u8; 9];
+        let partial_iov = Ciovec {
+            buf: partial.as_mut_ptr(),
+            buf_len: partial.len(),
+        };
+        let mut nread = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_pread_raw::<MappedWasm>(fd, &partial_iov, 1, 4, &mut nread),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(nread, partial.len());
+        assert_eq!(&partial, b"const COR");
+
+        let mut offset = 0;
+        assert_eq!(
+            fixture.fs.fd_seek_raw::<MappedWasm>(
+                fd,
+                0,
+                wasip1::WHENCE_END,
+                &mut offset,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(offset, CORE_SOURCE.len() as i64);
+        assert_eq!(
+            fixture.fs.fd_seek_raw::<MappedWasm>(
+                fd,
+                0,
+                wasip1::WHENCE_SET,
+                &mut offset,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+
+        let mut whole = vec![0u8; CORE_SOURCE.len()];
+        let whole_iov = Ciovec {
+            buf: whole.as_mut_ptr(),
+            buf_len: whole.len(),
+        };
+        assert_eq!(
+            fixture
+                .fs
+                .fd_read_raw::<MappedWasm>(fd, &whole_iov, 1, &mut nread),
+            wasip1::ERRNO_SUCCESS,
+        );
+        assert_eq!(nread, CORE_SOURCE.len());
+        assert_eq!(whole, CORE_SOURCE);
+        assert!(fixture.fs.lfs.read_file(inode).unwrap().is_empty());
+        assert_eq!(
+            fixture.fs.fd_close_raw::<MappedWasm>(fd),
+            wasip1::ERRNO_SUCCESS,
+        );
+    }
+
+    #[test]
+    fn rust_src_wasi_rejects_fd_and_path_mutations_with_rofs() {
+        let fixture = rust_src_fixture();
+        let mut fd = 0;
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                CORE_SOURCE_PATH.as_ptr(),
+                CORE_SOURCE_PATH.len(),
+                0,
+                !0,
+                !0,
+                0,
+                &mut fd,
+            ),
+            wasip1::ERRNO_SUCCESS,
+        );
+        let inode = *fixture.fs.fd_map.get(&fd).unwrap().inode_id();
+        let data = b"x";
+        let iov = Ciovec {
+            buf: data.as_ptr() as *mut u8,
+            buf_len: data.len(),
+        };
+        let mut nwritten = 0;
+        assert_eq!(
+            fixture
+                .fs
+                .fd_write_raw::<MappedWasm>(fd, &iov, 1, &mut nwritten),
+            wasip1::ERRNO_ROFS,
+        );
+        assert_eq!(
+            fixture
+                .fs
+                .fd_pwrite_raw::<MappedWasm>(fd, &iov, 1, 0, &mut nwritten),
+            wasip1::ERRNO_ROFS,
+        );
+        assert_eq!(
+            fixture.fs.fd_allocate_raw::<MappedWasm>(fd, 0, 1),
+            wasip1::ERRNO_ROFS,
+        );
+        assert_eq!(
+            fixture.fs.fd_filestat_set_size_raw::<MappedWasm>(fd, 0),
+            wasip1::ERRNO_ROFS,
+        );
+        assert_eq!(
+            fixture
+                .fs
+                .fd_filestat_set_times_raw::<MappedWasm>(fd, 0, 0, 0),
+            wasip1::ERRNO_ROFS,
+        );
+
+        let mut ignored_fd = 0;
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                CORE_SOURCE_PATH.as_ptr(),
+                CORE_SOURCE_PATH.len(),
+                wasip1::OFLAGS_TRUNC,
+                !0,
+                !0,
+                0,
+                &mut ignored_fd,
+            ),
+            wasip1::ERRNO_ROFS,
+        );
+        let new_file = b"/sysroot/lib/rustlib/src/rust/library/core/src/new.rs";
+        assert_eq!(
+            fixture.fs.path_open_raw::<MappedWasm>(
+                fixture.root_fd,
+                0,
+                new_file.as_ptr(),
+                new_file.len(),
+                wasip1::OFLAGS_CREAT,
+                !0,
+                !0,
+                0,
+                &mut ignored_fd,
+            ),
+            wasip1::ERRNO_ROFS,
+        );
+        let new_dir = b"/sysroot/lib/rustlib/src/rust/library/core/src/new-dir";
+        assert_eq!(
+            fixture.fs.path_create_directory_raw::<MappedWasm>(
+                fixture.root_fd,
+                new_dir.as_ptr(),
+                new_dir.len(),
+            ),
+            wasip1::ERRNO_ROFS,
+        );
+        assert_eq!(
+            fixture.fs.path_unlink_file_raw::<MappedWasm>(
+                fixture.root_fd,
+                CORE_SOURCE_PATH.as_ptr(),
+                CORE_SOURCE_PATH.len(),
+            ),
+            wasip1::ERRNO_ROFS,
+        );
+        let outside = b"/shared.txt";
+        assert_eq!(
+            fixture.fs.path_rename_raw::<MappedWasm>(
+                fixture.root_fd,
+                CORE_SOURCE_PATH.as_ptr(),
+                CORE_SOURCE_PATH.len(),
+                fixture.root_fd,
+                outside.as_ptr(),
+                outside.len(),
+            ),
+            wasip1::ERRNO_ROFS,
+        );
+        assert!(fixture.fs.lfs.read_file(inode).unwrap().is_empty());
     }
 
     #[test]
@@ -4472,6 +5445,57 @@ mod invocation_state_tests {
     }
 
     #[test]
+    fn cargo_output_capture_is_visible_across_threads() {
+        let _run_guard = CARGO_RUN_LOCK.lock();
+        *HOST_CARGO_OUTPUT.lock() = Some(CargoOutput::default());
+        let written = std::thread::spawn(|| {
+            <ShellVirtualStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::write(
+                b"metadata-json",
+            )
+            .unwrap()
+        })
+        .join()
+        .unwrap();
+        let output = HOST_CARGO_OUTPUT.lock().take().unwrap_or_default();
+
+        assert_eq!(written, b"metadata-json".len());
+        assert_eq!(output.stdout, b"metadata-json");
+    }
+
+    #[test]
+    fn cargo_output_capture_uses_global_sink_while_child_stdio_has_another_owner() {
+        let _run_guard = CARGO_RUN_LOCK.lock();
+        *HOST_CARGO_OUTPUT.lock() = Some(CargoOutput::default());
+        let _child_reset = ChildProcessStdioReset::install(Some(ChildProcessStdio::new(
+            b"/child".to_vec(),
+            Vec::new(),
+            None,
+        )));
+
+        let written = std::thread::spawn(|| {
+            <ShellVirtualStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::write(
+                b"metadata-during-rustc",
+            )
+            .unwrap()
+        })
+        .join()
+        .unwrap();
+        let output = HOST_CARGO_OUTPUT.lock().take().unwrap_or_default();
+
+        assert_eq!(written, b"metadata-during-rustc".len());
+        assert_eq!(output.stdout, b"metadata-during-rustc");
+        assert_eq!(
+            CHILD_PROCESS_STDIO
+                .lock()
+                .as_ref()
+                .unwrap()
+                .stdout
+                .buffered_len(),
+            0,
+        );
+    }
+
+    #[test]
     fn rustc_argv_root_path_hints_cover_supported_forms() {
         let argv = [
             "rustc",
@@ -4512,6 +5536,31 @@ mod invocation_state_tests {
             .map(|components| components.into_iter().map(str::to_string).collect())
             .collect::<Vec<Vec<String>>>(),
         );
+    }
+
+    #[test]
+    fn cargo_root_path_hints_keep_virtual_cwd_absolute_paths_at_root() {
+        let argv = [
+            "/cargo",
+            "metadata",
+            "--manifest-path",
+            "/sysroot/lib/rustlib/src/rust/library/Cargo.toml",
+        ]
+        .map(str::to_string);
+
+        let hints = cargo_root_path_hints(
+            &argv,
+            "/sysroot/lib/rustlib/src/rust/library",
+        );
+        assert!(hints.contains(&vec!["cargo".to_string()]));
+        assert!(hints.contains(&vec![
+            "sysroot".to_string(),
+            "lib".to_string(),
+            "rustlib".to_string(),
+            "src".to_string(),
+            "rust".to_string(),
+            "library".to_string(),
+        ]));
     }
 
     #[test]
@@ -5194,6 +6243,14 @@ mod lsp_cargo_result_tests {
         assert_eq!(
             lsp_host_program(&["cargo".to_string(), "metadata".to_string()]),
             Some(LspHostProgram::Cargo)
+        );
+        assert_eq!(
+            lsp_host_program(&["/cargo".to_string(), "metadata".to_string()]),
+            Some(LspHostProgram::Cargo)
+        );
+        assert_eq!(
+            lsp_host_program(&["/sysroot/bin/rustc".to_string(), "--version".to_string()]),
+            Some(LspHostProgram::Rustc)
         );
     }
 

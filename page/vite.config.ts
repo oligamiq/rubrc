@@ -30,7 +30,7 @@ async function readDevelopmentRustSrcAsset(): Promise<DevelopmentRustSrcAsset> {
     );
   }
   return {
-    path: `${developmentRustSrcDirectory}/rust-src-${sha256}.tar.vfsbr`,
+    path: `${developmentRustSrcDirectory}/rust-src-${sha256}.sqfs`,
     sha256,
   };
 }
@@ -96,7 +96,7 @@ async function serveDevelopmentRustSrcAsset(
     return;
   }
   const requestUrl = new URL(rawUrl, "http://localhost");
-  if (requestUrl.pathname !== "/rust-src.tar.vfsbr") {
+  if (requestUrl.pathname !== "/rust-src.sqfs") {
     next();
     return;
   }
@@ -195,6 +195,9 @@ export default defineConfig(async ({ command, isPreview }) => {
       tailwindcss(),
     ],
     optimizeDeps: {
+      include: [
+        "@codingame/monaco-vscode-editor-api/esm/vs/editor/editor.worker.js",
+      ],
       exclude: [
         "brotli-dec-wasm",
         "@oligami/browser_wasi_shim-threads",

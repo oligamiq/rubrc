@@ -2,12 +2,8 @@ import {
   type ArchiveBytesOptions,
   loadSysrootArchiveBytes,
   maintainRustSrcArchiveCache,
-  parseSysrootArchiveEntriesFromBytes,
-  type SysrootArchiveEntry,
 } from "./sysroot_archive.ts";
 import { takeExactSysrootChunk } from "./sysroot_protocol.ts";
-import { populateWebRustSrc } from "./web_sysroot.ts";
-import { workspaceFileSystem } from "./workspace_fs.ts";
 
 export type SysrootArchiveProgress = {
   triple: string;
@@ -22,9 +18,6 @@ type SysrootArchiveStoreDependencies = {
     triple: string,
     options?: ArchiveBytesOptions,
   ) => Promise<Uint8Array<ArrayBuffer>>;
-  parseEntries?: (
-    archiveBytes: Uint8Array<ArrayBuffer>,
-  ) => Promise<SysrootArchiveEntry[]>;
   maintainRustSrcCache?: () => void;
 };
 
@@ -52,9 +45,6 @@ export class SysrootArchiveStore {
   readonly #loadBytes: NonNullable<
     SysrootArchiveStoreDependencies["loadBytes"]
   >;
-  readonly #parseEntries: NonNullable<
-    SysrootArchiveStoreDependencies["parseEntries"]
-  >;
   readonly #maintainRustSrcCache: NonNullable<
     SysrootArchiveStoreDependencies["maintainRustSrcCache"]
   >;
@@ -67,8 +57,6 @@ export class SysrootArchiveStore {
 
   constructor(dependencies: SysrootArchiveStoreDependencies = {}) {
     this.#loadBytes = dependencies.loadBytes ?? loadSysrootArchiveBytes;
-    this.#parseEntries =
-      dependencies.parseEntries ?? parseSysrootArchiveEntriesFromBytes;
     this.#maintainRustSrcCache =
       dependencies.maintainRustSrcCache ?? maintainRustSrcArchiveCache;
   }
@@ -205,22 +193,7 @@ export class SysrootArchiveStore {
         signal: controller.signal,
       });
       controller.signal.throwIfAborted();
-      if (triple === "rust-src") {
-        const entries = await this.#parseEntries(archiveBytes);
-        controller.signal.throwIfAborted();
-        const decoder = new TextDecoder();
-        const hasCoreRoot = entries.some(
-          (entry) =>
-            !entry.isDirectory &&
-            entry.data.byteLength > 0 &&
-            decoder.decode(entry.name) === "core/src/lib.rs",
-        );
-        if (!hasCoreRoot) {
-          throw new Error("rust-src archive is missing core/src/lib.rs");
-        }
-        populateWebRustSrc(workspaceFileSystem.sysrootContents, entries);
-        this.#maintainRustSrcCache();
-      }
+      if (triple === "rust-src") this.#maintainRustSrcCache();
       this.#archives.set(triple, archiveBytes);
       this.#emit({
         triple,

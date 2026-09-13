@@ -29,15 +29,41 @@ const bindingsDir = new URL(
   import.meta.url,
 );
 
-globalThis.onmessage = async (event) => {
+type DiagnosticsResult = {
+  ok: boolean;
+  detail: string;
+  cargoCallsBeforeInit?: number;
+};
+
+type HostCallbackMessage = {
+  name?: string;
+  args?: Record<string, unknown>;
+};
+
+function asHostCallbackMessage(value: unknown): HostCallbackMessage {
+  if (typeof value !== "object" || value === null) return {};
+  return value as HostCallbackMessage;
+}
+
+type WorkerScope = {
+  onmessage: ((event: { data: any }) => void | Promise<void>) | null;
+  postMessage(message: unknown): void;
+};
+
+const workerScope = globalThis as unknown as WorkerScope;
+workerScope.onmessage = async (event) => {
   const trace = new VfsDebugTraceCollector();
   let tracePump: ReturnType<typeof startVfsDebugTracePump> | undefined;
   let lspOutputPort: MessagePort | undefined;
-  let result = {
+  let result: DiagnosticsResult = {
     ok: false,
     detail: "diagnostics worker did not produce a result",
   };
   let cargoCallsBeforeInit: number | undefined;
+  let messages: any[] = [];
+  let crateGraph = "";
+  const stopAfterHostCargoOutcome =
+    event.data.stopAfterHostCargoOutcome === true;
   try {
     const wasm = await WebAssembly.compile(
       await Deno.readFile(new URL("vfs.core.wasm", bindingsDir)),
@@ -65,7 +91,7 @@ globalThis.onmessage = async (event) => {
     );
     await animal.wait_worker_background_worker();
 
-    const messages: any[] = [];
+    messages = [];
     const decoder = new LspFrameDecoder();
     const receiveTerminalWrite = (args: {
       session_id: number;
@@ -89,7 +115,8 @@ globalThis.onmessage = async (event) => {
       animal.wasiImport,
       animal.wasiThreadImport,
       sharedMemory,
-      (index, message: { name?: string; args?: Record<string, unknown> }) => {
+      (index, rawMessage: unknown) => {
+        const message = asHostCallbackMessage(rawMessage);
         if (message.name === "terminalWrite") {
           const args = message.args as { session_id: number; data: unknown };
           receiveTerminalWrite(args);
@@ -134,8 +161,9 @@ globalThis.onmessage = async (event) => {
     const waitForMessage = async (
       predicate: (message: any) => boolean,
       description: string,
+      timeoutMs = 90_000,
     ): Promise<any> => {
-      const deadline = Date.now() + 90_000;
+      const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         for (let index = messages.length - 1; index >= 0; index--) {
           const message = messages[index];
@@ -194,8 +222,41 @@ globalThis.onmessage = async (event) => {
         ])[0],
       },
     });
+    if (stopAfterHostCargoOutcome) {
+      const outcomeDeadline = Date.now() + 90_000;
+      while (Date.now() < outcomeDeadline) {
+        const snapshot = trace.snapshot().trace;
+        const requests = Array.from(
+          snapshot.matchAll(/\[vfs-debug\] host-cargo:request id=(\d+)/g),
+        );
+        const request = requests.find(
+          (match) => Number(match[1]) > (cargoCallsBeforeInit ?? 0),
+        );
+        if (request) {
+          const callId = Number(request[1]);
+          const callStart = request.index ?? 0;
+          const callTrace = snapshot.slice(callStart);
+          const outcome = callTrace.match(
+            new RegExp(
+              `\\[vfs-debug\\] (host-cargo:(?:response|reject) id=${callId} status=-?\\d+)`,
+            ),
+          );
+          if (outcome) {
+            result = {
+              ok: true,
+              detail: `host-cargo focused host outcome id=${callId}: ${
+                outcome[1]
+              }`,
+              cargoCallsBeforeInit,
+            };
+            return;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("timed out waiting for host-run result outcome");
+    }
     const graphDeadline = Date.now() + 90_000;
-    let crateGraph = "";
     let graphRequestId = 2;
     const graphHasNode = (label: string) =>
       new RegExp(`\\blabel\\s*=\\s*"${label}"`).test(crateGraph);
@@ -212,12 +273,22 @@ globalThis.onmessage = async (event) => {
         "full crate graph",
       );
       crateGraph = typeof response.result === "string" ? response.result : "";
-      if (graphHasNode("rubrc_main") && graphHasNode("core")) {
+      if (
+        graphHasNode("rubrc_main") &&
+        graphHasNode("core") &&
+        graphHasNode("alloc") &&
+        graphHasNode("std")
+      ) {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    if (!graphHasNode("rubrc_main") || !graphHasNode("core")) {
+    if (
+      !graphHasNode("rubrc_main") ||
+      !graphHasNode("core") ||
+      !graphHasNode("alloc") ||
+      !graphHasNode("std")
+    ) {
       throw new Error(`incomplete crate graph: ${crateGraph}`);
     }
 
@@ -237,28 +308,113 @@ globalThis.onmessage = async (event) => {
     const isPublication = (message: any) =>
       message.method === "textDocument/publishDiagnostics" &&
       message.params?.uri === uri;
-    await waitForMessage(
-      (message) =>
-        isPublication(message) && message.params.diagnostics.length === 0,
-      "initial valid Rust diagnostics",
-    );
-
-    for (let index = messages.length - 1; index >= 0; index--) {
-      if (isPublication(messages[index])) messages.splice(index, 1);
-    }
+    const definitionText =
+      "fn main() { let values: Vec<i32> = Vec::new(); let _ = values.len(); }\n";
     send({
       jsonrpc: "2.0",
       method: "textDocument/didChange",
       params: {
         textDocument: { uri, version: 2 },
+        contentChanges: [{
+          range: {
+            start: { line: 0, character: 0 },
+            end: { line: 1, character: 0 },
+          },
+          rangeLength: 13,
+          text: definitionText,
+        }],
+      },
+    });
+    const definitionRequestId = graphRequestId++;
+    send({
+      jsonrpc: "2.0",
+      id: definitionRequestId,
+      method: "textDocument/definition",
+      params: {
+        textDocument: { uri },
+        position: { line: 0, character: definitionText.indexOf("Vec") + 1 },
+      },
+    });
+    const definitionResponse = await waitForMessage(
+      (message) => message.id === definitionRequestId,
+      "Vec definition",
+      180_000,
+    );
+    if (
+      !JSON.stringify(definitionResponse.result).includes(
+        "/library/alloc/src/vec/mod.rs",
+      )
+    ) {
+      throw new Error(
+        `Vec definition did not resolve into rust-src: ${
+          JSON.stringify(definitionResponse.result)
+        }`,
+      );
+    }
+
+    const completionText =
+      "fn main() { let mut values: Vec<i32> = Vec::new(); values.pu }\n";
+    send({
+      jsonrpc: "2.0",
+      method: "textDocument/didChange",
+      params: {
+        textDocument: { uri, version: 3 },
+        contentChanges: [{
+          range: {
+            start: { line: 0, character: 0 },
+            end: { line: 1, character: 0 },
+          },
+          rangeLength: definitionText.length,
+          text: completionText,
+        }],
+      },
+    });
+    const completionRequestId = graphRequestId++;
+    send({
+      jsonrpc: "2.0",
+      id: completionRequestId,
+      method: "textDocument/completion",
+      params: {
+        textDocument: { uri },
+        position: {
+          line: 0,
+          character: completionText.indexOf("values.pu") + "values.pu".length,
+        },
+        context: { triggerKind: 1 },
+      },
+    });
+    const completionResponse = await waitForMessage(
+      (message) => message.id === completionRequestId,
+      "Vec method completion",
+    );
+    const completionItems = Array.isArray(completionResponse.result)
+      ? completionResponse.result
+      : completionResponse.result?.items ?? [];
+    if (!completionItems.some((item: any) => item.label === "push")) {
+      throw new Error(
+        `Vec completion did not include push: ${
+          JSON.stringify(completionResponse.result)
+        }`,
+      );
+    }
+
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (isPublication(messages[index])) messages.splice(index, 1);
+    }
+    const invalidText = 'fn main() { let value: i32 = "wrong"; }\n';
+    send({
+      jsonrpc: "2.0",
+      method: "textDocument/didChange",
+      params: {
+        textDocument: { uri, version: 4 },
         contentChanges: [
           {
             range: {
               start: { line: 0, character: 0 },
               end: { line: 1, character: 0 },
             },
-            rangeLength: 13,
-            text: 'fn main() { let value: i32 = "wrong"; }\n',
+            rangeLength: completionText.length,
+            text: invalidText,
           },
         ],
       },
@@ -283,14 +439,14 @@ globalThis.onmessage = async (event) => {
       jsonrpc: "2.0",
       method: "textDocument/didChange",
       params: {
-        textDocument: { uri, version: 3 },
+        textDocument: { uri, version: 5 },
         contentChanges: [
           {
             range: {
               start: { line: 0, character: 0 },
               end: { line: 1, character: 0 },
             },
-            rangeLength: 40,
+            rangeLength: invalidText.length,
             text: "fn main() {}\n",
           },
         ],
@@ -310,10 +466,25 @@ globalThis.onmessage = async (event) => {
       cargoCallsBeforeInit,
     };
   } catch (error) {
+    const recentMessages = messages.slice(-40).map((message) => ({
+      id: message.id,
+      method: message.method,
+      params: message.method === "experimental/serverStatus" ||
+          message.method === "window/showMessage" ||
+          message.method === "window/logMessage"
+        ? message.params
+        : undefined,
+      error: message.error,
+    }));
+    const errorDetail = error instanceof Error
+      ? (error.stack ?? error.message)
+      : String(error);
     result = {
       ok: false,
       detail:
-        error instanceof Error ? (error.stack ?? error.message) : String(error),
+        `${errorDetail}\ncrate graph: ${crateGraph}\nrecent LSP messages: ${
+          JSON.stringify(recentMessages)
+        }`,
       cargoCallsBeforeInit,
     };
   } finally {
@@ -326,7 +497,7 @@ globalThis.onmessage = async (event) => {
     }
     lspOutputPort?.close();
     const traceSnapshot = trace.snapshot();
-    globalThis.postMessage({
+    workerScope.postMessage({
       ...result,
       trace: traceSnapshot.trace,
       traceDroppedChunks: traceSnapshot.droppedChunks,

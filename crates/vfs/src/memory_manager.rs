@@ -36,12 +36,26 @@ impl MemoryReserveManager {
 
         let current = crate::memory_size::<Wasm>();
         if current >= config.min_pages {
+            crate::debug_trace(&format!(
+                "memory:target={} action=skip current={} minimum={}",
+                Wasm::NAME,
+                current,
+                config.min_pages,
+            ));
             *reserved = true;
             return;
         }
 
         let reserve_pages = config.reserve_pages.max(config.min_pages - current);
         let result = crate::memory_reserve::<Wasm>(reserve_pages);
+        crate::debug_trace(&format!(
+            "memory:target={} action=reserve current={} minimum={} requested={} result={}",
+            Wasm::NAME,
+            current,
+            config.min_pages,
+            reserve_pages,
+            result,
+        ));
         if result <= 0 {
             Self::warn_failed(Wasm::NAME, config, current, reserve_pages);
             return;
@@ -110,8 +124,8 @@ pub(crate) const LLVM_CONFIG: TargetConfig = TargetConfig {
 };
 
 pub(crate) const LSP_CONFIG: TargetConfig = TargetConfig {
-    min_pages: 2048,
-    reserve_pages: 2048,
+    min_pages: 8192,
+    reserve_pages: 8192,
 };
 
 pub(crate) const CARGO_CONFIG: TargetConfig = TargetConfig {
@@ -132,5 +146,16 @@ pub(crate) static RUSTC_RESERVE_ONCE: TargetReserveOnce = TargetReserveOnce::new
 pub(crate) static LLVM_RESERVE_ONCE: TargetReserveOnce = TargetReserveOnce::new();
 pub(crate) static LSP_RESERVE_ONCE: TargetReserveOnce = TargetReserveOnce::new();
 pub(crate) static VFS_SHELL_RESERVE_ONCE: TargetReserveOnce = TargetReserveOnce::new();
+
+#[cfg(test)]
+mod tests {
+    use super::LSP_CONFIG;
+
+    #[test]
+    fn lsp_reserve_exceeds_complete_rust_src_diagnostics_peak() {
+        assert_eq!(LSP_CONFIG.min_pages, 8192);
+        assert_eq!(LSP_CONFIG.reserve_pages, 8192);
+    }
+}
 
 pub(crate) static LSP_START_ONCE: StartOnce = StartOnce::new();

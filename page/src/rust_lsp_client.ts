@@ -174,6 +174,7 @@ export async function startRustLspClient(
         activationModel,
         activationSignal,
         semanticWarming,
+        reportProjectProgress,
       ) => {
         analyzerConfiguration.activateProject();
         await activateRustProject({
@@ -192,6 +193,7 @@ export async function startRustLspClient(
               language,
             ),
           semanticWarming,
+          reportProjectProgress,
         });
         signal.throwIfAborted();
         activationSignal.throwIfAborted();

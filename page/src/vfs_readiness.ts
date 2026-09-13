@@ -219,10 +219,14 @@ export async function awaitStartupSysrootsSettlement(
   timing: Pick<StartupSysrootTiming, "sleep"> = {},
 ): Promise<VfsReadyResult> {
   signal.throwIfAborted();
-  const sleep =
-    timing.sleep ??
-    (() =>
-      new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  const sleep = timing.sleep ?? (() =>
+    new Promise<void>((resolve) => {
+      const requestFrame = (globalThis as unknown as {
+        requestAnimationFrame?: (callback: () => void) => number;
+      }).requestAnimationFrame;
+      if (requestFrame) requestFrame(() => resolve());
+      else setTimeout(resolve, 0);
+    }));
   let abortReason: unknown;
   while (true) {
     let status: StartupSysrootStatus;

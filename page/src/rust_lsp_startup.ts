@@ -1,4 +1,5 @@
 import { createRustAnalyzerProjectSettings } from "./rust_lsp_config.ts";
+import type { CrateGraphProgress } from "./rust_analyzer_readiness.ts";
 
 export type RustLspStartupActions = {
   prepopulateMain(): Promise<void>;
@@ -17,12 +18,12 @@ export type RustProjectActivation<TModel> = {
     sendRequest?(method: string, params?: unknown): Promise<unknown>;
   };
   readiness: {
-    waitForCrateGraph(signal: AbortSignal): Promise<void>;
-    noteDocumentChanged(version: number): void;
-    waitForSemanticReadiness(
-      model: TModel,
+    waitForCrateGraph(
       signal: AbortSignal,
+      observeProgress?: (progress: CrateGraphProgress) => void,
     ): Promise<void>;
+    noteDocumentChanged(version: number): void;
+    waitForSemanticReadiness(model: TModel, signal: AbortSignal): Promise<void>;
   };
   sync: {
     waitForDidClose(uri: string): Promise<void>;
@@ -30,6 +31,7 @@ export type RustProjectActivation<TModel> = {
   };
   setModelLanguage(model: TModel, language: string): void;
   semanticWarming(): void;
+  reportProjectProgress(progress: CrateGraphProgress): void;
 };
 
 const awaitWithAbort = async <T>(
@@ -81,6 +83,7 @@ export async function activateRustProject<TModel>(
     sync,
     setModelLanguage,
     semanticWarming,
+    reportProjectProgress,
   } = activation;
   if (model !== initializedModel) {
     throw new Error("Rust activation model changed after initialization");
@@ -95,7 +98,10 @@ export async function activateRustProject<TModel>(
     signal,
   );
   signal.throwIfAborted();
-  await awaitWithAbort(readiness.waitForCrateGraph(signal), signal);
+  await awaitWithAbort(
+    readiness.waitForCrateGraph(signal, reportProjectProgress),
+    signal,
+  );
   signal.throwIfAborted();
   await awaitMutationWithAbort(writeMain(content), signal);
   signal.throwIfAborted();
@@ -163,8 +169,8 @@ export async function runRustLspStartup(
     void startupPromise.catch(() => undefined);
     await Promise.race([startupPromise, startupTimeout, aborted]);
   } catch (error) {
-    const activelyCancelled = error === timeoutError ||
-      (signal.aborted && error === signal.reason);
+    const activelyCancelled =
+      error === timeoutError || (signal.aborted && error === signal.reason);
     if (activelyCancelled && startupPromise) {
       if (startPromise) {
         try {

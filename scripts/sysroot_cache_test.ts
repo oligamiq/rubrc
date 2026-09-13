@@ -1,4 +1,10 @@
 import {
+  createRustSrcCacheMetadata,
+  deterministicRustSrcSquashfsArgs,
+  deterministicRustSrcTarArgs,
+  rustSrcToolchainIdentity,
+  rustSrcCacheMatchesIdentity,
+  rustSrcCacheMatchesMetadata,
   prepareCachedArchive,
   prepareCachedSysroot,
   type SysrootCacheDeps,
@@ -6,6 +12,114 @@ import {
   validateRustSrcArchive,
   validateTarEntryName,
 } from "./sysroot_cache.ts";
+
+Deno.test("rust-src cache identity includes exact compiler and sysroot", () => {
+  const identity = rustSrcToolchainIdentity(
+    "rustc 1.95.0-nightly\ncommit-hash: abc123\n",
+    "/toolchains/nightly",
+  );
+  if (!rustSrcCacheMatchesIdentity(identity, `${identity}\n`)) {
+    throw new Error("matching identity was rejected");
+  }
+  if (
+    rustSrcCacheMatchesIdentity(
+      identity,
+      rustSrcToolchainIdentity(
+        "rustc 1.95.0-nightly\ncommit-hash: def456",
+        "/toolchains/nightly",
+      ),
+    )
+  ) {
+    throw new Error("different compiler identity was reused");
+  }
+  if (
+    rustSrcCacheMatchesIdentity(
+      identity,
+      rustSrcToolchainIdentity(
+        "rustc 1.95.0-nightly\ncommit-hash: abc123",
+        "/other",
+      ),
+    )
+  ) {
+    throw new Error("different sysroot identity was reused");
+  }
+});
+
+Deno.test("rust-src cache metadata rejects an archive digest mismatch", async () => {
+  const identity = rustSrcToolchainIdentity("rustc exact", "/exact/sysroot");
+  const original = new Uint8Array([1, 2, 3]);
+  const metadata = await createRustSrcCacheMetadata(identity, original);
+  if (!await rustSrcCacheMatchesMetadata(identity, original, metadata)) {
+    throw new Error("matching cache metadata was rejected");
+  }
+  if (
+    await rustSrcCacheMatchesMetadata(
+      identity,
+      new Uint8Array([1, 2, 4]),
+      metadata,
+    )
+  ) {
+    throw new Error("digest-mismatched archive was accepted");
+  }
+});
+
+Deno.test("rust-src tar arguments fix ordering and metadata", () => {
+  const args = deterministicRustSrcTarArgs("/toolchain/library");
+  const expected = [
+    "--create",
+    "--file",
+    "-",
+    "--sort=name",
+    "--mtime=@0",
+    "--owner=0",
+    "--group=0",
+    "--numeric-owner",
+    "--mode=u+rwX,go+rX,go-w",
+    "--pax-option=delete=atime,delete=ctime",
+    "--directory",
+    "/toolchain/library",
+    ".",
+  ];
+  if (args.join("\n") !== expected.join("\n")) {
+    throw new Error(
+      `unexpected deterministic tar arguments:\n${args.join("\n")}`,
+    );
+  }
+});
+
+Deno.test("rust-src SquashFS arguments fix compression metadata and timestamps", () => {
+  const args = deterministicRustSrcSquashfsArgs(
+    "/toolchain/library",
+    "/tmp/rust-src.sqfs",
+  );
+  const expected = [
+    "/toolchain/library",
+    "/tmp/rust-src.sqfs",
+    "-noappend",
+    "-comp",
+    "zstd",
+    "-Xcompression-level",
+    "22",
+    "-b",
+    "262144",
+    "-repro-time",
+    "0",
+    "-all-root",
+    "-force-file-mode",
+    "0644",
+    "-force-dir-mode",
+    "0755",
+    "-no-xattrs",
+    "-no-exports",
+    "-no-progress",
+    "-quiet",
+    "-processors",
+    "1",
+  ];
+  if (args.join("\n") !== expected.join("\n")) {
+    throw new Error(`unexpected SquashFS arguments:\n${args.join("\n")}`);
+  }
+});
 
 Deno.test("rust-src archive validation requires complete safe crate roots", async () => {
   const archive = new Uint8Array([7]);
@@ -110,7 +224,7 @@ Deno.test("prepareCachedArchive uses unique temporary paths per invocation", asy
 Deno.test("sysrootCachePaths uses repo-local cache and workspace paths", () => {
   const paths = sysrootCachePaths();
 
-  if (paths.cacheArchive !== ".rubrc-cache/sysroot/wasm32-wasip1.tar.br") {
+  if (paths.cacheArchive !== ".rubrc-cache/sysroot/rust_wasm/v0.2.1/wasm32-wasip1.tar.br") {
     throw new Error(`unexpected cache archive: ${paths.cacheArchive}`);
   }
   if (paths.expandedSysroot !== "test_workspace_rustc/sysroot") {
@@ -119,6 +233,27 @@ Deno.test("sysrootCachePaths uses repo-local cache and workspace paths", () => {
   if (!paths.url.endsWith("/wasm32-wasip1.tar.br")) {
     throw new Error(`unexpected sysroot URL: ${paths.url}`);
   }
+});
+
+Deno.test("default target archive cache is release-bound without removing old caches", async () => {
+  const oldCache = ".rubrc-cache/sysroot/wasm32-wasip1.tar.br";
+  const removed: string[] = [];
+  const result = await prepareCachedArchive({
+    deps: {
+      exists: async (path) => path === oldCache,
+      remove: async (path) => { removed.push(path); },
+      mkdir: async () => {},
+      readFile: async () => { throw new Error("old cache reused"); },
+      writeFile: async () => {},
+      rename: async () => {},
+      fetchBytes: async () => new Uint8Array([7]),
+      extractTarBr: async () => {},
+    },
+  });
+  if (result.cacheArchive !== sysrootCachePaths().cacheArchive || result.source !== "download") {
+    throw new Error("default cache preparation disagrees with release paths");
+  }
+  if (removed.includes(oldCache)) throw new Error("old cache deleted");
 });
 
 Deno.test("prepareCachedSysroot clears expanded sysroot and uses cached archive", async () => {

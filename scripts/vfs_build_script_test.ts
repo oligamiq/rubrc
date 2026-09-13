@@ -98,6 +98,21 @@ Deno.test("vfs copy script normalizes generated JS and preserves authored overla
       "generated vfs  \nconst tab = true;\t\r\nconst inside = 'keep  spaces';\n",
     );
     Deno.writeTextFileSync(`${sourceDir}/other.js`, "other generated  \n");
+    Deno.writeTextFileSync(
+      `${sourceDir}/common.ts`,
+      [
+        "class FakeWorker {",
+        "    worker;",
+        "    onmessage;",
+        "    constructor(url) {",
+        '        this.worker.on("message", (message) => {});',
+        "    }",
+        "    postMessage(message) {",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
     Deno.writeTextFileSync(`${sourceDir}/inst.ts`, "generated inst");
     Deno.writeTextFileSync(
       `${sourceDir}/package.json`,
@@ -160,6 +175,18 @@ Deno.test("vfs copy script normalizes generated JS and preserves authored overla
     ) {
       throw new Error("copy script must not normalize other generated files");
     }
+    const common = Deno.readTextFileSync(`${targetDir}/common.ts`);
+    for (const expected of [
+      "worker: any;",
+      "onmessage?: (event: { data: unknown }) => void;",
+      "constructor(url: string | URL)",
+      '(message: unknown) =>',
+      "postMessage(message: unknown)",
+    ]) {
+      if (!common.includes(expected)) {
+        throw new Error(`copy script must type generated common.ts: ${expected}`);
+      }
+    }
     if (Deno.readTextFileSync(`${targetDir}/inst.ts`) !== "custom inst  \n") {
       throw new Error("copy script must preserve inst.ts");
     }
@@ -212,6 +239,41 @@ Deno.test("vfs copy script normalizes generated JS and preserves authored overla
     }
     if (staleExists) {
       throw new Error("copy script must remove stale generated files");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("vfs copy script validates generated common before replacing target", () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const sourceDir = `${tempDir}/dist`;
+    const targetDir = `${tempDir}/vfs_bindings`;
+    Deno.mkdirSync(sourceDir);
+    Deno.mkdirSync(targetDir);
+    Deno.writeTextFileSync(`${sourceDir}/vfs.js`, "generated\n");
+    Deno.writeTextFileSync(`${sourceDir}/common.ts`, "class FakeWorker {}\n");
+    Deno.writeTextFileSync(`${targetDir}/sentinel.txt`, "keep me");
+    Deno.writeTextFileSync(`${targetDir}/inst.ts`, "authored overlay");
+
+    const result = new Deno.Command("node", {
+      args: ["scripts/copy_vfs_bindings.mjs"],
+      env: {
+        VFS_BINDINGS_SOURCE_DIR: sourceDir,
+        VFS_BINDINGS_TARGET_DIR: targetDir,
+      },
+      cwd: new URL("..", import.meta.url).pathname,
+    }).outputSync();
+
+    if (result.success) {
+      throw new Error("invalid generated common.ts must fail the copy");
+    }
+    if (Deno.readTextFileSync(`${targetDir}/sentinel.txt`) !== "keep me") {
+      throw new Error("generated common validation modified target before failing");
+    }
+    if (Deno.readTextFileSync(`${targetDir}/inst.ts`) !== "authored overlay") {
+      throw new Error("generated common validation lost authored overlay");
     }
   } finally {
     Deno.removeSync(tempDir, { recursive: true });

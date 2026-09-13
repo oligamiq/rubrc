@@ -24,6 +24,18 @@ Deno.test("Monaco worker setup avoids empty aliased language workers", () => {
   }
 });
 
+Deno.test("Vite pre-optimizes the resolved Monaco editor worker entry", () => {
+  const resolvedWorkerEntry =
+    "@codingame/monaco-vscode-editor-api/esm/vs/editor/editor.worker.js";
+  const includeBlock =
+    viteConfigSource.match(
+      /optimizeDeps\s*:\s*\{[\s\S]*?include\s*:\s*\[([\s\S]*?)\]/,
+    )?.[1] ?? "";
+  if (!includeBlock.includes(`"${resolvedWorkerEntry}"`)) {
+    throw new Error(`optimizeDeps.include is missing ${resolvedWorkerEntry}`);
+  }
+});
+
 Deno.test("Vite dev disables browser cache for patched WASI thread shim modules", () => {
   const cacheGuardPluginSource = viteConfigSource.match(
     /function wasiThreadShimCacheGuardPlugin\(\): Plugin \{[\s\S]*?\n\}/,

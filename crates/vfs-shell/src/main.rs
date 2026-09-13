@@ -445,6 +445,15 @@ unsafe extern "C" {
     #[link_name = "sysroot_read_archive_chunk"]
     pub fn sysroot_read_archive_chunk(data_ptr: i32, chunk_len: i32);
 
+    #[link_name = "sysroot_rust_src_mount_begin"]
+    pub fn sysroot_rust_src_mount_begin(archive_len: i32) -> i32;
+
+    #[link_name = "sysroot_rust_src_mount_abort"]
+    pub fn sysroot_rust_src_mount_abort();
+
+    #[link_name = "sysroot_rust_src_mount_finish"]
+    pub fn sysroot_rust_src_mount_finish(file_count_ptr: i32, total_bytes_ptr: i32) -> i32;
+
     #[link_name = "terminal_write"]
     pub fn terminal_write(session_id: u32, data_ptr: i32, data_len: i32);
 
@@ -568,12 +577,14 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                 sysroot_start_fetch(triple.as_ptr() as i32, triple.len() as i32);
             }
 
-            std::fs::create_dir_all(&base_dir).map_err(|error| {
-                format!(
-                    "failed to create sysroot base directory '{}': {error}",
-                    base_dir.display()
-                )
-            })?;
+            if !is_src {
+                std::fs::create_dir_all(&base_dir).map_err(|error| {
+                    format!(
+                        "failed to create sysroot base directory '{}': {error}",
+                        base_dir.display()
+                    )
+                })?;
+            }
 
             let start_time = std::time::Instant::now();
             let mut archive_len = 0i32;
@@ -581,6 +592,9 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                 unsafe { sysroot_get_archive_meta(&mut archive_len as *mut _ as i32) };
             if !sysroot_meta_has_file(has_archive, triple)? {
                 return Err(format!("sysroot archive for '{triple}' is unavailable"));
+            }
+            if is_src && unsafe { sysroot_rust_src_mount_begin(archive_len) } != 0 {
+                return Err("failed to begin rust-src SquashFS mount".to_string());
             }
             let archive_len = usize::try_from(archive_len)
                 .map_err(|_| format!("invalid sysroot archive length: {archive_len}"))?;
@@ -623,7 +637,40 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                 },
             );
 
-            let (files_loaded, total_bytes) = extract_sysroot_archive(&base_dir, archive_reader)?;
+            let (files_loaded, total_bytes) = if is_src {
+                let mut archive_reader = archive_reader;
+                let copied = match std::io::copy(&mut archive_reader, &mut std::io::sink()) {
+                    Ok(copied) => copied,
+                    Err(error) => {
+                        unsafe { sysroot_rust_src_mount_abort() };
+                        return Err(format!("failed to stream rust-src SquashFS archive: {error}"));
+                    }
+                };
+                if copied != archive_len as u64 {
+                    unsafe { sysroot_rust_src_mount_abort() };
+                    return Err(format!(
+                        "rust-src SquashFS archive length mismatch: expected {archive_len}, streamed {copied}"
+                    ));
+                }
+                let mut file_count = 0u32;
+                let mut source_bytes = 0u64;
+                let mount_status = unsafe {
+                    sysroot_rust_src_mount_finish(
+                        &mut file_count as *mut _ as i32,
+                        &mut source_bytes as *mut _ as i32,
+                    )
+                };
+                if mount_status != 0 {
+                    return Err(format!(
+                        "failed to mount rust-src SquashFS archive (status {mount_status})"
+                    ));
+                }
+                let total_bytes = usize::try_from(source_bytes)
+                    .map_err(|_| format!("rust-src source size exceeds usize: {source_bytes}"))?;
+                (file_count as usize, total_bytes)
+            } else {
+                extract_sysroot_archive(&base_dir, archive_reader)?
+            };
 
             let elapsed = start_time.elapsed().as_secs_f64();
             let speed = if elapsed > 0.0 {

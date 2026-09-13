@@ -20,6 +20,8 @@ export class Wasip1 {
   static fdPrestatDirNameImport(fd: number, pathPtr: number, pathLen: number): number;
   static fdFilestatGetImport(fd: number, filestatPtr: number): number;
   static fdReadImport(fd: number, iovsPtr: number, iovsLen: number, nreadPtr: number): number;
+  static fdSeekImport(fd: number, offset: bigint, whence: number, newOffsetPtr: number): number;
+  static fdSyncImport(fd: number): number;
   static pathOpenImport(fd: number, dirflags: number, pathPtr: number, pathLen: number, oflags: number, fsRightsBase: bigint, fsRightsInheriting: bigint, fdflags: number, fdOutPtr: number): number;
   static pathCreateDirectoryImport(fd: number, pathPtr: number, pathLen: number): number;
   static pathFilestatGetImport(fd: number, lookupflags: number, pathPtr: number, pathLen: number, filestatPtr: number): number;

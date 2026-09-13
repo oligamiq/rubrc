@@ -31,7 +31,7 @@ Deno.test("rust-src uses same-origin asset while target sysroots stay remote", (
       "https://example.test/rubrc/index.html",
       "abc123",
       "42",
-    ) === "https://example.test/rubrc/rust-src.tar.vfsbr?v=abc123&build=42",
+    ) === "https://example.test/rubrc/rust-src.sqfs?v=abc123&build=42",
     "rust-src did not include the running source revision and build epoch",
   );
   assert(
@@ -43,6 +43,37 @@ Deno.test("rust-src uses same-origin asset while target sysroots stay remote", (
     ) === "https://oligamiq.github.io/rust_wasm/v0.2.1/wasm32-wasip1.tar.br",
     "target sysroot URL changed",
   );
+});
+
+Deno.test("rust-src byte loader uses raw binary transport without Brotli transformation", async () => {
+  const fetchDescriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+  const cachesDescriptor = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  const input = new Uint8Array([0x68, 0x73, 0x71, 0x73, 1, 2, 3]);
+  let requested = "";
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    writable: true,
+    value: async (resource: string | URL | Request) => {
+      requested = typeof resource === "string"
+        ? resource
+        : resource instanceof URL
+        ? resource.href
+        : resource.url;
+      return new Response(input, {
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+      });
+    },
+  });
+  delete (globalThis as { caches?: unknown }).caches;
+  try {
+    const output = await loadSysrootArchiveBytes("rust-src", { timeoutMs: 100 });
+    assert(output.join(",") === input.join(","), "rust-src bytes were transformed");
+    assert(requested.includes("rust-src.sqfs"), `wrong rust-src request: ${requested}`);
+  } finally {
+    if (fetchDescriptor) Object.defineProperty(globalThis, "fetch", fetchDescriptor);
+    if (cachesDescriptor) Object.defineProperty(globalThis, "caches", cachesDescriptor);
+  }
 });
 
 Deno.test("sysroot archive returns complete entries atomically", async () => {

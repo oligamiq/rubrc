@@ -14,43 +14,26 @@ export function createRustAnalyzerLightweightOptions(): {
   };
 }
 
-export function createRustAnalyzerProjectSettings(): {
-  linkedProjects: Array<{
-    sysroot: "/sysroot";
-    sysroot_src: "/sysroot/lib/rustlib/src/rust/library";
-    crates: Array<{
-      display_name: "rubrc-main";
-      root_module: "/src/main.rs";
-      edition: "2021";
-      deps: [];
-    }>;
-  }>;
-  cargo: {
-    sysroot: "/sysroot";
-    buildScripts: { enable: false };
-    autoreload: true;
-  };
-  procMacro: { enable: false };
-  checkOnSave: { enable: false };
-  cachePriming: { enable: false };
-} {
+export function createRustAnalyzerProjectJson() {
   return {
-    linkedProjects: [
+    sysroot: "/sysroot" as const,
+    sysroot_src: "/sysroot/lib/rustlib/src/rust/library" as const,
+    crates: [
       {
-        sysroot: "/sysroot",
-        sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
-        crates: [
-          {
-            display_name: "rubrc-main",
-            root_module: "/src/main.rs",
-            edition: "2021",
-            deps: [],
-          },
-        ],
+        display_name: "rubrc-main",
+        root_module: "/src/main.rs",
+        edition: "2021",
+        deps: [],
       },
     ],
+  };
+}
+
+export function createRustAnalyzerProjectSettings() {
+  return {
+    linkedProjects: [createRustAnalyzerProjectJson()],
     cargo: {
-      sysroot: "/sysroot",
+      sysroot: "/sysroot" as const,
       buildScripts: { enable: false },
       autoreload: true,
     },

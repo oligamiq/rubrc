@@ -6,7 +6,10 @@ import {
   STARTUP_TIMEOUT_MS,
   waitForDiagnosticsQuiescence,
 } from "./lsp_browser_quiescence.mjs";
-import { shouldSuppressOptionalMetadataNotFound } from "./lsp_browser_console_error.mjs";
+import {
+  inspectConsoleArguments,
+  shouldSuppressOptionalMetadataNotFound,
+} from "./lsp_browser_console_error.mjs";
 import { safeFailureState } from "./lsp_browser_failure_state.mjs";
 import {
   closeBrowserStaticServer,
@@ -14,11 +17,26 @@ import {
 } from "./lsp_browser_static_server.mjs";
 import { VfsDebugTraceCollector } from "../page/src/vfs_debug_trace.ts";
 
-const port = Number(process.env.PORT ?? "4173");
-if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
-  throw new Error(`invalid browser acceptance port: ${process.env.PORT}`);
+// The browser-specific override takes precedence over the generic PORT.
+const browserPort = Number(
+  process.env.RUBRC_LSP_BROWSER_PORT ?? process.env.PORT ?? "4173",
+);
+if (
+  !Number.isSafeInteger(browserPort) ||
+  browserPort < 1 ||
+  browserPort > 65_535
+) {
+  throw new Error(`invalid browser acceptance port: ${browserPort}`);
 }
-const url = `http://127.0.0.1:${port}`;
+const coldStartupTimeoutMs = Number(
+  process.env.RUBRC_LSP_COLD_STARTUP_TIMEOUT_MS ?? STARTUP_TIMEOUT_MS,
+);
+if (!Number.isSafeInteger(coldStartupTimeoutMs) || coldStartupTimeoutMs < 1) {
+  throw new Error(
+    `invalid RUBRC_LSP_COLD_STARTUP_TIMEOUT_MS: ${coldStartupTimeoutMs}`,
+  );
+}
+const url = `http://127.0.0.1:${browserPort}`;
 const expectedMetadataUrl = new URL("/.rubrc-pages-build.json", url).href;
 const invalidMain = 'fn main() { let value: i32 = "wrong"; }\n';
 const validMain = "fn main() {}\n";
@@ -68,6 +86,180 @@ async function waitForServer() {
   throw new Error("browser static server did not start within 30 seconds");
 }
 
+function assertStartupTimings(label, timings) {
+  const expectedPhases = [
+    "editor-visible",
+    "vfs-starting",
+    "analyzer-initializing",
+    "sysroots-loading",
+    "project-activating",
+    "semantic-warming",
+    "ready",
+  ];
+  const phases = timings.map(({ phase }) => phase);
+  if (phases.join(",") !== expectedPhases.join(",")) {
+    throw new Error(`${label} phase timings are incomplete: ${phases}`);
+  }
+  for (let index = 1; index < timings.length; index++) {
+    if (timings[index].elapsedMs < timings[index - 1].elapsedMs) {
+      throw new Error(`${label} phase timings are not monotonic`);
+    }
+  }
+  console.log(`${label} startup timings: ${JSON.stringify(timings)}`);
+}
+
+async function measureColdStartup(browser) {
+  const context = await browser.createBrowserContext();
+  const page = await context.newPage();
+  const browserErrors = [];
+  const traceCollector = new VfsDebugTraceCollector();
+  let rejectColdStartupFatal;
+  const coldStartupFatal = new Promise((_, reject) => {
+    rejectColdStartupFatal = reject;
+  });
+  let primaryFailure;
+  try {
+    await page.setCacheEnabled(false);
+    page.on("pageerror", (error) =>
+      browserErrors.push(error.stack ?? error.message),
+    );
+    page.on("console", (message) => {
+      const text = message.text();
+      if (text.startsWith("[vfs-stall-trace]")) {
+        traceCollector.push(
+          text.slice("[vfs-stall-trace]".length).replace(/^ /, ""),
+        );
+      }
+      if (
+        message.type() === "error" &&
+        !text.startsWith("overly long loop turn took ") &&
+        !shouldSuppressOptionalMetadataNotFound(
+          text,
+          message.location().url,
+          expectedMetadataUrl,
+        )
+      ) {
+        browserErrors.push(text);
+      }
+      if (text.includes("base call failed: OutOfMemory")) {
+        void inspectConsoleArguments(message.args()).then((details) => {
+          const location = message.location();
+          rejectColdStartupFatal(
+            new Error(
+              `fatal cold-start transport error at ${location.url}:${location.lineNumber}:${location.columnNumber}: ${text}; details=${JSON.stringify(details)}`,
+            ),
+          );
+        });
+      }
+    });
+    page.on("requestfailed", (request) => {
+      browserErrors.push(
+        `request failed: ${request.url()} (${
+          request.failure()?.errorText ?? "unknown"
+        })`,
+      );
+    });
+    await page.evaluateOnNewDocument(() => {
+      const startedAt = performance.now();
+      const state = { ready: false, vfsWrites: [], startupTimings: [] };
+      window.__rubrcLspTest = new Proxy(state, {
+        set(target, property, value) {
+          Reflect.set(target, property, value);
+          if (property === "startup" && value?.phase) {
+            const last = target.startupTimings.at(-1);
+            if (last?.phase !== value.phase) {
+              target.startupTimings.push({
+                phase: value.phase,
+                elapsedMs: performance.now() - startedAt,
+              });
+            }
+          }
+          return true;
+        },
+      });
+    });
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await Promise.race([
+      page.waitForFunction(
+        () => {
+          const api = window.__rubrcLspTest;
+          if (api?.runtime?.reloadRequired) {
+            throw new Error("Runtime reload required");
+          }
+          return api?.ready === true && api?.startup?.phase === "ready";
+        },
+        { timeout: coldStartupTimeoutMs },
+      ),
+      coldStartupFatal,
+    ]);
+    const timings = await page.evaluate(
+      () => window.__rubrcLspTest.startupTimings,
+    );
+    const trace = traceCollector.snapshot().trace;
+    const pairedSysrootCall = Array.from(
+      trace.matchAll(
+        /host-call id=(\d+) name=(sysrootStartFetch|sysrootArchiveGetMeta|sysrootReadArchiveChunk) phase=request/g,
+      ),
+    ).some(([, id, name]) =>
+      trace.includes(`host-call id=${id} name=${name} phase=response`),
+    );
+    if (!pairedSysrootCall) {
+      throw new Error("cold startup trace omitted a paired sysroot call");
+    }
+    if (browserErrors.length > 0) {
+      throw new Error(
+        `cold startup browser errors:\n${browserErrors.join("\n")}`,
+      );
+    }
+    assertStartupTimings("cold", timings);
+    return timings;
+  } catch (error) {
+    const state = await safeFailureState(
+      () =>
+        page.evaluate(async () => {
+          const api = window.__rubrcLspTest;
+          const crateGraph =
+            typeof api?.requestCrateGraph === "function"
+              ? await Promise.race([
+                  api?.requestCrateGraph?.(),
+                  new Promise((resolve) =>
+                    setTimeout(
+                      () => resolve("request timed out after 500ms"),
+                      500,
+                    ),
+                  ),
+                ])
+              : undefined;
+          return {
+            ready: api?.ready,
+            startup: api?.startup,
+            runtime: api?.runtime,
+            startupTimings: api?.startupTimings,
+            completedGeneration: api?.completedGenerations?.at(-1),
+            crateGraph,
+          };
+        }),
+      () => traceCollector.snapshot(),
+    );
+    primaryFailure = new Error(
+      `cold startup failed: ${error.message}\nstartup failure state: ${JSON.stringify(
+        state,
+      )}\nbrowser errors:\n${browserErrors.join("\n")}`,
+    );
+    throw primaryFailure;
+  } finally {
+    try {
+      await closeBrowserContextWithinDeadline(context);
+    } catch (closeError) {
+      browser.process()?.kill("SIGKILL");
+      if (primaryFailure === undefined) throw closeError;
+      console.error(
+        `secondary cold-start cleanup failure: ${closeError.message}`,
+      );
+    }
+  }
+}
+
 async function closeBrowserWithinDeadline(browser) {
   if (browser === undefined) return;
   let timer;
@@ -84,6 +276,26 @@ async function closeBrowserWithinDeadline(browser) {
   } catch (error) {
     browser.process()?.kill("SIGKILL");
     throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function closeBrowserContextWithinDeadline(context) {
+  let timer;
+  try {
+    await Promise.race([
+      context.close(),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error("browser context did not close within 10 seconds"),
+            ),
+          BROWSER_CLOSE_TIMEOUT_MS,
+        );
+      }),
+    ]);
   } finally {
     clearTimeout(timer);
   }
@@ -121,7 +333,9 @@ function assertNoUnexpectedLifecycleBrowserErrors(
     "Staged startup failed: AbortError: runtime disposed",
   ];
   const cleanupFailures = errors.filter((error) =>
-    error.includes("Runtime cleanup failed: AggregateError: runtime cleanup failed")
+    error.includes(
+      "Runtime cleanup failed: AggregateError: runtime cleanup failed",
+    ),
   );
   const expectedAbort = (error) =>
     error.includes("request failed:") &&
@@ -129,7 +343,7 @@ function assertNoUnexpectedLifecycleBrowserErrors(
     (error.includes("/vfs-manifest.json") ||
       (error.includes("/assets/vfs.core-") &&
         error.includes(".wasm.br.json")) ||
-      error.includes("/rust-src.tar.vfsbr") ||
+      error.includes("/rust-src.sqfs") ||
       error.includes("/wasm32-wasip1.tar.br") ||
       error.includes("/wasm32-wasip2.tar.br"));
   const unexpected = errors.filter(
@@ -252,7 +466,7 @@ try {
   await assertSingleDefaultApiBundle();
   staticServer = await startBrowserStaticServer({
     hostname: "127.0.0.1",
-    port,
+    port: browserPort,
   });
   await waitForServer();
 
@@ -262,7 +476,9 @@ try {
     protocolTimeout: STARTUP_TIMEOUT_MS + 60_000,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
+  const coldStartup = await measureColdStartup(browser);
   const page = await browser.newPage();
+  await page.setCacheEnabled(false);
   const browserErrors = [];
   const traceCollector = new VfsDebugTraceCollector();
   let rejectStartupFatal;
@@ -317,9 +533,13 @@ try {
         message.args().map((argument) =>
           argument.evaluate((value) =>
             value instanceof Error
-              ? { name: value.name, message: value.message, stack: value.stack }
-              : String(value)
-          )
+              ? {
+                  name: value.name,
+                  message: value.message,
+                  stack: value.stack,
+                }
+              : String(value),
+          ),
         ),
       ).then((details) => {
         const location = message.location();
@@ -339,17 +559,52 @@ try {
     );
   });
   await page.evaluateOnNewDocument((text) => {
-    const state = { ready: false, vfsWrites: [] };
-    let captured = false;
+    const startedAt = performance.now();
+    const state = {
+      ready: false,
+      vfsWrites: [],
+      startupTimings: [],
+      projectProgressCaptures: [],
+      projectBeforeFirstPollText: undefined,
+    };
+    let initialCaptured = false;
+    let startupEdited = false;
     window.__rubrcLspTest = new Proxy(state, {
       set(target, property, value) {
         Reflect.set(target, property, value);
+        if (property === "startup" && value?.phase) {
+          const last = target.startupTimings.at(-1);
+          if (last?.phase !== value.phase) {
+            target.startupTimings.push({
+              phase: value.phase,
+              elapsedMs: performance.now() - startedAt,
+            });
+          }
+        }
+        if (property === "startup" && value?.phase === "project-activating") {
+          const overlayText = document.body.innerText;
+          if (
+            value.projectProgress === undefined &&
+            target.projectBeforeFirstPollText === undefined
+          ) {
+            Reflect.set(target, "projectBeforeFirstPollText", overlayText);
+          }
+          if (value?.projectProgress !== undefined) {
+            const last = target.projectProgressCaptures.at(-1);
+            if (last?.progress?.attempt !== value.projectProgress.attempt) {
+              target.projectProgressCaptures.push({
+                progress: value.projectProgress,
+                overlayText,
+              });
+            }
+          }
+        }
         if (
-          !captured &&
+          !initialCaptured &&
           property === "startup" &&
           value?.phase === "editor-visible"
         ) {
-          captured = true;
+          initialCaptured = true;
           const model = target.model;
           const monaco = target.monaco;
           const editor = target.editor;
@@ -365,7 +620,19 @@ try {
             editable:
               editor.getOption(monaco.editor.EditorOption.readOnly) === false,
           });
+        }
+        if (
+          !startupEdited &&
+          property === "startup" &&
+          value?.phase === "semantic-warming"
+        ) {
+          startupEdited = true;
+          const model = target.model;
           model.setValue(text);
+          Reflect.set(target, "startupEdit", {
+            phase: value.phase,
+            version: model.getVersionId(),
+          });
         }
         return true;
       },
@@ -377,8 +644,10 @@ try {
       page.waitForFunction(
         ({ startupText }) => {
           const testApi = window.__rubrcLspTest;
-          if (testApi?.runtime?.reloadRequired) throw new Error("Runtime reload required");
-          if (!testApi?.ready || !testApi.monaco || !testApi.editor) return false;
+          if (testApi?.runtime?.reloadRequired)
+            throw new Error("Runtime reload required");
+          if (!testApi?.ready || !testApi.monaco || !testApi.editor)
+            return false;
           const rustModels = testApi.monaco.editor
             .getModels()
             .filter((model) => model.getLanguageId() === "rust");
@@ -390,9 +659,12 @@ try {
             ) === false &&
             testApi.startup?.phase === "ready" &&
             testApi.startup.overlayVisible === false &&
+            testApi.startup.projectProgress?.ready === true &&
+            testApi.projectProgressCaptures.length > 0 &&
             testApi.task9Initial?.overlayVisible === true &&
             testApi.task9Initial.namedModel === true &&
             testApi.task9Initial.editable === true &&
+            testApi.startupEdit?.phase === "semantic-warming" &&
             testApi.model?.getValue() === startupText &&
             testApi.mainDidOpenComplete === true &&
             testApi.mainDiagnosticsPublicationCount > 0 &&
@@ -428,6 +700,62 @@ try {
     );
   }
 
+  const editedStartup = await page.evaluate(
+    () => window.__rubrcLspTest.startupTimings,
+  );
+  assertStartupTimings("semantic-edit", editedStartup);
+  if (coldStartup.at(-1)?.elapsedMs > STARTUP_TIMEOUT_MS) {
+    throw new Error("cold startup exceeded the startup budget");
+  }
+
+  await page.evaluate(() => {
+    const api = window.__rubrcLspTest;
+    const progress = api.startup.projectProgress;
+    if (progress === undefined) {
+      throw new Error(
+        "startup test state lacks production crate graph progress",
+      );
+    }
+    if (!Object.isFrozen(progress) || !Object.isFrozen(progress.labels)) {
+      throw new Error("production crate graph progress is mutable");
+    }
+    if (!progress.ready || progress.attempt < 1) {
+      throw new Error(
+        `invalid ready crate graph progress: ${JSON.stringify(progress)}`,
+      );
+    }
+    if (progress.labels.join(",") !== "rubrc_main,core,alloc,std") {
+      throw new Error(
+        `unstable ready crate labels: ${progress.labels.join(",")}`,
+      );
+    }
+    const initialText = api.projectBeforeFirstPollText ?? "";
+    if (!initialText.includes("Project") || !initialText.includes("...")) {
+      throw new Error(
+        `Project did not render indeterminate startup: ${initialText}`,
+      );
+    }
+    const capture = api.projectProgressCaptures.find(
+      (item) => item.progress === progress,
+    );
+    if (capture === undefined) {
+      throw new Error(
+        "ready project progress was not captured from the overlay",
+      );
+    }
+    const expectedSummary = `${Math.floor(progress.elapsedMs / 1_000)}s · poll ${progress.attempt} · crates 4/4`;
+    if (!capture.overlayText.includes(expectedSummary)) {
+      throw new Error(
+        `overlay omitted ${expectedSummary}: ${capture.overlayText}`,
+      );
+    }
+    for (const label of ["rubrc_main", "core", "alloc", "std"]) {
+      if (!capture.overlayText.includes(label)) {
+        throw new Error(`overlay omitted ${label}: ${capture.overlayText}`);
+      }
+    }
+  });
+
   try {
     await waitForDiagnosticsQuiescence({
       stage: "initial diagnostics",
@@ -458,11 +786,7 @@ try {
     );
   }
 
-  const readinessPublicationCount = await page.evaluate(
-    () => window.__rubrcLspTest.mainDiagnosticsPublicationCount,
-  );
-
-  await page.evaluate(async (startupText) => {
+  await page.evaluate((startupText) => {
     const api = window.__rubrcLspTest;
     const expectedHistory = [
       "editor-visible",
@@ -491,20 +815,13 @@ try {
         `readiness versions do not match model ${modelVersion}: diagnostics=${api.startup.diagnosticsVersion}, inlay=${api.startup.inlayHintVersion}`,
       );
     }
-    const graph = await api.requestCrateGraph();
-    const nodeLabel = (label) =>
-      new RegExp(
-        `(?:^|[;{\\n])\\s*(?:[A-Za-z_][\\w]*|"(?:\\\\.|[^"\\\\])*")\\s*(?:\\[[^\\]]*\\])*\\[?[^;]*\\blabel="${label}"`,
-        "m",
-      ).test(graph);
+    const progress = api.startup.projectProgress;
     if (
-      !nodeLabel("rubrc_main") ||
-      !nodeLabel("core") ||
-      !nodeLabel("alloc") ||
-      !nodeLabel("std")
+      progress?.ready !== true ||
+      progress.labels.join(",") !== "rubrc_main,core,alloc,std"
     ) {
       throw new Error(
-        "crate graph is missing rubrc-main, core, alloc, or std nodes",
+        `production crate graph progress is incomplete: ${JSON.stringify(progress)}`,
       );
     }
   }, startupMain);
@@ -659,6 +976,9 @@ try {
     timeoutMs: remainingAnalysisBudget(),
   });
 
+  const readinessPublicationCount = await page.evaluate(
+    () => window.__rubrcLspTest.mainDiagnosticsPublicationCount,
+  );
   await page.evaluate((text) => {
     const { monaco } = window.__rubrcLspTest;
     monaco.editor
@@ -946,7 +1266,9 @@ try {
     cleanRemount.previous.runtime.lifecycleWorkers !== 0 ||
     cleanRemount.previous.runtime.farmCallbacks !== 0
   ) {
-    throw new Error(`remount retained stale state: ${JSON.stringify(cleanRemount)}`);
+    throw new Error(
+      `remount retained stale state: ${JSON.stringify(cleanRemount)}`,
+    );
   }
 
   await page.evaluate(() => {
@@ -981,7 +1303,9 @@ try {
     targetDisposal.phase !== "disposed" ||
     targetDisposal.operation !== "idle"
   ) {
-    throw new Error(`target disposal did not settle: ${JSON.stringify(targetDisposal)}`);
+    throw new Error(
+      `target disposal did not settle: ${JSON.stringify(targetDisposal)}`,
+    );
   }
   assertLifecycleOrder(targetDisposal.events, "target disposal");
 
@@ -1023,7 +1347,9 @@ try {
     !quarantine.events.includes("reload-required") ||
     !quarantine.remountBlocked
   ) {
-    throw new Error(`quarantine acceptance failed: ${JSON.stringify(quarantine)}`);
+    throw new Error(
+      `quarantine acceptance failed: ${JSON.stringify(quarantine)}`,
+    );
   }
   assertNoUnexpectedLifecycleBrowserErrors(
     browserErrors.slice(forcedBrowserErrorStart),

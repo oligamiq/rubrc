@@ -1,4 +1,4 @@
-import { prepareReleasedRustSrcArchive } from "./rust_src_archive.ts";
+import { prepareReleasedRustSrcSquashfs } from "./rust_src_archive.ts";
 
 export const DEV_RUST_SRC_DIRECTORY = ".rubrc-cache/dev";
 export const DEV_RUST_SRC_SIDECAR = `${DEV_RUST_SRC_DIRECTORY}/rust-src.sha256`;
@@ -64,7 +64,7 @@ export async function pruneDevelopmentRustSrcAssets(
       continue;
     }
 
-    const match = /^rust-src-([a-f0-9]{64})\.tar\.vfsbr$/.exec(entry.name);
+    const match = /^rust-src-([a-f0-9]{64})\.sqfs$/.exec(entry.name);
     if (!match || match[1] === activeSha256) continue;
     const stat = await statIfPresent(path, dependencies);
     if (stat === null) continue;
@@ -99,12 +99,12 @@ function bytesToHex(bytes: Uint8Array): string {
 
 export async function writeRustSrcDevAsset(
   directory = DEV_RUST_SRC_DIRECTORY,
-  prepare = prepareReleasedRustSrcArchive,
+  prepare = prepareReleasedRustSrcSquashfs,
 ): Promise<string> {
   const { archive } = await prepare();
   const digest = await crypto.subtle.digest("SHA-256", archive as BufferSource);
   const sha256 = bytesToHex(new Uint8Array(digest));
-  const assetPath = `${directory}/rust-src-${sha256}.tar.vfsbr`;
+  const assetPath = `${directory}/rust-src-${sha256}.sqfs`;
   const sidecarPath = `${directory}/rust-src.sha256`;
   const temporaryAsset = `${assetPath}.${crypto.randomUUID()}.tmp`;
   const temporarySidecar = `${sidecarPath}.${crypto.randomUUID()}.tmp`;

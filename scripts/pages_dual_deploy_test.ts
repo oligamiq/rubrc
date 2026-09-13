@@ -24,7 +24,7 @@ Deno.test("CI preview backfills legacy assets and preserves modern ones", async 
   const denoCwdLog = `${temporary}/deno-cwd.log`;
   const decoder = new TextDecoder();
 
-  const writeFixture = async (directory: string) => {
+  const writeFixture = async (directory: string, format = "sqfs") => {
     await Deno.mkdir(`${directory}/assets`, { recursive: true });
     await Deno.mkdir(`${directory}/v1`, { recursive: true });
     await Deno.writeTextFile(
@@ -32,6 +32,7 @@ Deno.test("CI preview backfills legacy assets and preserves modern ones", async 
       "<main>fixture</main>\n",
     );
     await Deno.writeTextFile(`${directory}/v1/index.html`, "<main>v1</main>\n");
+    await Deno.writeTextFile(`${directory}/assets/app.js`, `const asset = "rust-src.${format}";\n`);
     await Deno.writeTextFile(
       `${directory}/assets/vfs.core-test.wasm.br.part-000`,
       "x",
@@ -77,12 +78,12 @@ Deno.test("CI preview backfills legacy assets and preserves modern ones", async 
     const fakeDeno = `${fakeBin}/deno`;
     await Deno.writeTextFile(
       fakeDeno,
-      '#!/bin/sh\nset -eu\ncase " $* " in\n  *" --allow-net "*) ;;\n  *) echo "missing --allow-net" >&2; exit 1 ;;\nesac\nprintf "%s\\n" "$PWD" >> "$FAKE_DENO_CWD_FILE"\nfor last do :; done\nprintf "fake-rust-src" > "$last"\n',
+      '#!/bin/sh\nset -eu\ncase " $* " in\n  *" --allow-net "*) ;;\n  *) echo "missing --allow-net" >&2; exit 1 ;;\nesac\ncase " $* " in\n  *" --allow-run=mksquashfs,unsquashfs "*) ;;\n  *) echo "missing conversion permissions" >&2; exit 1 ;;\nesac\nprintf "%s\\n" "$PWD" >> "$FAKE_DENO_CWD_FILE"\nfor last do :; done\nprintf "fake-rust-src" > "$last"\n',
     );
     await Deno.chmod(fakeDeno, 0o755);
 
     const legacy = `${temporary}/legacy`;
-    await writeFixture(legacy);
+    await writeFixture(legacy, "tar.vfsbr");
     await Deno.writeTextFile(`${legacy}/.rubrc-pages-build.json`, "");
     await runPrepare(legacy);
     const legacyOutput = `${legacy}-pages-ready`;
@@ -100,12 +101,12 @@ Deno.test("CI preview backfills legacy assets and preserves modern ones", async 
     const modern = `${temporary}/modern`;
     await writeFixture(modern);
     const metadata = '{"version":1,"sourceSha":"keep-me","buildEpoch":42}\n';
-    await Deno.writeTextFile(`${modern}/rust-src.tar.vfsbr`, "keep-rust-src");
+    await Deno.writeTextFile(`${modern}/rust-src.sqfs`, "keep-rust-src");
     await Deno.writeTextFile(`${modern}/.rubrc-pages-build.json`, metadata);
     await runPrepare(modern);
     const modernOutput = `${modern}-pages-ready`;
     assert(
-      (await Deno.readTextFile(`${modernOutput}/rust-src.tar.vfsbr`)) ===
+      (await Deno.readTextFile(`${modernOutput}/rust-src.sqfs`)) ===
         "keep-rust-src",
       "modern rust-src was overwritten",
     );
@@ -118,6 +119,22 @@ Deno.test("CI preview backfills legacy assets and preserves modern ones", async 
       (await Deno.readTextFile(denoCwdLog)) === `${root}\n`,
       "rust-src preparation did not run from the repository root",
     );
+
+    const missingModern = `${temporary}/missing-modern`;
+    await writeFixture(missingModern);
+    await runPrepare(missingModern);
+    assert(await Deno.readTextFile(`${missingModern}-pages-ready/rust-src.sqfs`) === "fake-rust-src", "modern SquashFS not backfilled");
+
+    const providedLegacy = `${temporary}/provided-legacy`;
+    await writeFixture(providedLegacy, "tar.vfsbr");
+    await Deno.writeTextFile(`${providedLegacy}/rust-src.tar.vfsbr`, "keep-legacy-tar");
+    await Deno.writeTextFile(`${providedLegacy}/rust-src.sqfs`, "keep-extra-sqfs");
+    await Deno.writeTextFile(`${providedLegacy}/.rubrc-pages-build.json`, metadata);
+    await runPrepare(providedLegacy);
+    assert(await Deno.readTextFile(`${providedLegacy}-pages-ready/rust-src.tar.vfsbr`) === "keep-legacy-tar", "provided legacy tar overwritten");
+    assert(await Deno.readTextFile(`${providedLegacy}-pages-ready/rust-src.sqfs`) === "keep-extra-sqfs", "provided extra asset deleted");
+    assert(await Deno.readTextFile(`${providedLegacy}-pages-ready/.rubrc-pages-build.json`) === metadata, "legacy metadata overwritten");
+    assert(await Deno.readTextFile(denoCwdLog) === `${root}\n${root}\n`, "provided assets triggered regeneration");
   } finally {
     await Deno.remove(temporary, { recursive: true });
   }

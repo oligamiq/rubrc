@@ -22,3 +22,36 @@ export function shouldSuppressOptionalMetadataNotFound(
     return false;
   }
 }
+
+function describeInspectionError(error) {
+  try {
+    if (error instanceof Error) {
+      return error.message === ""
+        ? error.name
+        : `${error.name}: ${error.message}`;
+    }
+    return String(error);
+  } catch {
+    return "Unknown";
+  }
+}
+
+export async function inspectConsoleArguments(args) {
+  return Promise.all(
+    args.map(async (argument) => {
+      try {
+        return await argument.evaluate((value) =>
+          value instanceof Error
+            ? {
+                name: value.name,
+                message: value.message,
+                stack: value.stack,
+              }
+            : String(value),
+        );
+      } catch (error) {
+        return `uninspectable console argument: ${describeInspectionError(error)}`;
+      }
+    }),
+  );
+}

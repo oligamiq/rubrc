@@ -112,6 +112,7 @@ function context(generation: number): Ctx {
     exec_file_id: id("exec"),
     load_additional_sysroot_id: id("target"),
     install_startup_sysroots_id: id("startup"),
+    rust_src_fs_id: id("rust-src-fs"),
     input_char_id: id("char"),
     input_string_id: id("string"),
     interrupt_id: id("interrupt"),

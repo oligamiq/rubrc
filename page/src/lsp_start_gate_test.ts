@@ -44,7 +44,10 @@ Deno.test("App creates and attaches the editable named model at mount", async ()
     "workspaceFileSystem.writeFile(",
     freezeIndex,
   );
-  const flushIndex = source.indexOf("await runtime.flushWorkspace()", persistIndex);
+  const flushIndex = source.indexOf(
+    "await runtime.flushWorkspace()",
+    persistIndex,
+  );
 
   assert(mountIndex >= 0, "Monaco mount handler is missing");
   assert(uriIndex > mountIndex, "named model URI is not created during mount");
@@ -74,8 +77,10 @@ Deno.test("App creates and attaches the editable named model at mount", async ()
     "named model is not editable on attachment",
   );
   assert(
-    prepareIndex > editableIndex && freezeIndex > prepareIndex &&
-      persistIndex > freezeIndex && flushIndex > persistIndex,
+    prepareIndex > editableIndex &&
+      freezeIndex > prepareIndex &&
+      persistIndex > freezeIndex &&
+      flushIndex > persistIndex,
     "remount preparation does not freeze, persist, then flush the named model",
   );
   assert(
@@ -110,7 +115,9 @@ Deno.test("remount preparation persists every file-backed Monaco model", async (
   );
 
   assert(
-    prepareIndex >= 0 && modelsIndex > prepareIndex && fileIndex > modelsIndex &&
+    prepareIndex >= 0 &&
+      modelsIndex > prepareIndex &&
+      fileIndex > modelsIndex &&
       persistIndex > fileIndex,
     "startup remount can drop pending edits from secondary file models",
   );
@@ -175,7 +182,8 @@ Deno.test("entrypoint creates one page supervisor beside the persistent workspac
   );
   assert(
     source.includes("workspaceFileSystem") &&
-      source.indexOf("workspaceFileSystem") < source.indexOf("new RuntimeSupervisor("),
+      source.indexOf("workspaceFileSystem") <
+        source.indexOf("new RuntimeSupervisor("),
     "persistent workspace is not page-level supervisor input",
   );
   assert(
@@ -210,7 +218,9 @@ Deno.test("App exposes startup state and gates run and target changes", async ()
     "App does not render the coordinator snapshot in StartupOverlay",
   );
   assert(
-    /<RunButton[\s\S]*?run=\{\(triple\) => runtime\.run\(triple\)\}/.test(source),
+    /<RunButton[\s\S]*?run=\{\(triple\) => runtime\.run\(triple\)\}/.test(
+      source,
+    ),
     "RunButton does not dispatch through the runtime",
   );
   assert(
@@ -248,13 +258,19 @@ Deno.test("App adopts startup and attaches the model before runtime startup", as
   const coordinatorIndex = source.indexOf("new StartupCoordinator(");
   const adoptIndex = source.indexOf("runtime.adoptCoordinator(coordinator)");
   const mountIndex = source.indexOf("const handleMount");
-  const attachIndex = source.indexOf("mountedEditor.setModel(model)", mountIndex);
+  const attachIndex = source.indexOf(
+    "mountedEditor.setModel(model)",
+    mountIndex,
+  );
   const editableIndex = source.indexOf(
     "mountedEditor.updateOptions({ readOnly: false })",
     attachIndex,
   );
   const runtimeStartIndex = source.indexOf("runtime.start()", editableIndex);
-  const stagedStartIndex = source.indexOf("coordinator.start(model)", runtimeStartIndex);
+  const stagedStartIndex = source.indexOf(
+    "coordinator.start(model)",
+    runtimeStartIndex,
+  );
 
   assert(coordinatorIndex >= 0, "startup coordinator is missing");
   assert(
@@ -285,7 +301,8 @@ Deno.test("App adopts startup and attaches the model before runtime startup", as
 Deno.test("adopted coordinator preserves the runtime abort reason", async () => {
   const source = await readSource("page/src/startup_coordinator.ts");
   assert(
-    source.includes("abort(reason") && source.includes("this.#controller.abort(reason)"),
+    source.includes("abort(reason") &&
+      source.includes("this.#controller.abort(reason)"),
     "StartupCoordinator cannot be aborted with the runtime failure",
   );
 });
@@ -318,6 +335,24 @@ Deno.test("overlay preserves the editor and renders determinate, indeterminate, 
     appSource.includes('class="relative h-[30vh]"') &&
       /<MonacoEditor[\s\S]*?<StartupOverlay/.test(appSource),
     "overlay does not retain the Monaco code container beneath it",
+  );
+});
+
+Deno.test("overlay renders structured project progress while running and failed", async () => {
+  const source = await readSource("page/src/StartupOverlay.tsx");
+  assert(
+    source.includes("presentProjectProgress(projectProgress)") &&
+      source.includes("{details().summary}") &&
+      source.includes("{details().detail}"),
+    "overlay does not render structured project progress",
+  );
+  assert(
+    source.includes("data-startup-task={task.id}"),
+    "overlay lacks a stable task selector",
+  );
+  assert(
+    source.includes("col-span-2") && source.includes("break-words"),
+    "project labels cannot wrap within the overlay",
   );
 });
 
@@ -358,12 +393,16 @@ Deno.test("test entrypoint remounts only after canonical runtime disposal", asyn
   const prepareIndex = source.indexOf("prepareAppForRemount()", remountIndex);
   const unmountIndex = source.indexOf("disposeApp?.()", remountIndex);
   const disposeIndex = source.indexOf("await runtime.dispose()", remountIndex);
-  const nextMountIndex = source.indexOf("await mountGeneration()", disposeIndex);
+  const nextMountIndex = source.indexOf(
+    "await mountGeneration()",
+    disposeIndex,
+  );
 
   assert(mountIndex >= 0, "entrypoint lacks a reusable generation mount");
   assert(remountIndex > mountIndex, "test remount control is not page-level");
   assert(
-    flushRaceIndex > remountIndex && prepareIndex > flushRaceIndex &&
+    flushRaceIndex > remountIndex &&
+      prepareIndex > flushRaceIndex &&
       flushDeadlineIndex > prepareIndex,
     "pre-remount workspace flush has no teardown deadline",
   );
@@ -372,7 +411,8 @@ Deno.test("test entrypoint remounts only after canonical runtime disposal", asyn
     "ready workspace edits are not flushed before editor unmount",
   );
   assert(
-    unmountIndex > prepareIndex && disposeIndex > unmountIndex &&
+    unmountIndex > prepareIndex &&
+      disposeIndex > unmountIndex &&
       nextMountIndex > disposeIndex,
     "remount does not await AppRuntime.dispose before supervisor admission",
   );
@@ -392,15 +432,22 @@ Deno.test("test entrypoint remounts only after canonical runtime disposal", asyn
   );
   assert(
     source.includes("renderRuntimeFailure({") &&
-      source.includes("reloadRequired: runtime?.phase === \"reload-required\"") &&
+      source.includes('reloadRequired: runtime?.phase === "reload-required"') &&
       source.includes("if (flushError !== undefined)"),
     "flush failure does not render a post-disposal runtime failure",
   );
   const cleanupIndex = appSource.indexOf("onCleanup(() => {");
-  const runtimeDisposeIndex = appSource.indexOf("runtime.dispose()", cleanupIndex);
-  const generationDisposeIndex = appSource.indexOf("generation?.dispose()", cleanupIndex);
+  const runtimeDisposeIndex = appSource.indexOf(
+    "runtime.dispose()",
+    cleanupIndex,
+  );
+  const generationDisposeIndex = appSource.indexOf(
+    "generation?.dispose()",
+    cleanupIndex,
+  );
   assert(
-    runtimeDisposeIndex > cleanupIndex && generationDisposeIndex > runtimeDisposeIndex,
+    runtimeDisposeIndex > cleanupIndex &&
+      generationDisposeIndex > runtimeDisposeIndex,
     "App drops lifecycle recording before canonical disposal settles",
   );
 });

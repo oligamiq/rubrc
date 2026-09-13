@@ -2271,6 +2271,29 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       return Number(subtask.waitableRep()) << 4 | subtaskState;
     }
 
+    function _liftFlatS8(ctx) {
+      _debugLog('[_liftFlatS8()] args', { ctx });
+      let val;
+
+      if (ctx.useDirectParams) {
+        if (ctx.params.length === 0) { throw new Error('expected at least a single i32 argument'); }
+        val = ctx.params[0];
+        ctx.params = ctx.params.slice(1);
+        return [val, ctx];
+      }
+
+      if (ctx.storageLen !== undefined && ctx.storageLen < 1) {
+        throw new Error(`insufficient storage ([${ctx.storageLen}] bytes) for lift (s8 requires 1 byte)`);
+      }
+
+      val = new DataView(ctx.memory.buffer).getInt8(ctx.storagePtr, true);
+      ctx.storagePtr += 1;
+      if (ctx.storageLen !== undefined) { ctx.storageLen -= 1; }
+
+      return [val, ctx];
+    }
+
+
     function _liftFlatS32(ctx) {
       _debugLog('[_liftFlatS32()] args', { ctx });
       let val;
@@ -3071,6 +3094,14 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       }
 
     }
+
+    function clampGuest(i, min, max) {
+      if (i < min || i > max) {
+        throw new TypeError(`must be between ${min} and ${max}`);
+      }
+      return i;
+    }
+
 
     const isNode = typeof process !== 'undefined' && process.versions && process.versions.node;
     let _fs;
@@ -5767,7 +5798,167 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       }
       _trampoline32.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdReaddirImport';
 
-      const _trampoline33 = function(arg0, arg1, arg2) {
+      const _trampoline33 = function(arg0, arg1, arg2, arg3) {
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-seek-import"] [Instruction::CallInterface] (sync, @ enter)');
+        const hostProvided = true;
+
+        let parentTask;
+        let task;
+        let subtask;
+
+        const createTask = () => {
+          const results = createNewCurrentTask({
+            componentIdx: -1,
+            isAsync: false,
+            entryFnName: 'Wasip1.fdSeekImport',
+            getCallbackFn: () => null,
+            callbackFnName: null,
+            errHandling: 'none',
+            callingWasmExport: false,
+          });
+          task = results[0];
+        };
+
+        taskCreation: {
+          parentTask = getCurrentTask(
+          0,
+          _getGlobalCurrentTaskMeta(0)?.taskID,
+          )?.task;
+
+          if (!parentTask) {
+            createTask();
+            break taskCreation;
+          }
+
+          createTask();
+
+          if (hostProvided) {
+            subtask = parentTask.getLatestSubtask();
+            if (!subtask) {
+              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
+            }
+            task.setParentSubtask(subtask);
+          }
+        }
+
+        const started = task.enterSync();
+
+        let ret;
+
+        try {
+          ret = _withGlobalCurrentTaskMeta({
+            componentIdx: task.componentIdx(),
+            taskID: task.id(),
+            fn: () => Wasip1.fdSeekImport(arg0, arg1, clampGuest(arg2, -128, 127), arg3),
+          })
+          ;
+        } catch (err) {
+
+          _debugLog('[Instruction::CallInterface] error during sync call', {
+            taskID: task.id(),
+            subtaskID: task.getParentSubtask()?.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+
+        }
+
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-seek-import"][Instruction::Return]', {
+          funcName: '[static]wasip1.fd-seek-import',
+          paramCount: 1,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([toInt32(ret)]);
+        task.exit();
+        return toInt32(ret);
+      }
+      _trampoline33.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdSeekImport';
+
+      const _trampoline34 = function(arg0) {
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-sync-import"] [Instruction::CallInterface] (sync, @ enter)');
+        const hostProvided = true;
+
+        let parentTask;
+        let task;
+        let subtask;
+
+        const createTask = () => {
+          const results = createNewCurrentTask({
+            componentIdx: -1,
+            isAsync: false,
+            entryFnName: 'Wasip1.fdSyncImport',
+            getCallbackFn: () => null,
+            callbackFnName: null,
+            errHandling: 'none',
+            callingWasmExport: false,
+          });
+          task = results[0];
+        };
+
+        taskCreation: {
+          parentTask = getCurrentTask(
+          0,
+          _getGlobalCurrentTaskMeta(0)?.taskID,
+          )?.task;
+
+          if (!parentTask) {
+            createTask();
+            break taskCreation;
+          }
+
+          createTask();
+
+          if (hostProvided) {
+            subtask = parentTask.getLatestSubtask();
+            if (!subtask) {
+              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
+            }
+            task.setParentSubtask(subtask);
+          }
+        }
+
+        const started = task.enterSync();
+
+        let ret;
+
+        try {
+          ret = _withGlobalCurrentTaskMeta({
+            componentIdx: task.componentIdx(),
+            taskID: task.id(),
+            fn: () => Wasip1.fdSyncImport(arg0),
+          })
+          ;
+        } catch (err) {
+
+          _debugLog('[Instruction::CallInterface] error during sync call', {
+            taskID: task.id(),
+            subtaskID: task.getParentSubtask()?.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+
+        }
+
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-sync-import"][Instruction::Return]', {
+          funcName: '[static]wasip1.fd-sync-import',
+          paramCount: 1,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([toInt32(ret)]);
+        task.exit();
+        return toInt32(ret);
+      }
+      _trampoline34.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdSyncImport';
+
+      const _trampoline35 = function(arg0, arg1, arg2) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.path-create-directory-import"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
 
@@ -5845,9 +6036,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline33.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.pathCreateDirectoryImport';
+      _trampoline35.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.pathCreateDirectoryImport';
 
-      const _trampoline34 = function(arg0, arg1, arg2, arg3, arg4) {
+      const _trampoline36 = function(arg0, arg1, arg2, arg3, arg4) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.path-filestat-get-import"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
 
@@ -5925,9 +6116,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline34.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.pathFilestatGetImport';
+      _trampoline36.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.pathFilestatGetImport';
 
-      const _trampoline35 = function(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
+      const _trampoline37 = function(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.path-open-import"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
 
@@ -6005,9 +6196,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline35.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.pathOpenImport';
+      _trampoline37.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.pathOpenImport';
 
-      const _trampoline36 = function(arg0, arg1, arg2) {
+      const _trampoline38 = function(arg0, arg1, arg2) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.path-remove-directory-import"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
 
@@ -6085,9 +6276,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline36.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.pathRemoveDirectoryImport';
+      _trampoline38.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.pathRemoveDirectoryImport';
 
-      const _trampoline37 = function(arg0, arg1, arg2) {
+      const _trampoline39 = function(arg0, arg1, arg2) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.path-unlink-file-import"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
 
@@ -6165,9 +6356,9 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline37.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.pathUnlinkFileImport';
+      _trampoline39.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.pathUnlinkFileImport';
 
-      const _trampoline38 = function(arg0) {
+      const _trampoline40 = function(arg0) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.proc-exit-import"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
 
@@ -6244,7 +6435,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.resolve([ret]);
         task.exit();
       }
-      _trampoline38.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.procExitImport';
+      _trampoline40.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.procExitImport';
       let exports0;
       let exports0FlushToVfs;
 
@@ -8756,7 +8947,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline33.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS64,_liftFlatS8,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -8776,7 +8967,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline33.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS64,_liftFlatS8,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -8797,7 +8988,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline34.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -8817,7 +9008,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline34.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -8838,7 +9029,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline35.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS64,_liftFlatS64,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -8858,7 +9049,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline35.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS64,_liftFlatS64,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -8879,7 +9070,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline36.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -8899,7 +9090,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline36.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -8920,7 +9111,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline37.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS64,_liftFlatS64,_liftFlatS32,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -8940,7 +9131,7 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline37.manuallyAsync,
-        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS32,_liftFlatS64,_liftFlatS64,_liftFlatS32,_liftFlatS32],
         resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
@@ -8961,8 +9152,8 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline38.manuallyAsync,
-        paramLiftFns: [_liftFlatS32],
-        resultLowerFns: [],
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        resultLowerFns: [_lowerFlatS32],
         hasResultPointer: false,
         funcTypeIsAsync: false,
         getCallbackFn: () => null,
@@ -8981,6 +9172,68 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         componentIdx: 0,
         isAsync: false,
         isManualAsync: _trampoline38.manuallyAsync,
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        resultLowerFns: [_lowerFlatS32],
+        hasResultPointer: false,
+        funcTypeIsAsync: false,
+        getCallbackFn: () => null,
+        getPostReturnFn: () => null,
+        isCancellable: false,
+        memoryIdx: null,
+        stringEncoding: 'utf8',
+        getMemoryFn: () => null,
+        getReallocFn: undefined,
+        importFn: _trampoline38,
+      },
+      );
+      let trampoline39 = _trampoline39.manuallyAsync ? new WebAssembly.Suspending(_lowerImportBackwardsCompat.bind(
+      null,
+      {
+        trampolineIdx: 39,
+        componentIdx: 0,
+        isAsync: false,
+        isManualAsync: _trampoline39.manuallyAsync,
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        resultLowerFns: [_lowerFlatS32],
+        hasResultPointer: false,
+        funcTypeIsAsync: false,
+        getCallbackFn: () => null,
+        getPostReturnFn: () => null,
+        isCancellable: false,
+        memoryIdx: null,
+        stringEncoding: 'utf8',
+        getMemoryFn: () => null,
+        getReallocFn: undefined,
+        importFn: _trampoline39,
+      },
+      )) : _lowerImportBackwardsCompat.bind(
+      null,
+      {
+        trampolineIdx: 39,
+        componentIdx: 0,
+        isAsync: false,
+        isManualAsync: _trampoline39.manuallyAsync,
+        paramLiftFns: [_liftFlatS32,_liftFlatS32,_liftFlatS32],
+        resultLowerFns: [_lowerFlatS32],
+        hasResultPointer: false,
+        funcTypeIsAsync: false,
+        getCallbackFn: () => null,
+        getPostReturnFn: () => null,
+        isCancellable: false,
+        memoryIdx: null,
+        stringEncoding: 'utf8',
+        getMemoryFn: () => null,
+        getReallocFn: undefined,
+        importFn: _trampoline39,
+      },
+      );
+      let trampoline40 = _trampoline40.manuallyAsync ? new WebAssembly.Suspending(_lowerImportBackwardsCompat.bind(
+      null,
+      {
+        trampolineIdx: 40,
+        componentIdx: 0,
+        isAsync: false,
+        isManualAsync: _trampoline40.manuallyAsync,
         paramLiftFns: [_liftFlatS32],
         resultLowerFns: [],
         hasResultPointer: false,
@@ -8992,7 +9245,27 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         stringEncoding: 'utf8',
         getMemoryFn: () => null,
         getReallocFn: undefined,
-        importFn: _trampoline38,
+        importFn: _trampoline40,
+      },
+      )) : _lowerImportBackwardsCompat.bind(
+      null,
+      {
+        trampolineIdx: 40,
+        componentIdx: 0,
+        isAsync: false,
+        isManualAsync: _trampoline40.manuallyAsync,
+        paramLiftFns: [_liftFlatS32],
+        resultLowerFns: [],
+        hasResultPointer: false,
+        funcTypeIsAsync: false,
+        getCallbackFn: () => null,
+        getPostReturnFn: () => null,
+        isCancellable: false,
+        memoryIdx: null,
+        stringEncoding: 'utf8',
+        getMemoryFn: () => null,
+        getReallocFn: undefined,
+        importFn: _trampoline40,
       },
       );
       ({ exports: exports0 } = yield instantiateCore(yield module0, {
@@ -9028,13 +9301,15 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           '[static]wasip1.fd-prestat-get-import': trampoline30,
           '[static]wasip1.fd-read-import': trampoline18,
           '[static]wasip1.fd-readdir-import': trampoline32,
+          '[static]wasip1.fd-seek-import': trampoline33,
+          '[static]wasip1.fd-sync-import': trampoline34,
           '[static]wasip1.fd-write-import': trampoline19,
-          '[static]wasip1.path-create-directory-import': trampoline33,
-          '[static]wasip1.path-filestat-get-import': trampoline34,
-          '[static]wasip1.path-open-import': trampoline35,
-          '[static]wasip1.path-remove-directory-import': trampoline36,
-          '[static]wasip1.path-unlink-file-import': trampoline37,
-          '[static]wasip1.proc-exit-import': trampoline38,
+          '[static]wasip1.path-create-directory-import': trampoline35,
+          '[static]wasip1.path-filestat-get-import': trampoline36,
+          '[static]wasip1.path-open-import': trampoline37,
+          '[static]wasip1.path-remove-directory-import': trampoline38,
+          '[static]wasip1.path-unlink-file-import': trampoline39,
+          '[static]wasip1.proc-exit-import': trampoline40,
           '[static]wasip1.random-get-import': trampoline21,
           '[static]wasip1.sched-yield-import': trampoline22,
         },

@@ -9,6 +9,23 @@ export type MonacoRangeLike = {
   endColumn: number;
 };
 
+export type CrateGraphProgress = {
+  readonly attempt: number;
+  readonly elapsedMs: number;
+  readonly remainingMs: number;
+  readonly labels: readonly string[];
+  readonly ready: boolean;
+};
+
+type CrateGraphProgressObserver = (progress: CrateGraphProgress) => void;
+
+const REQUIRED_CRATE_LABELS: readonly string[] = Object.freeze([
+  "rubrc_main",
+  "core",
+  "alloc",
+  "std",
+]);
+
 type ReadinessTiming = {
   now?: () => number;
   sleep?: () => Promise<void>;
@@ -56,9 +73,7 @@ const dotAttributeGroups = (statement: string) => {
   let declaration = statement.trim();
   const graphStart = declaration.lastIndexOf("{");
   if (graphStart >= 0) declaration = declaration.slice(graphStart + 1).trim();
-  const nodeId = declaration.match(
-    /^(?:[A-Za-z_][\w]*|"(?:\\.|[^"\\])*")/,
-  );
+  const nodeId = declaration.match(/^(?:[A-Za-z_][\w]*|"(?:\\.|[^"\\])*")/);
   if (!nodeId) return undefined;
   if (["node", "edge", "graph", "digraph", "strict"].includes(nodeId[0])) {
     return undefined;
@@ -135,27 +150,25 @@ const nodeLabels = (dot: string) => {
     const label = quotedDotAttribute(groups, "label");
     if (!label) continue;
     labels.add(
-      label.replace(
-        /\\(["\\nrt])/g,
-        (_match, escaped: string) =>
-          escaped === "n"
-            ? "\n"
-            : escaped === "r"
+      label.replace(/\\(["\\nrt])/g, (_match, escaped: string) =>
+        escaped === "n"
+          ? "\n"
+          : escaped === "r"
             ? "\r"
             : escaped === "t"
-            ? "\t"
-            : escaped,
+              ? "\t"
+              : escaped,
       ),
     );
   }
   return labels;
 };
 
-const crateGraphIsReady = (dot: unknown) => {
-  if (typeof dot !== "string") return false;
+const requiredCrateLabels = (dot: unknown): readonly string[] => {
+  if (typeof dot !== "string") return Object.freeze([]);
   const labels = nodeLabels(dot);
-  return ["rubrc_main", "core", "alloc", "std"].every((label) =>
-    labels.has(label)
+  return Object.freeze(
+    REQUIRED_CRATE_LABELS.filter((label) => labels.has(label)),
   );
 };
 
@@ -177,13 +190,15 @@ export class RustAnalyzerReadiness {
     timing: ReadinessTiming = {},
   ) {
     this.now = timing.now ?? performance.now.bind(performance);
-    this.sleep = timing.sleep ??
+    this.sleep =
+      timing.sleep ??
       (() =>
         new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS)));
-    this.graphSleep = timing.sleep ??
+    this.graphSleep =
+      timing.sleep ??
       (() =>
         new Promise<void>((resolve) =>
-          setTimeout(resolve, CRATE_GRAPH_POLL_INTERVAL_MS)
+          setTimeout(resolve, CRATE_GRAPH_POLL_INTERVAL_MS),
         ));
     this.timeoutMs = timing.timeoutMs ?? PHASE_TIMEOUT_MS;
   }
@@ -208,8 +223,13 @@ export class RustAnalyzerReadiness {
     this.semanticDeadline = this.now() + this.timeoutMs;
   }
 
-  async waitForCrateGraph(signal: AbortSignal): Promise<void> {
-    const deadline = this.now() + this.timeoutMs;
+  async waitForCrateGraph(
+    signal: AbortSignal,
+    observeProgress?: CrateGraphProgressObserver,
+  ): Promise<void> {
+    const startedAt = this.now();
+    const deadline = startedAt + this.timeoutMs;
+    let attempt = 0;
     while (true) {
       this.checkActive(signal);
       if (this.now() >= deadline) {
@@ -217,19 +237,28 @@ export class RustAnalyzerReadiness {
           `rust-analyzer crate graph timed out after ${this.timeoutMs}ms`,
         );
       }
+      attempt++;
       let dot: unknown;
       try {
         dot = await this.awaitPhaseOperation(
-          this.client.sendRequest<unknown>(
-            "rust-analyzer/viewCrateGraph",
-            { full: true },
-          ),
+          this.client.sendRequest<unknown>("rust-analyzer/viewCrateGraph", {
+            full: true,
+          }),
           signal,
           () => deadline,
           "rust-analyzer crate graph",
         );
       } catch (error) {
         if (!isContentModified(error)) throw error;
+        this.checkActive(signal);
+        this.emitCrateGraphProgress(
+          observeProgress,
+          attempt,
+          startedAt,
+          deadline,
+          Object.freeze([]),
+          false,
+        );
         await this.awaitPhaseOperation(
           this.graphSleep(),
           signal,
@@ -239,7 +268,17 @@ export class RustAnalyzerReadiness {
         continue;
       }
       this.checkActive(signal);
-      if (crateGraphIsReady(dot)) {
+      const labels = requiredCrateLabels(dot);
+      const ready = labels.length === REQUIRED_CRATE_LABELS.length;
+      this.emitCrateGraphProgress(
+        observeProgress,
+        attempt,
+        startedAt,
+        deadline,
+        labels,
+        ready,
+      );
+      if (ready) {
         this.crateGraphReady = true;
         this.diagnosticsVersion = undefined;
         return;
@@ -329,6 +368,29 @@ export class RustAnalyzerReadiness {
   private checkActive(signal: AbortSignal): void {
     signal.throwIfAborted();
     if (this.disposed) throw new Error("rust-analyzer readiness is disposed");
+  }
+
+  private emitCrateGraphProgress(
+    observer: CrateGraphProgressObserver | undefined,
+    attempt: number,
+    startedAt: number,
+    deadline: number,
+    labels: readonly string[],
+    ready: boolean,
+  ): void {
+    const observedAt = this.now();
+    const progress = Object.freeze({
+      attempt,
+      elapsedMs: observedAt - startedAt,
+      remainingMs: Math.max(0, deadline - observedAt),
+      labels,
+      ready,
+    });
+    try {
+      observer?.(progress);
+    } catch {
+      // Progress observers are telemetry only.
+    }
   }
 
   private async awaitPhaseOperation<T>(
