@@ -7,25 +7,25 @@ import type { RuntimeGeneration } from "./runtime_terminal_service.ts";
 
 export type UtilityWorkerInbound =
   | {
-      type: "initialize";
-      generation: RuntimeGeneration;
-      wasiRef: WASIFarmRefObject;
-      ctx: Ctx;
-    }
+    type: "initialize";
+    generation: RuntimeGeneration;
+    wasiRef: WASIFarmRefObject;
+    ctx: Ctx;
+  }
   | { type: "destroyer-adopted"; generation: RuntimeGeneration }
   | { type: "cancel-before-destroyer"; generation: RuntimeGeneration }
   | {
-      type: "destroyer-adoption-failed";
-      generation: RuntimeGeneration;
-      message: string;
-    };
+    type: "destroyer-adoption-failed";
+    generation: RuntimeGeneration;
+    message: string;
+  };
 
 export type UtilityWorkerOutbound =
   | {
-      type: "destroyer";
-      generation: RuntimeGeneration;
-      handle: DestroyerHandleObject;
-    }
+    type: "destroyer";
+    generation: RuntimeGeneration;
+    handle: DestroyerHandleObject;
+  }
   | { type: "cancelled-before-destroyer"; generation: RuntimeGeneration }
   | { type: "ready"; generation: RuntimeGeneration }
   | { type: "control-fatal"; message: string }
@@ -33,21 +33,21 @@ export type UtilityWorkerOutbound =
 
 export type LifecycleWorkerInbound =
   | {
-      type: "adopt";
-      generation: RuntimeGeneration;
-      handle: DestroyerHandleObject;
-    }
+    type: "adopt";
+    generation: RuntimeGeneration;
+    handle: DestroyerHandleObject;
+  }
   | { type: "destroy"; generation: RuntimeGeneration; token: string };
 
 export type LifecycleWorkerOutbound =
   | { type: "adopted"; generation: RuntimeGeneration }
   | { type: "destroyed"; generation: RuntimeGeneration; token: string }
   | {
-      type: "fatal";
-      generation: RuntimeGeneration;
-      token?: string;
-      message: string;
-    };
+    type: "fatal";
+    generation: RuntimeGeneration;
+    token?: string;
+    message: string;
+  };
 
 type RecordValue = Record<string, unknown>;
 
@@ -190,8 +190,7 @@ export function createUtilityWorkerMessageHandler(options: {
 }) {
   let terminal = false;
   return async (message: unknown): Promise<void> => {
-    const terminalAdoptionFailure =
-      terminal &&
+    const terminalAdoptionFailure = terminal &&
       isUtilityWorkerInbound(message) &&
       message.type === "destroyer-adoption-failed";
     if (terminal && !terminalAdoptionFailure) return;
@@ -221,7 +220,7 @@ export function createUtilityWorkerMessageHandler(options: {
 interface UtilityAnimal {
   create_destroyer(): { get_object(): DestroyerHandleObject };
   start(root: unknown): unknown;
-  destroy(): void;
+  async_destroy(): Promise<void>;
 }
 
 export interface UtilityWorkerStateMachineDependencies<
@@ -271,9 +270,9 @@ export function createUtilityWorkerStateMachine<
     try {
       const prerequisite = dependencies.prepareAnimal
         ? await dependencies.prepareAnimal(
-            message,
-            prerequisiteController.signal,
-          )
+          message,
+          prerequisiteController.signal,
+        )
         : (undefined as TPrerequisite);
       if (cancelledBeforeAnimal) {
         throw new Error("disposed before Animal construction");
@@ -301,7 +300,7 @@ export function createUtilityWorkerStateMachine<
       }
       if (!lifecycleOwnsDestroyer) {
         try {
-          animal?.destroy();
+          await animal?.async_destroy();
         } catch (cleanupError) {
           cleanupErrors.push(cleanupError);
         }
@@ -377,7 +376,7 @@ export function createUtilityWorkerStateMachine<
 }
 
 interface LifecycleDestroyer {
-  destroy(): void;
+  async_destroy(): Promise<void>;
 }
 
 export function createLifecycleWorkerStateMachine(dependencies: {
@@ -386,17 +385,23 @@ export function createLifecycleWorkerStateMachine(dependencies: {
 }) {
   let destroyer: LifecycleDestroyer | undefined;
   let activeGeneration: RuntimeGeneration | undefined;
-  let destroyOutcome: { ok: true } | { ok: false; message: string } | undefined;
+  let destroyOutcome:
+    | Promise<{ ok: true } | { ok: false; message: string }>
+    | undefined;
 
-  const respondToDestroy = (generation: RuntimeGeneration, token: string) => {
-    if (destroyOutcome?.ok) {
+  const respondToDestroy = async (
+    generation: RuntimeGeneration,
+    token: string,
+  ) => {
+    const outcome = await destroyOutcome;
+    if (outcome?.ok) {
       dependencies.postMessage({ type: "destroyed", generation, token });
-    } else if (destroyOutcome?.ok === false) {
+    } else if (outcome?.ok === false) {
       dependencies.postMessage({
         type: "fatal",
         generation,
         token,
-        message: destroyOutcome.message,
+        message: outcome.message,
       });
     }
   };
@@ -424,15 +429,13 @@ export function createLifecycleWorkerStateMachine(dependencies: {
       if (message.generation !== activeGeneration) {
         throw new Error("lifecycle worker generation mismatch");
       }
-      if (destroyOutcome === undefined) {
-        try {
-          destroyer.destroy();
-          destroyOutcome = { ok: true };
-        } catch (error) {
-          destroyOutcome = { ok: false, message: toErrorMessage(error) };
-        }
-      }
-      respondToDestroy(message.generation, message.token);
+      destroyOutcome ??= Promise.resolve().then(() =>
+        destroyer!.async_destroy()
+      ).then(
+        () => ({ ok: true as const }),
+        (error) => ({ ok: false as const, message: toErrorMessage(error) }),
+      );
+      await respondToDestroy(message.generation, message.token);
     },
   };
 }
@@ -453,8 +456,7 @@ export function createRuntimeWorkerFactory(options: {
   createWorker?: (url: string) => RuntimeWorkerEndpoint;
   onFatalError?: (generation: RuntimeGeneration, error: Error) => void;
 }) {
-  const createWorker =
-    options.createWorker ??
+  const createWorker = options.createWorker ??
     ((url: string) => new Worker(url, { type: "module" }));
   return {
     create(generation: RuntimeGeneration): RuntimeWorkerHandshake {
@@ -562,14 +564,19 @@ export function createRuntimeWorkerHandshake(options: {
   };
 
   const requestDestroy = () => {
-    if (!disposeRequested || !adopted || destroyToken !== undefined || terminal)
+    if (
+      !disposeRequested || !adopted || destroyToken !== undefined || terminal
+    ) {
       return;
+    }
     destroyToken = options.createToken?.() ?? crypto.randomUUID();
-    options.lifecycleWorker.postMessage({
-      type: "destroy",
-      generation: options.generation,
-      token: destroyToken,
-    } satisfies LifecycleWorkerInbound);
+    options.lifecycleWorker.postMessage(
+      {
+        type: "destroy",
+        generation: options.generation,
+        token: destroyToken,
+      } satisfies LifecycleWorkerInbound,
+    );
   };
 
   const cancelBeforeDestroyer = () => {
@@ -578,13 +585,16 @@ export function createRuntimeWorkerHandshake(options: {
       destroyerReceived ||
       prerequisiteCancellationRequested ||
       terminal
-    )
+    ) {
       return;
+    }
     prerequisiteCancellationRequested = true;
-    options.utilityWorker.postMessage({
-      type: "cancel-before-destroyer",
-      generation: options.generation,
-    } satisfies UtilityWorkerInbound);
+    options.utilityWorker.postMessage(
+      {
+        type: "cancel-before-destroyer",
+        generation: options.generation,
+      } satisfies UtilityWorkerInbound,
+    );
   };
 
   const beginFailureDisposal = (error: Error) => {
@@ -646,11 +656,13 @@ export function createRuntimeWorkerHandshake(options: {
         return;
       }
       destroyerReceived = true;
-      options.lifecycleWorker.postMessage({
-        type: "adopt",
-        generation: options.generation,
-        handle: message.handle,
-      } satisfies LifecycleWorkerInbound);
+      options.lifecycleWorker.postMessage(
+        {
+          type: "adopt",
+          generation: options.generation,
+          handle: message.handle,
+        } satisfies LifecycleWorkerInbound,
+      );
       return;
     }
     if (disposeRequested) return;
@@ -681,10 +693,12 @@ export function createRuntimeWorkerHandshake(options: {
       adopted = true;
       if (disposeRequested) requestDestroy();
       else {
-        options.utilityWorker.postMessage({
-          type: "destroyer-adopted",
-          generation: options.generation,
-        } satisfies UtilityWorkerInbound);
+        options.utilityWorker.postMessage(
+          {
+            type: "destroyer-adopted",
+            generation: options.generation,
+          } satisfies UtilityWorkerInbound,
+        );
       }
       return;
     }
@@ -695,11 +709,13 @@ export function createRuntimeWorkerHandshake(options: {
       }
       adoptionFailure = new Error(message.message);
       rejectStartup(adoptionFailure);
-      options.utilityWorker.postMessage({
-        type: "destroyer-adoption-failed",
-        generation: options.generation,
-        message: message.message,
-      } satisfies UtilityWorkerInbound);
+      options.utilityWorker.postMessage(
+        {
+          type: "destroyer-adoption-failed",
+          generation: options.generation,
+          message: message.message,
+        } satisfies UtilityWorkerInbound,
+      );
       return;
     }
     if (message.token !== destroyToken) return;
@@ -739,12 +755,14 @@ export function createRuntimeWorkerHandshake(options: {
         return Promise.reject(new Error("runtime worker is disposed"));
       }
       initialized = true;
-      options.utilityWorker.postMessage({
-        type: "initialize",
-        generation: options.generation,
-        wasiRef,
-        ctx,
-      } satisfies UtilityWorkerInbound);
+      options.utilityWorker.postMessage(
+        {
+          type: "initialize",
+          generation: options.generation,
+          wasiRef,
+          ctx,
+        } satisfies UtilityWorkerInbound,
+      );
       return startup;
     },
     dispose() {

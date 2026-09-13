@@ -11,6 +11,9 @@ import {
   type RuntimeWorkerEndpoint,
   UtilityWorkerStartupError,
 } from "./runtime_worker_protocol.ts";
+import type { DestroyerHandleObject } from "@oligami/browser_wasi_shim-threads";
+import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
+import { File, OpenFile } from "@bjorn3/browser_wasi_shim";
 
 function assert(
   condition: unknown,
@@ -61,14 +64,10 @@ function deferred<T>() {
 const generation = "runtime-1";
 const ctx = { terminal_id: "terminal" } as never;
 const wasiRef = { stdin: 0 } as never;
+// State-machine unit tests treat the library-owned payload as opaque.
 const destroyerHandle = {
-  sender: {
-    allocator: { share_arrays_memory: new SharedArrayBuffer(64) },
-    lock: new SharedArrayBuffer(24),
-    signature_input: new SharedArrayBuffer(24),
-  },
-  destroy_status: new SharedArrayBuffer(8),
-};
+  fixture: "destroyer",
+} as unknown as DestroyerHandleObject;
 
 Deno.test("runtime worker protocol accepts only strict canonical envelopes", () => {
   assert(
@@ -193,7 +192,7 @@ Deno.test("utility worker publishes destroyer and awaits adoption before guest s
       return { get_object: () => destroyerHandle };
     },
     start(_root: unknown) {},
-    destroy() {
+    async async_destroy() {
       events.push("animal-destroyed");
     },
   };
@@ -263,7 +262,7 @@ Deno.test("utility worker prepares the construction module before creating the A
       return {
         create_destroyer: () => ({ get_object: () => destroyerHandle }),
         start(_root: unknown) {},
-        destroy() {
+        async async_destroy() {
           events.push("animal-destroyed");
         },
       };
@@ -322,7 +321,7 @@ Deno.test("utility cancellation during prerequisite fetch creates and destroys n
       return {
         create_destroyer: () => ({ get_object: () => destroyerHandle }),
         start(_root: unknown) {},
-        destroy() {
+        async async_destroy() {
           destroyCalls++;
         },
       };
@@ -377,7 +376,7 @@ Deno.test("utility prerequisite failure creates and destroys no Animal", async (
       return {
         create_destroyer: () => ({ get_object: () => destroyerHandle }),
         start(_root: unknown) {},
-        destroy() {
+        async async_destroy() {
           destroyCalls++;
         },
       };
@@ -409,7 +408,7 @@ Deno.test("utility worker rejects duplicate initialize and mismatched adoption",
       return {
         create_destroyer: () => ({ get_object: () => destroyerHandle }),
         start(_root: unknown) {},
-        destroy() {},
+        async async_destroy() {},
       };
     },
     postMessage() {},
@@ -479,13 +478,15 @@ Deno.test("utility worker message handler reports one strict control failure", a
 });
 
 Deno.test("utility worker leaves post-adoption startup cleanup to lifecycle owner", async () => {
-  for (const stage of [
-    "wait-background",
-    "fetch",
-    "instantiate",
-    "start",
-    "registration",
-  ]) {
+  for (
+    const stage of [
+      "wait-background",
+      "fetch",
+      "instantiate",
+      "start",
+      "registration",
+    ]
+  ) {
     const outbound: Array<{ type: string; message?: string }> = [];
     let destroyCalls = 0;
     let startCalls = 0;
@@ -497,7 +498,7 @@ Deno.test("utility worker leaves post-adoption startup cleanup to lifecycle owne
           start(_root: unknown) {
             startCalls++;
           },
-          destroy() {
+          async async_destroy() {
             destroyCalls++;
           },
         };
@@ -544,7 +545,7 @@ Deno.test("utility worker destroys locally once when publication fails before ad
       return {
         create_destroyer: () => ({ get_object: () => destroyerHandle }),
         start(_root: unknown) {},
-        destroy() {
+        async async_destroy() {
           destroyCalls++;
         },
       };
@@ -572,7 +573,7 @@ Deno.test("utility worker still destroys locally when its failure hook throws", 
       return {
         create_destroyer: () => ({ get_object: () => destroyerHandle }),
         start(_root: unknown) {},
-        destroy() {
+        async async_destroy() {
           destroyCalls++;
         },
       };
@@ -631,7 +632,7 @@ Deno.test("utility worker reclaims local ownership when lifecycle adoption fails
       return {
         create_destroyer: () => ({ get_object: () => destroyerHandle }),
         start(_root: unknown) {},
-        destroy() {
+        async async_destroy() {
           destroyCalls++;
           events.push("animal-destroyed");
         },
@@ -664,6 +665,137 @@ Deno.test("utility worker reclaims local ownership when lifecycle adoption fails
   assertEquals(events, ["destroyer", "animal-destroyed", "fatal"]);
 });
 
+Deno.test("lifecycle state machine defers destroyed until async_destroy resolves (deferred success)", async () => {
+  const outbound: unknown[] = [];
+  const asyncDestroyDeferred = deferred<void>();
+  const machine = createLifecycleWorkerStateMachine({
+    restoreDestroyer: () => ({
+      async_destroy: () => asyncDestroyDeferred.promise,
+    }),
+    postMessage: (message) => outbound.push(message),
+  });
+  await machine.handle({ type: "adopt", generation, handle: destroyerHandle });
+  const handling = machine.handle({
+    type: "destroy",
+    generation,
+    token: "tok-1",
+  });
+  await Promise.resolve();
+  // destroyed must NOT be emitted yet — lifecycle waits for async_destroy
+  assertEquals(outbound, [{ type: "adopted", generation }]);
+  asyncDestroyDeferred.resolve();
+  await handling;
+  assertEquals(outbound, [
+    { type: "adopted", generation },
+    { type: "destroyed", generation, token: "tok-1" },
+  ]);
+});
+
+Deno.test("lifecycle state machine correlates fatal with each duplicate token after deferred failure", async () => {
+  const outbound: unknown[] = [];
+  const asyncDestroyDeferred = deferred<void>();
+  const machine = createLifecycleWorkerStateMachine({
+    restoreDestroyer: () => ({
+      async_destroy: () => asyncDestroyDeferred.promise,
+    }),
+    postMessage: (message) => outbound.push(message),
+  });
+  await machine.handle({ type: "adopt", generation, handle: destroyerHandle });
+  const h1 = machine.handle({ type: "destroy", generation, token: "tok-1" });
+  const h2 = machine.handle({ type: "destroy", generation, token: "tok-2" });
+  await Promise.resolve();
+  // nothing yet — both are waiting on the same async_destroy
+  assertEquals(outbound, [{ type: "adopted", generation }]);
+  asyncDestroyDeferred.reject(new Error("async destroy failed"));
+  await h1.catch(() => {});
+  await h2.catch(() => {});
+  assertEquals(outbound.slice(1), [
+    {
+      type: "fatal",
+      generation,
+      token: "tok-1",
+      message: "async destroy failed",
+    },
+    {
+      type: "fatal",
+      generation,
+      token: "tok-2",
+      message: "async destroy failed",
+    },
+  ]);
+});
+
+Deno.test("lifecycle state machine shares one in-flight outcome for duplicate destroy tokens", async () => {
+  const outbound: unknown[] = [];
+  let destroyCalls = 0;
+  const asyncDestroyDeferred = deferred<void>();
+  const machine = createLifecycleWorkerStateMachine({
+    restoreDestroyer: () => ({
+      async_destroy() {
+        destroyCalls++;
+        return asyncDestroyDeferred.promise;
+      },
+    }),
+    postMessage: (message) => outbound.push(message),
+  });
+  await machine.handle({ type: "adopt", generation, handle: destroyerHandle });
+  const h1 = machine.handle({ type: "destroy", generation, token: "tok-1" });
+  const h2 = machine.handle({ type: "destroy", generation, token: "tok-2" });
+  asyncDestroyDeferred.resolve();
+  await h1;
+  await h2;
+  assertEquals(destroyCalls, 1, "async_destroy called more than once");
+  assertEquals(outbound, [
+    { type: "adopted", generation },
+    { type: "destroyed", generation, token: "tok-1" },
+    { type: "destroyed", generation, token: "tok-2" },
+  ]);
+});
+
+Deno.test("utility worker pre-adoption rollback awaits async_destroy before emitting fatal", async () => {
+  const asyncDestroyDeferred = deferred<void>();
+  const events: string[] = [];
+  const outbound: Array<{ type: string; message?: string }> = [];
+  const machine = createUtilityWorkerStateMachine({
+    createAnimal() {
+      return {
+        create_destroyer: () => ({ get_object: () => destroyerHandle }),
+        start(_root: unknown) {},
+        async_destroy() {
+          events.push("async-destroy-called");
+          return asyncDestroyDeferred.promise;
+        },
+      };
+    },
+    postMessage: (message) => {
+      outbound.push(message);
+      events.push(message.type);
+    },
+    async startGuest() {},
+  });
+  const starting = machine.handle({
+    type: "initialize",
+    generation,
+    wasiRef,
+    ctx,
+  });
+  void starting.catch(() => {});
+
+  // Trigger adoption failure before async_destroy resolves
+  const handling = machine.handle({
+    type: "destroyer-adoption-failed",
+    generation,
+    message: "adoption failed",
+  });
+  await Promise.resolve();
+  // fatal must NOT be emitted until async_destroy resolves
+  assertEquals(outbound.map((m) => m.type), ["destroyer"]);
+  asyncDestroyDeferred.resolve();
+  await handling;
+  await assertRejects(() => starting, "adoption failed");
+  assertEquals(events, ["destroyer", "async-destroy-called", "fatal"]);
+});
+
 Deno.test("lifecycle state machine adopts once, rejects stale generations, and destroys once", async () => {
   const outbound: unknown[] = [];
   let restoreCalls = 0;
@@ -671,7 +803,11 @@ Deno.test("lifecycle state machine adopts once, rejects stale generations, and d
   const machine = createLifecycleWorkerStateMachine({
     restoreDestroyer() {
       restoreCalls++;
-      return { destroy: () => destroyCalls++ };
+      return {
+        async_destroy: async () => {
+          destroyCalls++;
+        },
+      };
     },
     postMessage(message) {
       outbound.push(message);
@@ -706,7 +842,7 @@ Deno.test("lifecycle state machine correlates destroy failures with each token",
   let destroyCalls = 0;
   const machine = createLifecycleWorkerStateMachine({
     restoreDestroyer: () => ({
-      destroy() {
+      async_destroy() {
         destroyCalls++;
         throw new Error("destroy failed");
       },
@@ -1146,7 +1282,7 @@ function withTestTimeout<T>(
     );
   });
   return Promise.race([operation, deadline]).finally(() =>
-    clearTimeout(timeout),
+    clearTimeout(timeout)
   );
 }
 
@@ -1348,12 +1484,11 @@ const defaultWaitTimers: WaitTimers = {
 };
 
 function createFixtureWorker(role: FixtureRole): RuntimeWorkerEndpoint {
-  const path =
-    role === "background"
-      ? "./worker_process/runtime_worker_test_background.ts"
-      : role === "utility"
-        ? "./worker_process/runtime_worker_test_utility.ts"
-        : "./worker_process/runtime_worker_test_lifecycle.ts";
+  const path = role === "background"
+    ? "./worker_process/runtime_worker_test_background.ts"
+    : role === "utility"
+    ? "./worker_process/runtime_worker_test_utility.ts"
+    : "./worker_process/runtime_worker_test_lifecycle.ts";
   return new Worker(new URL(path, import.meta.url).href, { type: "module" });
 }
 
@@ -1399,10 +1534,9 @@ function createWorkerWait<T>(options: {
   }
   function onError(event: Event) {
     event.preventDefault();
-    const message =
-      event instanceof ErrorEvent && event.message
-        ? event.message
-        : `${event.type} during ${options.label}`;
+    const message = event instanceof ErrorEvent && event.message
+      ? event.message
+      : `${event.type} during ${options.label}`;
     reject(new Error(message));
   }
   function onMessageError(event: Event) {
@@ -1568,22 +1702,18 @@ async function createReadyRuntimeWorkers(
 
 interface OwnedDestroyer {
   background: RuntimeWorkerEndpoint;
-  handle: typeof destroyerHandle;
-  status: Int32Array;
-  dispose(): void;
+  handle: DestroyerHandleObject;
+  complete(): Promise<void>;
+  dispose(): Promise<void>;
 }
 
 async function createRealDestroyer(
   options: WorkerFactoryOptions = {},
 ): Promise<OwnedDestroyer> {
   let background: RuntimeWorkerEndpoint | undefined;
-  const allocatorMemory = new SharedArrayBuffer(10 * 1024 * 1024);
-  Atomics.store(new Int32Array(allocatorMemory), 2, 12);
-  const sender = {
-    allocator: { share_arrays_memory: allocatorMemory },
-    lock: new SharedArrayBuffer(24),
-    signature_input: new SharedArrayBuffer(24),
-  };
+  const fd = () => new OpenFile(new File([]));
+  const farm = new WASIFarm(fd(), fd(), fd());
+  let handle: DestroyerHandleObject;
   try {
     background = (options.createWorker ?? createFixtureWorker)("background");
     const bootstrap = waitForFixtureReady(
@@ -1592,36 +1722,51 @@ async function createRealDestroyer(
       options.timers,
     );
     await bootstrap.promise;
-    assertEquals(
-      await nextWorkerMessageAfter(
-        background,
-        () =>
-          background?.postMessage({
-            override_object: {},
-            worker_background_ref_object: structuredClone(sender),
-          }),
-        options.timers,
-      ),
-      "ready",
+    const response = await nextWorkerMessageAfter(
+      background,
+      () =>
+        background?.postMessage({
+          type: "create",
+          farmRef: farm.get_ref(),
+        }),
+      options.timers,
+    ) as { handle?: DestroyerHandleObject };
+    assert(
+      response.handle,
+      `owner did not supply a public handle: ${JSON.stringify(response)}`,
     );
+    handle = response.handle;
   } catch (error) {
     background?.terminate();
+    farm.destroy();
     throw error;
   }
-  const handle = {
-    sender,
-    destroy_status: new SharedArrayBuffer(8),
-  };
   const ownedBackground = background;
   let disposed = false;
+  let completion: Promise<void> | undefined;
+  const complete = () =>
+    completion ??= (async () => {
+      assertEquals(
+        await nextWorkerMessageAfter(
+          ownedBackground,
+          () => ownedBackground.postMessage({ type: "finish" }),
+        ),
+        { type: "finished" },
+      );
+    })();
   return {
     background: ownedBackground,
     handle,
-    status: new Int32Array(handle.destroy_status),
-    dispose() {
+    complete,
+    async dispose() {
       if (disposed) return;
       disposed = true;
-      ownedBackground.terminate();
+      try {
+        await complete();
+      } finally {
+        ownedBackground.terminate();
+        farm.destroy();
+      }
     },
   };
 }
@@ -1629,7 +1774,6 @@ async function createRealDestroyer(
 Deno.test("lifecycle worker transitions a live destroyer from owned to destroyed", async () => {
   const owned = await createRealDestroyer();
   try {
-    assertEquals(Atomics.load(owned.status, 1), 0);
     const lifecycleOwner = await createReadyLifecycleWorker();
     try {
       const worker = lifecycleOwner.worker;
@@ -1639,8 +1783,7 @@ Deno.test("lifecycle worker transitions a live destroyer from owned to destroyed
             type: "adopt",
             generation,
             handle: owned.handle,
-          }),
-        ),
+          })),
         { type: "adopted", generation },
       );
 
@@ -1651,8 +1794,7 @@ Deno.test("lifecycle worker transitions a live destroyer from owned to destroyed
               type: "destroy",
               generation,
               token: "destroy-real",
-            }),
-          ),
+            })),
           {
             type: "destroyed",
             generation,
@@ -1661,40 +1803,38 @@ Deno.test("lifecycle worker transitions a live destroyer from owned to destroyed
         );
       } catch (error) {
         throw new Error(
-          `${error instanceof Error ? error.message : error}; status=${Atomics.load(
-            owned.status,
-            1,
-          )} lock=${Array.from(new Int32Array(owned.handle.sender.lock))}`,
+          `${error instanceof Error ? error.message : error}; status=${
+            Atomics.load(
+              new Int32Array(owned.handle.destroy_status),
+              0,
+            )
+          }`,
         );
       }
-      assertEquals(Atomics.load(owned.status, 1), 2);
+      await owned.complete();
     } finally {
       lifecycleOwner.dispose();
     }
   } finally {
-    owned.dispose();
+    await owned.dispose();
   }
 });
 
-Deno.test("test coordinator wakes the waiter before reporting an unexpected signature", async () => {
+Deno.test("owner fixture rejects unexpected commands without blocking later teardown", async () => {
   const owned = await createRealDestroyer();
   try {
-    const lock = new Int32Array(owned.handle.sender.lock);
-    const signature = new Int32Array(owned.handle.sender.signature_input);
     assertEquals(
       await nextWorkerMessageAfter(owned.background, () => {
-        Atomics.store(signature, 0, 99);
-        Atomics.store(lock, 2, 1);
-        Atomics.store(lock, 1, 0);
+        owned.background.postMessage({ type: "invalid" });
       }),
       {
         type: "fixture-error",
-        message: "test coordinator received a non-destroy request",
+        message: "Error: invalid owner fixture command",
       },
     );
-    assertEquals(Atomics.load(lock, 2), 0);
+    await owned.complete();
   } finally {
-    owned.dispose();
+    await owned.dispose();
   }
 });
 
@@ -1730,12 +1870,11 @@ Deno.test("real disposal during prerequisite fetch creates no Animal", async () 
         "disposed before ready",
       );
       assertEquals(Array.from(counters), [0, 0, 0]);
-      assertEquals(Atomics.load(owned.status, 1), 0);
     } finally {
       workers.dispose();
     }
   } finally {
-    owned.dispose();
+    await owned.dispose();
   }
 });
 
@@ -1761,13 +1900,13 @@ Deno.test("real utility and lifecycle workers complete one ownership handshake",
       );
       assertEquals(Array.from(counters), [1, 1, 0]);
       await withTestTimeout(runtime.dispose(), "two-worker disposal");
-      assertEquals(Atomics.load(owned.status, 1), 2);
+      await owned.complete();
       assertEquals(Array.from(counters), [1, 1, 0]);
     } finally {
       workers.dispose();
     }
   } finally {
-    owned.dispose();
+    await owned.dispose();
   }
 });
 
@@ -1809,7 +1948,7 @@ Deno.test("real ownership handshakes remain clean across repeated generations", 
             `repeated disposal ${round}`,
           );
           assertEquals(Array.from(counters), [1, 1, 0]);
-          assertEquals(Atomics.load(owned.status, 1), 2);
+          await owned.complete();
           assertEquals(workerErrors, []);
         } finally {
           workers.utility.removeEventListener("error", recordError);
@@ -1820,7 +1959,7 @@ Deno.test("real ownership handshakes remain clean across repeated generations", 
         workers.dispose();
       }
     } finally {
-      owned.dispose();
+      await owned.dispose();
     }
   }
 });
@@ -1847,13 +1986,13 @@ Deno.test("real start failure cleans up only through lifecycle worker", async ()
         () => withTestTimeout(runtime.dispose(), "start-failure disposal"),
         "start failed",
       );
-      assertEquals(Atomics.load(owned.status, 1), 2);
+      await owned.complete();
       assertEquals(Array.from(counters), [1, 1, 0]);
     } finally {
       workers.dispose();
     }
   } finally {
-    owned.dispose();
+    await owned.dispose();
   }
 });
 
@@ -1915,8 +2054,9 @@ Deno.test("real utility worker reports duplicate initialize once without an unca
     worker.addEventListener("error", recordError);
     try {
       assertEquals(
-        await nextWorkerMessageAfter(worker, () =>
-          worker.postMessage(initialize),
+        await nextWorkerMessageAfter(
+          worker,
+          () => worker.postMessage(initialize),
         ),
         {
           type: "destroyer",
@@ -1925,8 +2065,9 @@ Deno.test("real utility worker reports duplicate initialize once without an unca
         },
       );
       assertEquals(
-        await nextWorkerMessageAfter(worker, () =>
-          worker.postMessage(initialize),
+        await nextWorkerMessageAfter(
+          worker,
+          () => worker.postMessage(initialize),
         ),
         {
           type: "control-fatal",
@@ -1947,8 +2088,9 @@ Deno.test("lifecycle worker reports reconstruction failure as a fatal envelope",
   try {
     const worker = owned.worker;
     assertEquals(
-      await nextWorkerMessageAfter(worker, () =>
-        worker.postMessage({ type: "adopt", generation, handle: {} }),
+      await nextWorkerMessageAfter(
+        worker,
+        () => worker.postMessage({ type: "adopt", generation, handle: {} }),
       ),
       {
         type: "fatal",
@@ -1971,31 +2113,13 @@ async function sourceFiles(directory: URL): Promise<URL[]> {
   return files;
 }
 
-Deno.test("a second coordinator payload leaves two uncancelled loops on one shared lock", async () => {
-  const threadSpawner = await Deno.readTextFile(
-    new URL(
-      "../../node_modules/@oligami/browser_wasi_shim-threads/src/shared_array_buffer/thread_spawn.ts",
-      import.meta.url,
-    ),
+Deno.test("lifecycle completion uses public async destruction rather than private coordinator state", async () => {
+  const source = await Deno.readTextFile(
+    new URL("./runtime_worker_protocol.ts", import.meta.url),
   );
-  const coordinator = await Deno.readTextFile(
-    new URL(
-      "../../node_modules/@oligami/browser_wasi_shim-threads/src/shared_array_buffer/worker_background/worker.ts",
-      import.meta.url,
-    ),
-  );
-
-  assert(
-    threadSpawner.includes("this.worker_background_worker.postMessage({") &&
-      threadSpawner.includes("thread_spawn_wasm,"),
-    "ThreadSpawner construction no longer posts its module to the coordinator",
-  );
-  assert(
-    coordinator.includes("this.listen_holder = this.listen();") &&
-      coordinator.includes("while (true)") &&
-      coordinator.includes("worker_background = WorkerBackground.init_self("),
-    "coordinator payloads no longer create independent uncancelled listeners",
-  );
+  assert(source.includes("destroyer!.async_destroy()"));
+  assert(source.includes("await animal?.async_destroy()"));
+  assert(!source.includes("worker_background_ref"));
 });
 
 Deno.test("runtime imports the utility worker directly and removes the forwarding layer", async () => {
@@ -2085,22 +2209,10 @@ Deno.test("runtime imports the utility worker directly and removes the forwardin
   const backgroundFixture = await Deno.readTextFile(
     new URL("./worker_process/runtime_worker_test_background.ts", src),
   );
-  const unexpectedSignature = backgroundFixture.indexOf(
-    "if (Atomics.load(signature, 0) !== 5)",
-  );
-  const waiterNotification = backgroundFixture.indexOf(
-    "Atomics.notify(lock, 2);",
-    unexpectedSignature,
-  );
-  const fixtureError = backgroundFixture.indexOf(
-    'type: "fixture-error"',
-    unexpectedSignature,
-  );
   assert(
-    unexpectedSignature >= 0 &&
-      waiterNotification > unexpectedSignature &&
-      waiterNotification < fixtureError,
-    "unexpected fixture signatures can strand a shared-lock waiter",
+    backgroundFixture.includes("await owner.async_destroy()") &&
+      !backgroundFixture.includes("Atomics"),
+    "owner fixture must use public destruction instead of recreating coordinator state",
   );
   assert(
     utility.includes('[`VFS_THREADS=${vfs_threads}`, "VFS_DEBUG_TRACE=1"]'),

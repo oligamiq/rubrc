@@ -51,10 +51,7 @@
   },
   "workspaces": ["./lib", "./page"],
   "dependencies": {
-    "@oligami/browser_wasi_shim-threads": "0.4.1",
+    "@oligami/browser_wasi_shim-threads": "0.5.0",
     "tsx": "^4.23.0"
-  },
-  "patchedDependencies": {
-    "@oligami/browser_wasi_shim-threads@0.4.1": "patches/@oligami%2Fbrowser_wasi_shim-threads@0.4.1.patch"
   }
 }

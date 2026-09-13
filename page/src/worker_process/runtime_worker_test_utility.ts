@@ -37,7 +37,7 @@ const utility = createUtilityWorkerStateMachine({
         Atomics.add(counters, 1, 1);
         if (fixture.failStart) throw new Error("start failed");
       },
-      destroy() {
+      async async_destroy() {
         Atomics.add(counters, 2, 1);
       },
     };

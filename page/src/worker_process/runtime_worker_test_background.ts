@@ -1,33 +1,28 @@
-globalThis.postMessage({ type: "fixture-ready", worker: "background" });
+import { WASIFarmAnimal } from "@oligami/browser_wasi_shim-threads";
 
-globalThis.addEventListener("message", (event) => {
-  const sender = event.data.worker_background_ref_object as {
-    lock: SharedArrayBuffer;
-    signature_input: SharedArrayBuffer;
-  };
-  const lock = new Int32Array(sender.lock);
-  const signature = new Int32Array(sender.signature_input);
-  Atomics.store(lock, 0, 0);
-  Atomics.store(lock, 1, 1);
-  globalThis.postMessage("ready");
-
-  const poll = setInterval(() => {
-    if (Atomics.load(lock, 1) !== 0 || Atomics.load(lock, 2) !== 1) return;
-    if (Atomics.load(signature, 0) !== 5) {
-      clearInterval(poll);
-      Atomics.store(lock, 1, 1);
-      Atomics.store(lock, 2, 0);
-      Atomics.notify(lock, 2);
-      globalThis.postMessage({
-        type: "fixture-error",
-        message: "test coordinator received a non-destroy request",
+let owner: WASIFarmAnimal | undefined;
+globalThis.addEventListener("message", async (event) => {
+  try {
+    if (event.data.type === "create") {
+      const module = new WebAssembly.Module(
+        new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]),
+      );
+      owner = new WASIFarmAnimal(event.data.farmRef, [], [], {
+        can_thread_spawn: true,
+        thread_spawn_worker_url: "",
+        thread_spawn_wasm: module,
+        share_memory: {},
       });
-      globalThis.close();
-      return;
+      await owner.wait_worker_background_worker();
+      globalThis.postMessage({ handle: owner.create_destroyer().get_object() });
+    } else if (event.data.type === "finish" && owner) {
+      await owner.async_destroy();
+      globalThis.postMessage({ type: "finished" });
+    } else {
+      throw new Error("invalid owner fixture command");
     }
-    Atomics.store(lock, 1, 1);
-    Atomics.store(lock, 2, 0);
-    Atomics.notify(lock, 2, 1);
-    clearInterval(poll);
-  }, 1);
+  } catch (error) {
+    globalThis.postMessage({ type: "fixture-error", message: String(error) });
+  }
 });
+globalThis.postMessage({ type: "fixture-ready", worker: "background" });
