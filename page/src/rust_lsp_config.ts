@@ -1,9 +1,16 @@
-export function createRustAnalyzerLightweightOptions(): {
+import {
+  RUST_ANALYZER_MAIN_LOOP_THREADS_WASI,
+} from "./runtime_parallelism.ts";
+
+export function createRustAnalyzerLightweightOptions(
+  numThreads = RUST_ANALYZER_MAIN_LOOP_THREADS_WASI,
+): {
   linkedProjects: [];
   cargo: { buildScripts: { enable: false }; autoreload: false };
   procMacro: { enable: false };
   checkOnSave: { enable: false };
   cachePriming: { enable: false };
+  numThreads: number;
 } {
   return {
     linkedProjects: [],
@@ -11,6 +18,7 @@ export function createRustAnalyzerLightweightOptions(): {
     procMacro: { enable: false },
     checkOnSave: { enable: false },
     cachePriming: { enable: false },
+    numThreads,
   };
 }
 
@@ -29,7 +37,9 @@ export function createRustAnalyzerProjectJson() {
   };
 }
 
-export function createRustAnalyzerProjectSettings() {
+export function createRustAnalyzerProjectSettings(
+  numThreads = RUST_ANALYZER_MAIN_LOOP_THREADS_WASI,
+) {
   return {
     linkedProjects: [createRustAnalyzerProjectJson()],
     cargo: {
@@ -40,19 +50,22 @@ export function createRustAnalyzerProjectSettings() {
     procMacro: { enable: false },
     checkOnSave: { enable: false },
     cachePriming: { enable: false },
+    numThreads,
   };
 }
 
-export function createRustAnalyzerConfigurationState() {
+export function createRustAnalyzerConfigurationState(
+  numThreads = RUST_ANALYZER_MAIN_LOOP_THREADS_WASI,
+) {
   let settings:
     | ReturnType<typeof createRustAnalyzerLightweightOptions>
     | ReturnType<typeof createRustAnalyzerProjectSettings> =
-      createRustAnalyzerLightweightOptions();
+      createRustAnalyzerLightweightOptions(numThreads);
 
   return {
     initializationOptions: () => settings,
     activateProject: () => {
-      settings = createRustAnalyzerProjectSettings();
+      settings = createRustAnalyzerProjectSettings(numThreads);
     },
     response: (items: readonly { section?: string | null }[]) =>
       items.map((item) => item.section === "rust-analyzer" ? settings : null),

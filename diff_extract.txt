@@ -1,0 +1,1531 @@
+224: diff --git a/.github/workflows/static.yml b/.github/workflows/static.yml
+225: index 0b3f04c6..ebc57726 100644
+226: --- a/.github/workflows/static.yml
+227: +++ b/.github/workflows/static.yml
+228: @@ -96,30 +96,35 @@ jobs:
+229:  
+230:            if (metadata.version !== 1) {
+231:              throw new Error("metadata.version !== 1");
+232:            }
+233:  
+234:            if (metadata.sourceSha !== process.env.SOURCE_SHA) {
+235:              throw new Error(
+236:                "metadata.sourceSha does not match source_sha",
+237:              );
+238:            }
+239: +
+240: +          if (
+241: +            !Number.isSafeInteger(metadata.buildEpoch) ||
+242: +            metadata.buildEpoch <= 0
+243: +          ) {
+244: +            throw new Error("metadata.buildEpoch is not a positive safe integer");
+245: +          }
+246:            NODE
+247:  
+248:        - name: Verify artifacts
+249:          run: node source/scripts/verify-vfs-asset.mjs site
+250:  
+251: -      - name: Remove .rubrc-pages-build.json
+252: -        run: rm -f site/.rubrc-pages-build.json
+253: -
+254: -      - name: Confirm index.html and v1/index.html
+255: +      - name: Confirm deployment files
+256:          run: |
+257: +          test -f site/.rubrc-pages-build.json
+258:            test -f site/index.html
+259:            test -f site/v1/index.html
+260:  
+261:        - name: Setup Pages
+262:          uses: actions/configure-pages@v5
+263:  
+264:        - name: Upload artifact
+265:          uses: actions/upload-pages-artifact@v3
+266:          with:
+267:            path: 'site'
+796: diff --git a/crates/vfs-shell/src/sysroot_extraction.rs b/crates/vfs-shell/src/sysroot_extraction.rs
+797: new file mode 100644
+798: index 00000000..53a4e1e1
+799: --- /dev/null
+800: +++ b/crates/vfs-shell/src/sysroot_extraction.rs
+801: @@ -0,0 +1,173 @@
+802: +use std::path::{Component, Path, PathBuf};
+803: +use std::sync::Mutex;
+804: +
+805: +static SYSROOT_LOAD_LOCK: Mutex<()> = Mutex::new(());
+806: +
+807: +pub(crate) fn with_sysroot_load_lock<T>(
+808: +    operation: impl FnOnce() -> Result<T, String>,
+809: +) -> Result<T, String> {
+810: +    let _guard = SYSROOT_LOAD_LOCK
+811: +        .lock()
+812: +        .map_err(|_| "sysroot load lock was poisoned".to_string())?;
+813: +    operation()
+814: +}
+815: +
+816: +pub(crate) fn sysroot_meta_has_file(status: i32, triple: &str) -> Result<bool, String> {
+817: +    match status {
+818: +        1 => Ok(true),
+819: +        0 => Ok(false),
+820: +        -1 => Err(format!("failed to fetch sysroot archive for '{triple}'")),
+821: +        _ => Err(format!(
+822: +            "invalid sysroot archive status {status} for '{triple}'"
+823: +        )),
+824: +    }
+825: +}
+826: +
+827: +pub(crate) fn sysroot_entry_path(base_dir: &Path, name: &str) -> Result<PathBuf, String> {
+828: +    if name == "." || name == "./" {
+829: +        return Ok(base_dir.to_path_buf());
+830: +    }
+831: +    let mut relative = PathBuf::new();
+832: +    for component in Path::new(name).components() {
+833: +        match component {
+834: +            Component::Normal(part) => relative.push(part),
+835: +            Component::CurDir => {}
+836: +            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+837: +                return Err(format!("unsafe sysroot archive entry: {name}"));
+838: +            }
+839: +        }
+840: +    }
+841: +    if relative.as_os_str().is_empty() {
+842: +        return Err(format!("unsafe sysroot archive entry: {name}"));
+843: +    }
+844: +    Ok(base_dir.join(relative))
+845: +}
+846: +
+847: +pub(crate) fn write_sysroot_entry(
+848: +    base_dir: &Path,
+849: +    name_bytes: Vec<u8>,
+850: +    data: Option<&[u8]>,
+851: +) -> Result<(), String> {
+852: +    let name = String::from_utf8(name_bytes)
+853: +        .map_err(|error| format!("failed to decode sysroot file name: {error}"))?;
+854: +    let file_path = sysroot_entry_path(base_dir, &name)?;
+855: +    match data {
+856: +        None => std::fs::create_dir_all(&file_path)
+857: +            .map_err(|error| format!("failed to create sysroot directory '{name}': {error}")),
+858: +        Some(data) => {
+859: +            if let Some(parent) = file_path.parent() {
+860: +                std::fs::create_dir_all(parent).map_err(|error| {
+861: +                    format!("failed to create parent directory for sysroot file '{name}': {error}")
+862: +                })?;
+863: +            }
+864: +            std::fs::write(&file_path, data)
+865: +                .map_err(|error| format!("failed to write sysroot file '{name}': {error}"))
+866: +        }
+867: +    }
+868: +}
+869: +
+870: +#[cfg(test)]
+871: +mod tests {
+872: +    use super::{
+873: +        sysroot_entry_path, sysroot_meta_has_file, with_sysroot_load_lock, write_sysroot_entry,
+874: +    };
+875: +    use std::fs;
+876: +    use std::path::PathBuf;
+877: +    use std::sync::atomic::{AtomicUsize, Ordering};
+878: +    use std::sync::{Arc, Barrier};
+879: +    use std::time::Duration;
+880: +
+881: +    static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
+882: +
+883: +    fn temp_path(label: &str) -> PathBuf {
+884: +        std::env::temp_dir().join(format!(
+885: +            "rubrc-sysroot-{label}-{}-{}",
+886: +            std::process::id(),
+887: +            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+888: +        ))
+889: +    }
+890: +
+891: +    #[test]
+892: +    fn rejects_absolute_parent_and_nested_escape_paths() {
+893: +        let base = PathBuf::from("/sysroot/lib");
+894: +        for name in ["/absolute", "..", "../escape", "nested/../../escape"] {
+895: +            assert!(
+896: +                sysroot_entry_path(&base, name).is_err(),
+897: +                "accepted unsafe entry {name}"
+898: +            );
+899: +        }
+900: +    }
+901: +
+902: +    #[test]
+903: +    fn accepts_archive_root_directory_marker() {
+904: +        let base = PathBuf::from("/sysroot/lib");
+905: +        assert_eq!(sysroot_entry_path(&base, ".").unwrap(), base);
+906: +    }
+907: +
+908: +    #[test]
+909: +    fn rejects_invalid_utf8_file_names() {
+910: +        let error = write_sysroot_entry(&PathBuf::from("/sysroot/lib"), vec![0xff], Some(&[1]))
+911: +            .unwrap_err();
+912: +        assert!(error.contains("decode"), "unexpected error: {error}");
+913: +    }
+914: +
+915: +    #[test]
+916: +    fn propagates_directory_creation_failure() {
+917: +        let base = temp_path("directory-error");
+918: +        fs::write(&base, b"not a directory").unwrap();
+919: +        let result = write_sysroot_entry(&base, b"nested".to_vec(), None);
+920: +        let _ = fs::remove_file(&base);
+921: +        assert!(result.is_err());
+922: +    }
+923: +
+924: +    #[test]
+925: +    fn propagates_file_write_failure() {
+926: +        let base = temp_path("write-error");
+927: +        fs::create_dir_all(base.join("existing-directory")).unwrap();
+928: +        let result = write_sysroot_entry(
+929: +            &base,
+930: +            b"existing-directory".to_vec(),
+931: +            Some(b"file contents"),
+932: +        );
+933: +        let _ = fs::remove_dir_all(&base);
+934: +        assert!(result.is_err());
+935: +    }
+936: +
+937: +    #[test]
+938: +    fn serializes_complete_sysroot_transactions() {
+939: +        let start = Arc::new(Barrier::new(5));
+940: +        let active = Arc::new(AtomicUsize::new(0));
+941: +        let maximum = Arc::new(AtomicUsize::new(0));
+942: +        let workers = (0..4)
+943: +            .map(|_| {
+944: +                let start = Arc::clone(&start);
+945: +                let active = Arc::clone(&active);
+946: +                let maximum = Arc::clone(&maximum);
+947: +                std::thread::spawn(move || {
+948: +                    start.wait();
+949: +                    with_sysroot_load_lock(|| {
+950: +                        let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+951: +                        maximum.fetch_max(current, Ordering::SeqCst);
+952: +                        std::thread::sleep(Duration::from_millis(5));
+953: +                        active.fetch_sub(1, Ordering::SeqCst);
+954: +                        Ok(())
+955: +                    })
+956: +                    .unwrap();
+957: +                })
+958: +            })
+959: +            .collect::<Vec<_>>();
+960: +        start.wait();
+961: +        for worker in workers {
+962: +            worker.join().unwrap();
+963: +        }
+964: +        assert_eq!(maximum.load(Ordering::SeqCst), 1);
+965: +    }
+966: +
+967: +    #[test]
+968: +    fn failed_host_archive_status_fails_the_extraction() {
+969: +        assert!(sysroot_meta_has_file(1, "rust-src").unwrap());
+970: +        assert!(!sysroot_meta_has_file(0, "rust-src").unwrap());
+971: +        let error = sysroot_meta_has_file(-1, "rust-src").unwrap_err();
+972: +        assert!(error.contains("rust-src"), "unexpected error: {error}");
+973: +    }
+974: +}
+11776: diff --git a/lib/src/fetch_compressed_stream.ts b/lib/src/fetch_compressed_stream.ts
+11777: new file mode 100644
+11778: index 00000000..8dc4694c
+11779: --- /dev/null
+11780: +++ b/lib/src/fetch_compressed_stream.ts
+11781: @@ -0,0 +1,99 @@
+11782: +import {
+11783: +  type FetchInput,
+11784: +  type FetchWithOptionalCacheDependencies,
+11785: +  fetchWithOptionalCache,
+11786: +} from "./fetch_with_optional_cache.ts";
+11787: +
+11788: +const ACCEPTED_COMPRESSED_CONTENT_TYPES = new Set([
+11789: +  "application/octet-stream",
+11790: +  "application/brotli",
+11791: +  "application/x-brotli",
+11792: +]);
+11793: +const HTTP_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+11794: +
+11795: +export type FetchCompressedStreamDependencies = Omit<
+11796: +  FetchWithOptionalCacheDependencies,
+11797: +  "acceptResponse"
+11798: +> & {
+11799: +  getDecompressStream(): Promise<TransformStream<Uint8Array, Uint8Array>>;
+11800: +};
+11801: +
+11802: +function mediaType(response: Response): string | null {
+11803: +  const contentType = response.headers.get("content-type");
+11804: +  if (contentType === null || contentType.includes(",")) return null;
+11805: +
+11806: +  const [rawType, ...rawParameters] = contentType.split(";");
+11807: +  const typeParts = rawType.trim().split("/");
+11808: +  if (
+11809: +    typeParts.length !== 2 ||
+11810: +    !HTTP_TOKEN.test(typeParts[0]) ||
+11811: +    !HTTP_TOKEN.test(typeParts[1])
+11812: +  ) {
+11813: +    return null;
+11814: +  }
+11815: +  for (const rawParameter of rawParameters) {
+11816: +    const separator = rawParameter.indexOf("=");
+11817: +    if (separator < 1) return null;
+11818: +    const name = rawParameter.slice(0, separator).trim();
+11819: +    const value = rawParameter.slice(separator + 1).trim();
+11820: +    if (!HTTP_TOKEN.test(name) || !HTTP_TOKEN.test(value)) return null;
+11821: +  }
+11822: +
+11823: +  return typeParts.join("/").toLowerCase();
+11824: +}
+11825: +
+11826: +export function isAcceptedCompressedResponse(response: Response): boolean {
+11827: +  const type = mediaType(response);
+11828: +  return type !== null && ACCEPTED_COMPRESSED_CONTENT_TYPES.has(type);
+11829: +}
+11830: +
+11831: +function requestUrl(input: FetchInput): string {
+11832: +  if (typeof input === "string") return input;
+11833: +  if (input instanceof URL) return input.href;
+11834: +  return input.url;
+11835: +}
+11836: +
+11837: +export async function fetchCompressedStream(
+11838: +  url: FetchInput,
+11839: +  signal: AbortSignal | undefined,
+11840: +  dependencies: FetchCompressedStreamDependencies,
+11841: +): Promise<ReadableStream<Uint8Array>> {
+11842: +  const response = await fetchWithOptionalCache(
+11843: +    url,
+11844: +    signal === undefined ? undefined : { signal },
+11845: +    {
+11846: +      cacheStorage: dependencies.cacheStorage,
+11847: +      fetch: dependencies.fetch,
+11848: +      reportCacheError: dependencies.reportCacheError,
+11849: +      acceptResponse: isAcceptedCompressedResponse,
+11850: +    },
+11851: +  );
+11852: +
+11853: +  if (!response.ok) {
+11854: +    await response.body?.cancel().catch(() => undefined);
+11855: +    throw new Error("Failed to fetch wasm");
+11856: +  }
+11857: +  if (!isAcceptedCompressedResponse(response)) {
+11858: +    const contentType = response.headers.get("content-type");
+11859: +    await response.body?.cancel().catch(() => undefined);
+11860: +    const reason =
+11861: +      contentType === null
+11862: +        ? "missing Content-Type"
+11863: +        : `unsupported Content-Type ${JSON.stringify(contentType)}`;
+11864: +    throw new Error(
+11865: +      `Invalid compressed asset response for ${requestUrl(url)}: ${reason}`,
+11866: +    );
+11867: +  }
+11868: +  if (!response.body) {
+11869: +    throw new Error("No body in response");
+11870: +  }
+11871: +
+11872: +  let decompressStream: TransformStream<Uint8Array, Uint8Array>;
+11873: +  try {
+11874: +    decompressStream = await dependencies.getDecompressStream();
+11875: +  } catch (error) {
+11876: +    await response.body.cancel().catch(() => undefined);
+11877: +    throw error;
+11878: +  }
+11879: +  return response.body.pipeThrough(decompressStream);
+11880: +}
+12180: diff --git a/lib/src/fetch_with_optional_cache.ts b/lib/src/fetch_with_optional_cache.ts
+12181: new file mode 100644
+12182: index 00000000..4b8145ac
+12183: --- /dev/null
+12184: +++ b/lib/src/fetch_with_optional_cache.ts
+12185: @@ -0,0 +1,84 @@
+12186: +export type FetchInput = string | URL | Request;
+12187: +
+12188: +export interface CacheBoundary {
+12189: +  match(input: FetchInput): Promise<Response | undefined>;
+12190: +  delete(input: FetchInput): Promise<boolean>;
+12191: +  put(input: FetchInput, response: Response): Promise<void>;
+12192: +}
+12193: +
+12194: +export interface CacheStorageBoundary {
+12195: +  open(name: string): Promise<CacheBoundary>;
+12196: +}
+12197: +
+12198: +export interface FetchWithOptionalCacheDependencies {
+12199: +  cacheStorage?: CacheStorageBoundary;
+12200: +  fetch(input: FetchInput, init?: RequestInit): Promise<Response>;
+12201: +  reportCacheError(error: unknown): void;
+12202: +  acceptResponse?: (response: Response) => boolean;
+12203: +}
+12204: +
+12205: +export async function fetchWithOptionalCache(
+12206: +  input: FetchInput,
+12207: +  init: RequestInit | undefined,
+12208: +  dependencies: FetchWithOptionalCacheDependencies,
+12209: +): Promise<Response> {
+12210: +  const {
+12211: +    cacheStorage,
+12212: +    fetch,
+12213: +    reportCacheError,
+12214: +    acceptResponse = () => true,
+12215: +  } = dependencies;
+12216: +  const method =
+12217: +    init?.method ?? (input instanceof Request ? input.method : "GET");
+12218: +  if (method.toUpperCase() !== "GET") {
+12219: +    return await fetch(input, init);
+12220: +  }
+12221: +  if (!cacheStorage) return await fetch(input, init);
+12222: +  const cacheInput = new Request(input, init);
+12223: +  const responseIsAccepted = async (response: Response): Promise<boolean> => {
+12224: +    try {
+12225: +      return acceptResponse(response);
+12226: +    } catch (error) {
+12227: +      await response.body?.cancel().catch(() => undefined);
+12228: +      throw error;
+12229: +    }
+12230: +  };
+12231: +
+12232: +  let cache: CacheBoundary;
+12233: +  try {
+12234: +    cache = await cacheStorage.open("rubrc-assets-v1");
+12235: +  } catch (error) {
+12236: +    reportCacheError(error);
+12237: +    return await fetch(input, init);
+12238: +  }
+12239: +
+12240: +  let cachedResponse: Response | undefined;
+12241: +  try {
+12242: +    cachedResponse = await cache.match(cacheInput);
+12243: +  } catch (error) {
+12244: +    reportCacheError(error);
+12245: +    return await fetch(input, init);
+12246: +  }
+12247: +
+12248: +  if (cachedResponse) {
+12249: +    if (cachedResponse.ok && (await responseIsAccepted(cachedResponse))) {
+12250: +      return cachedResponse;
+12251: +    }
+12252: +    await cachedResponse.body?.cancel().catch(() => undefined);
+12253: +    try {
+12254: +      await cache.delete(cacheInput);
+12255: +    } catch (error) {
+12256: +      reportCacheError(error);
+12257: +    }
+12258: +  }
+12259: +
+12260: +  const response = await fetch(input, init);
+12261: +  if (response.ok && (await responseIsAccepted(response))) {
+12262: +    const cacheResponse = response.clone();
+12263: +    void cache.put(cacheInput, cacheResponse).catch(async (error) => {
+12264: +      await cacheResponse.body?.cancel().catch(() => undefined);
+12265: +      reportCacheError(error);
+12266: +    });
+12267: +  }
+12268: +  return response;
+12269: +}
+26315: diff --git a/page/src/rust_src_cache.ts b/page/src/rust_src_cache.ts
+26316: new file mode 100644
+26317: index 00000000..b04043ce
+26318: --- /dev/null
+26319: +++ b/page/src/rust_src_cache.ts
+26320: @@ -0,0 +1,81 @@
+26321: +type FetchInput = string | URL | Request;
+26322: +
+26323: +type RustSrcCache = {
+26324: +  keys(): Promise<readonly Request[]>;
+26325: +  delete(request: Request): Promise<boolean>;
+26326: +};
+26327: +
+26328: +export type RustSrcCacheDependencies = {
+26329: +  cacheStorage?: { open(name: string): Promise<RustSrcCache> };
+26330: +  fetch(input: FetchInput, init?: RequestInit): Promise<Response>;
+26331: +  reportError(error: unknown): void;
+26332: +};
+26333: +
+26334: +function cacheBuildEpoch(url: URL): number | undefined {
+26335: +  const values = url.searchParams.getAll("build");
+26336: +  if (values.length === 0) return 0;
+26337: +  if (values.length !== 1 || !/^(0|[1-9]\d*)$/.test(values[0])) {
+26338: +    return undefined;
+26339: +  }
+26340: +  const value = Number(values[0]);
+26341: +  return Number.isSafeInteger(value) ? value : undefined;
+26342: +}
+26343: +
+26344: +export async function pruneRustSrcCacheVariants(
+26345: +  archiveUrl: string,
+26346: +  sourceRevision: string,
+26347: +  dependencies: RustSrcCacheDependencies,
+26348: +): Promise<void> {
+26349: +  try {
+26350: +    const cacheStorage = dependencies.cacheStorage;
+26351: +    if (!cacheStorage) return;
+26352: +    const current = new URL(
+26353: +      archiveUrl,
+26354: +      typeof location === "undefined"
+26355: +        ? "https://development.invalid/"
+26356: +        : location.href,
+26357: +    );
+26358: +    const currentBuildEpoch = cacheBuildEpoch(current);
+26359: +    const cache = await cacheStorage.open("rubrc-assets-v1");
+26360: +    const requests = await cache.keys();
+26361: +    const metadataUrl = new URL(".rubrc-pages-build.json", current);
+26362: +    const response = await dependencies.fetch(metadataUrl, {
+26363: +      cache: "no-store",
+26364: +    });
+26365: +    if (!response.ok) return;
+26366: +    const metadata: unknown = await response.json();
+26367: +    if (
+26368: +      typeof metadata !== "object" ||
+26369: +      metadata === null ||
+26370: +      !("version" in metadata) ||
+26371: +      metadata.version !== 1 ||
+26372: +      !("sourceSha" in metadata) ||
+26373: +      metadata.sourceSha !== sourceRevision ||
+26374: +      !("buildEpoch" in metadata) ||
+26375: +      typeof metadata.buildEpoch !== "number" ||
+26376: +      !Number.isSafeInteger(metadata.buildEpoch) ||
+26377: +      metadata.buildEpoch <= 0 ||
+26378: +      metadata.buildEpoch !== currentBuildEpoch
+26379: +    )
+26380: +      return;
+26381: +
+26382: +    for (const request of requests) {
+26383: +      const candidate = new URL(request.url);
+26384: +      if (
+26385: +        candidate.origin === current.origin &&
+26386: +        candidate.pathname === current.pathname &&
+26387: +        candidate.href !== current.href
+26388: +      ) {
+26389: +        const candidateBuildEpoch = cacheBuildEpoch(candidate);
+26390: +        if (
+26391: +          candidateBuildEpoch !== undefined &&
+26392: +          candidateBuildEpoch < metadata.buildEpoch
+26393: +        ) {
+26394: +          await cache.delete(request);
+26395: +        }
+26396: +      }
+26397: +    }
+26398: +  } catch (error) {
+26399: +    dependencies.reportError(error);
+26400: +  }
+26401: +}
+31283: diff --git a/page/vite.config.ts b/page/vite.config.ts
+31284: index 553d7d0b..43baa8d6 100644
+31285: --- a/page/vite.config.ts
+31286: +++ b/page/vite.config.ts
+31287: @@ -1,42 +1,187 @@
+31288: -import { defineConfig } from "vite";
+31289: +import { Buffer } from "node:buffer";
+31290: +import { open, readFile } from "node:fs/promises";
+31291: +import { pipeline } from "node:stream/promises";
+31292: +import { fileURLToPath } from "node:url";
+31293: +import importMetaUrlPlugin from "@codingame/esbuild-import-meta-url-plugin";
+31294: +import tailwindcss from "@tailwindcss/vite";
+31295: +import { defineConfig, type Plugin } from "vite";
+31296:  import solidPlugin from "vite-plugin-solid";
+31297: -// import devtools from 'solid-devtools/vite';
+31298: -import tailwindcss from '@tailwindcss/vite'
+31299: -import importMetaUrlPlugin from '@codingame/esbuild-import-meta-url-plugin'
+31300: -
+31301: -export default defineConfig({
+31302: -  plugins: [
+31303: -    /*
+31304: -    Uncomment the following line to enable solid-devtools.
+31305: -    For more info see https://github.com/thetarnav/solid-devtools/tree/main/packages/extension#readme
+31306: -    */
+31307: -    // devtools(),
+31308: -    solidPlugin(),
+31309: -    tailwindcss(),
+31310: -  ],
+31311: -  optimizeDeps: {
+31312: -    exclude: ['brotli-dec-wasm'],
+31313: -    esbuildOptions: {
+31314: -      plugins: [
+31315: -        importMetaUrlPlugin
+31316: -      ]
+31317: +
+31318: +const crossOriginIsolationHeaders = {
+31319: +  "Cross-Origin-Embedder-Policy": "require-corp",
+31320: +  "Cross-Origin-Opener-Policy": "same-origin",
+31321: +};
+31322: +
+31323: +const developmentRustSrcDirectory = fileURLToPath(
+31324: +  new URL("../.rubrc-cache/dev/", import.meta.url),
+31325: +);
+31326: +const developmentRustSrcSidecarPath = `${developmentRustSrcDirectory}/rust-src.sha256`;
+31327: +
+31328: +type DevelopmentRustSrcAsset = {
+31329: +  path: string;
+31330: +  sha256: string;
+31331: +};
+31332: +
+31333: +async function readDevelopmentRustSrcAsset(): Promise<DevelopmentRustSrcAsset> {
+31334: +  const sha256 = (await readFile(developmentRustSrcSidecarPath, "utf8")).trim();
+31335: +  if (!/^[a-f0-9]{64}$/.test(sha256)) {
+31336: +    throw new Error(
+31337: +      `invalid development rust-src SHA-256 in ${developmentRustSrcSidecarPath}`,
+31338: +    );
+31339: +  }
+31340: +  return {
+31341: +    path: `${developmentRustSrcDirectory}/rust-src-${sha256}.tar.vfsbr`,
+31342: +    sha256,
+31343: +  };
+31344: +}
+31345: +
+31346: +function developmentRustSrcPlugin(asset: DevelopmentRustSrcAsset): Plugin {
+31347: +  return {
+31348: +    name: "rubrc-development-rust-src",
+31349: +    apply: "serve",
+31350: +    configureServer(server) {
+31351: +      server.middlewares.use((request, response, next) => {
+31352: +        void serveDevelopmentRustSrcAsset(request, response, next, asset).catch(
+31353: +          (error) => {
+31354: +            if (!response.destroyed) next(error);
+31355: +          },
+31356: +        );
+31357: +      });
+31358: +    },
+31359: +  };
+31360: +}
+31361: +
+31362: +async function serveDevelopmentRustSrcAsset(
+31363: +  request: import("node:http").IncomingMessage,
+31364: +  response: import("node:http").ServerResponse,
+31365: +  next: (error?: unknown) => void,
+31366: +  asset: DevelopmentRustSrcAsset,
+31367: +): Promise<void> {
+31368: +  if (request.method !== "GET" && request.method !== "HEAD") {
+31369: +    next();
+31370: +    return;
+31371: +  }
+31372: +  const rawUrl = request.url;
+31373: +  if (!rawUrl?.startsWith("/") || rawUrl.startsWith("//")) {
+31374: +    next();
+31375: +    return;
+31376: +  }
+31377: +  const requestUrl = new URL(rawUrl, "http://localhost");
+31378: +  if (requestUrl.pathname !== "/rust-src.tar.vfsbr") {
+31379: +    next();
+31380: +    return;
+31381: +  }
+31382: +  if (requestUrl.searchParams.get("v") !== asset.sha256) {
+31383: +    response.statusCode = 409;
+31384: +    response.setHeader("Content-Type", "text/plain; charset=utf-8");
+31385: +    const message = `rust-src development asset revision mismatch; expected ${asset.sha256}\n`;
+31386: +    response.setHeader("Content-Length", String(Buffer.byteLength(message)));
+31387: +    response.end(request.method === "HEAD" ? undefined : message);
+31388: +    return;
+31389: +  }
+31390: +
+31391: +  const file = await open(asset.path, "r");
+31392: +  try {
+31393: +    const stat = await file.stat();
+31394: +    if (!stat.isFile()) {
+31395: +      throw new Error(
+31396: +        `development rust-src asset is not a regular file: ${asset.path}`,
+31397: +      );
+31398: +    }
+31399: +    if (response.destroyed) {
+31400: +      await file.close();
+31401: +      return;
+31402: +    }
+31403: +    response.statusCode = 200;
+31404: +    response.setHeader("Content-Type", "application/octet-stream");
+31405: +    response.setHeader("Content-Length", String(stat.size));
+31406: +    response.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+31407: +    if (request.method === "HEAD") {
+31408: +      await file.close();
+31409: +      if (!response.destroyed) response.end();
+31410: +      return;
+31411:      }
+31412: -  },
+31413: -  server: {
+31414: -    port: 3000,
+31415: -    headers: {
+31416: -      "Cross-Origin-Embedder-Policy": "require-corp",
+31417: -      "Cross-Origin-Opener-Policy": "same-origin",
+31418: +  } catch (error) {
+31419: +    await file.close();
+31420: +    throw error;
+31421: +  }
+31422: +  let stream: ReturnType<typeof file.createReadStream>;
+31423: +  try {
+31424: +    stream = file.createReadStream();
+31425: +  } catch (error) {
+31426: +    await file.close();
+31427: +    throw error;
+31428: +  }
+31429: +  try {
+31430: +    await pipeline(stream, response);
+31431: +  } catch (error) {
+31432: +    if (
+31433: +      response.destroyed ||
+31434: +      (error instanceof Error &&
+31435: +        "code" in error &&
+31436: +        (error.code === "ECONNRESET" ||
+31437: +          error.code === "ERR_STREAM_PREMATURE_CLOSE"))
+31438: +    ) {
+31439: +      return;
+31440: +    }
+31441: +    if (response.headersSent) {
+31442: +      response.destroy(error instanceof Error ? error : undefined);
+31443: +      return;
+31444: +    }
+31445: +    throw error;
+31446: +  }
+31447: +}
+31448: +
+31449: +export default defineConfig(async ({ command, isPreview }) => {
+31450: +  const isDevelopmentServer = command === "serve" && isPreview !== true;
+31451: +  const developmentRustSrcAsset = isDevelopmentServer
+31452: +    ? await readDevelopmentRustSrcAsset()
+31453: +    : undefined;
+31454: +  const productionSourceRevision = process.env.SOURCE_SHA ?? "development";
+31455: +  const sourceRevision =
+31456: +    developmentRustSrcAsset?.sha256 ?? productionSourceRevision;
+31457: +
+31458: +  return {
+31459: +    define: {
+31460: +      __RUBRC_SOURCE_REVISION__: JSON.stringify(sourceRevision),
+31461: +      __RUBRC_BUILD_EPOCH__: JSON.stringify(process.env.BUILD_EPOCH ?? "0"),
+31462: +    },
+31463: +    resolve: {
+31464: +      alias: {
+31465: +        "monaco-editor": "@codingame/monaco-vscode-editor-api",
+31466: +      },
+31467: +      dedupe: [
+31468: +        "vscode",
+31469: +        "@codingame/monaco-vscode-api",
+31470: +        "@codingame/monaco-vscode-extension-api",
+31471: +        "@codingame/monaco-vscode-extensions-service-override",
+31472: +      ],
+31473: +    },
+31474: +    plugins: [
+31475: +      ...(developmentRustSrcAsset
+31476: +        ? [developmentRustSrcPlugin(developmentRustSrcAsset)]
+31477: +        : []),
+31478: +      solidPlugin(),
+31479: +      tailwindcss(),
+31480: +    ],
+31481: +    optimizeDeps: {
+31482: +      exclude: ["brotli-dec-wasm"],
+31483: +      esbuildOptions: {
+31484: +        plugins: [importMetaUrlPlugin],
+31485: +      },
+31486: +    },
+31487: +    server: {
+31488: +      port: 3000,
+31489: +      headers: crossOriginIsolationHeaders,
+31490: +    },
+31491: +    preview: { headers: crossOriginIsolationHeaders },
+31492: +    build: {
+31493: +      target: "esnext",
+31494: +      minify: process.env.NODE_ENV === "production" ? true : false,
+31495: +    },
+31496: +    worker: {
+31497: +      format: "es",
+31498:      },
+31499: -  },
+31500: -  build: {
+31501: -    target: "esnext",
+31502: -    // If use debug mode, not minify.
+31503: -    minify: process.env.NODE_ENV === "production" ? true : false
+31504: -    // produce sourcemaps for debug builds
+31505: -  },
+31506: -  worker: {
+31507: -    format: "es",
+31508: -  },
+31509: -  base: "./",
+31510: +    base: "./",
+31511: +  };
+31512:  });
+32444: diff --git a/scripts/lsp_browser_static_server.mjs b/scripts/lsp_browser_static_server.mjs
+32445: new file mode 100644
+32446: index 00000000..6feec6e2
+32447: --- /dev/null
+32448: +++ b/scripts/lsp_browser_static_server.mjs
+32449: @@ -0,0 +1,267 @@
+32450: +import { createReadStream } from "node:fs";
+32451: +import { open, realpath, stat } from "node:fs/promises";
+32452: +import { createServer } from "node:http";
+32453: +import { extname, isAbsolute, relative, resolve, sep } from "node:path";
+32454: +import { pipeline } from "node:stream/promises";
+32455: +import { fileURLToPath } from "node:url";
+32456: +
+32457: +const DEFAULT_ROOT = fileURLToPath(new URL("../page/dist/", import.meta.url));
+32458: +const CROSS_ORIGIN_ISOLATION_HEADERS = {
+32459: +  "Cross-Origin-Embedder-Policy": "require-corp",
+32460: +  "Cross-Origin-Opener-Policy": "same-origin",
+32461: +};
+32462: +const CONTENT_TYPES = new Map([
+32463: +  [".html", "text/html; charset=utf-8"],
+32464: +  [".js", "text/javascript; charset=utf-8"],
+32465: +  [".mjs", "text/javascript; charset=utf-8"],
+32466: +  [".css", "text/css; charset=utf-8"],
+32467: +  [".wasm", "application/wasm"],
+32468: +  [".json", "application/json; charset=utf-8"],
+32469: +  [".vfsbr", "application/octet-stream"],
+32470: +]);
+32471: +
+32472: +function isMissing(error) {
+32473: +  return (
+32474: +    error instanceof Error &&
+32475: +    "code" in error &&
+32476: +    (error.code === "ENOENT" || error.code === "ENOTDIR")
+32477: +  );
+32478: +}
+32479: +
+32480: +function isClientAbort(error, request, response) {
+32481: +  return (
+32482: +    request.destroyed ||
+32483: +    response.destroyed ||
+32484: +    (error instanceof Error &&
+32485: +      "code" in error &&
+32486: +      (error.code === "ECONNRESET" ||
+32487: +        error.code === "ERR_STREAM_PREMATURE_CLOSE"))
+32488: +  );
+32489: +}
+32490: +
+32491: +function endResponse(request, response, body = "") {
+32492: +  response.end(request.method === "HEAD" ? undefined : body);
+32493: +}
+32494: +
+32495: +export function resolveStaticPath(rootDirectory, pathname) {
+32496: +  let decoded;
+32497: +  try {
+32498: +    decoded = decodeURIComponent(pathname);
+32499: +  } catch {
+32500: +    return null;
+32501: +  }
+32502: +  if (
+32503: +    !decoded.startsWith("/") ||
+32504: +    decoded.startsWith("//") ||
+32505: +    decoded.includes("\0")
+32506: +  ) {
+32507: +    return null;
+32508: +  }
+32509: +  const normalized = decoded.replaceAll("\\", "/");
+32510: +  if (normalized.split("/").includes("..")) return null;
+32511: +
+32512: +  const root = resolve(rootDirectory);
+32513: +  const candidate = resolve(root, `.${normalized}`);
+32514: +  const relativePath = relative(root, candidate);
+32515: +  if (
+32516: +    relativePath === ".." ||
+32517: +    relativePath.startsWith(`..${sep}`) ||
+32518: +    isAbsolute(relativePath)
+32519: +  ) {
+32520: +    return null;
+32521: +  }
+32522: +  return candidate;
+32523: +}
+32524: +
+32525: +async function safeRegularFile(canonicalRoot, path) {
+32526: +  let canonicalPath;
+32527: +  try {
+32528: +    canonicalPath = await realpath(path);
+32529: +  } catch (error) {
+32530: +    if (isMissing(error)) return null;
+32531: +    throw error;
+32532: +  }
+32533: +  if (
+32534: +    !canonicalPath.startsWith(canonicalRoot + sep) &&
+32535: +    canonicalPath !== canonicalRoot
+32536: +  ) {
+32537: +    return null;
+32538: +  }
+32539: +  let handle;
+32540: +  try {
+32541: +    handle = await open(canonicalPath, "r");
+32542: +    const fileStat = await handle.stat();
+32543: +    if (!fileStat.isFile()) {
+32544: +      await handle.close();
+32545: +      return null;
+32546: +    }
+32547: +    return { handle, fileStat, canonicalPath };
+32548: +  } catch (error) {
+32549: +    if (handle) await handle.close().catch(() => {});
+32550: +    if (isMissing(error)) return null;
+32551: +    throw error;
+32552: +  }
+32553: +}
+32554: +
+32555: +async function serveFile(request, response, path, handle, fileStat) {
+32556: +  try {
+32557: +    response.statusCode = 200;
+32558: +    response.setHeader(
+32559: +      "Content-Type",
+32560: +      CONTENT_TYPES.get(extname(path).toLowerCase()) ??
+32561: +        "application/octet-stream",
+32562: +    );
+32563: +    response.setHeader("Content-Length", String(fileStat.size));
+32564: +    if (request.method === "HEAD") {
+32565: +      response.end();
+32566: +      return;
+32567: +    }
+32568: +
+32569: +    try {
+32570: +      await pipeline(handle.createReadStream(), response);
+32571: +    } catch (error) {
+32572: +      if (isClientAbort(error, request, response)) return;
+32573: +      if (response.headersSent) {
+32574: +        response.destroy(error instanceof Error ? error : undefined);
+32575: +        return;
+32576: +      }
+32577: +      throw error;
+32578: +    }
+32579: +  } finally {
+32580: +    await handle.close().catch(() => {});
+32581: +  }
+32582: +}
+32583: +
+32584: +async function handleRequest(rootDirectory, request, response) {
+32585: +  for (const [name, value] of Object.entries(CROSS_ORIGIN_ISOLATION_HEADERS)) {
+32586: +    response.setHeader(name, value);
+32587: +  }
+32588: +  if (request.method !== "GET" && request.method !== "HEAD") {
+32589: +    response.statusCode = 405;
+32590: +    response.setHeader("Allow", "GET, HEAD");
+32591: +    endResponse(request, response, "Method Not Allowed\n");
+32592: +    return;
+32593: +  }
+32594: +
+32595: +  let requestUrl;
+32596: +  try {
+32597: +    requestUrl = new URL(request.url ?? "/", "http://localhost");
+32598: +  } catch {
+32599: +    response.statusCode = 400;
+32600: +    endResponse(request, response, "Bad Request\n");
+32601: +    return;
+32602: +  }
+32603: +  const pathname =
+32604: +    requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
+32605: +  const requestedPath = resolveStaticPath(rootDirectory, pathname);
+32606: +  if (requestedPath === null) {
+32607: +    response.statusCode = 400;
+32608: +    endResponse(request, response, "Bad Request\n");
+32609: +    return;
+32610: +  }
+32611: +
+32612: +  let canonicalRoot;
+32613: +  try {
+32614: +    canonicalRoot = await realpath(rootDirectory);
+32615: +  } catch (error) {
+32616: +    response.statusCode = 500;
+32617: +    endResponse(request, response, "Internal Server Error\n");
+32618: +    return;
+32619: +  }
+32620: +
+32621: +  const requestedSafe = await safeRegularFile(canonicalRoot, requestedPath);
+32622: +  if (requestedSafe !== null) {
+32623: +    await serveFile(
+32624: +      request,
+32625: +      response,
+32626: +      requestedPath,
+32627: +      requestedSafe.handle,
+32628: +      requestedSafe.fileStat,
+32629: +    );
+32630: +    return;
+32631: +  }
+32632: +
+32633: +  const accept = request.headers.accept ?? "";
+32634: +  const ext = extname(pathname).toLowerCase();
+32635: +  if (!accept.includes("text/html") || (ext !== "" && ext !== ".html")) {
+32636: +    response.statusCode = 404;
+32637: +    endResponse(request, response, "Not Found\n");
+32638: +    return;
+32639: +  }
+32640: +
+32641: +  const fallbackPath = resolve(rootDirectory, "index.html");
+32642: +  const fallbackSafe = await safeRegularFile(canonicalRoot, fallbackPath);
+32643: +  if (fallbackSafe === null) {
+32644: +    response.statusCode = 404;
+32645: +    endResponse(request, response, "Not Found\n");
+32646: +    return;
+32647: +  }
+32648: +  await serveFile(
+32649: +    request,
+32650: +    response,
+32651: +    fallbackPath,
+32652: +    fallbackSafe.handle,
+32653: +    fallbackSafe.fileStat,
+32654: +  );
+32655: +}
+32656: +
+32657: +export function createBrowserStaticServer(rootDirectory = DEFAULT_ROOT) {
+32658: +  const root = resolve(rootDirectory);
+32659: +  return createServer((request, response) => {
+32660: +    void handleRequest(root, request, response).catch((error) => {
+32661: +      if (isClientAbort(error, request, response)) return;
+32662: +      console.error("Browser static server request failed", error);
+32663: +      if (response.headersSent) {
+32664: +        response.destroy(error instanceof Error ? error : undefined);
+32665: +        return;
+32666: +      }
+32667: +      response.removeHeader("Content-Length");
+32668: +      response.removeHeader("Content-Type");
+32669: +      response.statusCode = 500;
+32670: +      response.setHeader("Content-Type", "text/plain; charset=utf-8");
+32671: +      const body = "Internal Server Error\n";
+32672: +      response.setHeader("Content-Length", String(body.length));
+32673: +      endResponse(request, response, body);
+32674: +    });
+32675: +  });
+32676: +}
+32677: +
+32678: +export async function startBrowserStaticServer({
+32679: +  rootDirectory = DEFAULT_ROOT,
+32680: +  hostname = "127.0.0.1",
+32681: +  port = 4173,
+32682: +} = {}) {
+32683: +  const server = createBrowserStaticServer(rootDirectory);
+32684: +  await new Promise((resolvePromise, reject) => {
+32685: +    const onError = (error) => reject(error);
+32686: +    server.once("error", onError);
+32687: +    server.listen(port, hostname, () => {
+32688: +      server.off("error", onError);
+32689: +      resolvePromise();
+32690: +    });
+32691: +  });
+32692: +  return server;
+32693: +}
+32694: +
+32695: +export async function closeBrowserStaticServer(server) {
+32696: +  if (!server?.listening) return;
+32697: +  await new Promise((resolvePromise, reject) => {
+32698: +    server.close((error) => {
+32699: +      if (error) reject(error);
+32700: +      else resolvePromise();
+32701: +    });
+32702: +    server.closeAllConnections?.();
+32703: +  });
+32704: +}
+32705: +
+32706: +if (import.meta.main) {
+32707: +  const port = Number(process.env.PORT ?? "4173");
+32708: +  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+32709: +    throw new Error(`invalid static server port: ${process.env.PORT}`);
+32710: +  }
+32711: +  const server = await startBrowserStaticServer({ port });
+32712: +  console.log(`browser static server listening on http://127.0.0.1:${port}`);
+32713: +  const shutdown = () => void closeBrowserStaticServer(server);
+32714: +  process.once("SIGINT", shutdown);
+32715: +  process.once("SIGTERM", shutdown);
+32716: +}
+33137: diff --git a/scripts/prepare_rust_src_dev_asset.ts b/scripts/prepare_rust_src_dev_asset.ts
+33138: new file mode 100644
+33139: index 00000000..5c99c4f9
+33140: --- /dev/null
+33141: +++ b/scripts/prepare_rust_src_dev_asset.ts
+33142: @@ -0,0 +1,143 @@
+33143: +import { prepareInstalledRustSrcArchive } from "./rust_src_archive.ts";
+33144: +
+33145: +export const DEV_RUST_SRC_DIRECTORY = ".rubrc-cache/dev";
+33146: +export const DEV_RUST_SRC_SIDECAR = `${DEV_RUST_SRC_DIRECTORY}/rust-src.sha256`;
+33147: +export const DEV_RUST_SRC_RETAINED_ASSETS = 3;
+33148: +export const DEV_RUST_SRC_TMP_MAX_AGE_MS = 60 * 60 * 1_000;
+33149: +
+33150: +export type DevelopmentRustSrcPruneDependencies = {
+33151: +  readDir(path: string): AsyncIterable<Deno.DirEntry>;
+33152: +  stat(path: string): Promise<Deno.FileInfo>;
+33153: +  remove(path: string): Promise<void>;
+33154: +  now(): number;
+33155: +};
+33156: +
+33157: +const defaultPruneDependencies: DevelopmentRustSrcPruneDependencies = {
+33158: +  readDir: (path) => Deno.readDir(path),
+33159: +  stat: (path) => Deno.stat(path),
+33160: +  remove: (path) => Deno.remove(path),
+33161: +  now: () => Date.now(),
+33162: +};
+33163: +
+33164: +async function statIfPresent(
+33165: +  path: string,
+33166: +  dependencies: DevelopmentRustSrcPruneDependencies,
+33167: +): Promise<Deno.FileInfo | null> {
+33168: +  try {
+33169: +    return await dependencies.stat(path);
+33170: +  } catch (error) {
+33171: +    if (error instanceof Deno.errors.NotFound) return null;
+33172: +    throw error;
+33173: +  }
+33174: +}
+33175: +
+33176: +async function removeIfPresent(
+33177: +  path: string,
+33178: +  remove: (path: string) => Promise<void>,
+33179: +): Promise<void> {
+33180: +  try {
+33181: +    await remove(path);
+33182: +  } catch (error) {
+33183: +    if (error instanceof Deno.errors.NotFound) return;
+33184: +    throw error;
+33185: +  }
+33186: +}
+33187: +
+33188: +export async function pruneDevelopmentRustSrcAssets(
+33189: +  directory: string,
+33190: +  activeSha256: string,
+33191: +  dependencies: DevelopmentRustSrcPruneDependencies = defaultPruneDependencies,
+33192: +): Promise<void> {
+33193: +  const priorArchives: Array<{ path: string; mtime: number }> = [];
+33194: +  for await (const entry of dependencies.readDir(directory)) {
+33195: +    if (!entry.isFile) continue;
+33196: +    const path = `${directory}/${entry.name}`;
+33197: +    if (entry.name.endsWith(".tmp")) {
+33198: +      const stat = await statIfPresent(path, dependencies);
+33199: +      const mtime = stat?.mtime?.getTime() ?? stat?.birthtime?.getTime();
+33200: +      if (
+33201: +        mtime !== undefined &&
+33202: +        dependencies.now() - mtime > DEV_RUST_SRC_TMP_MAX_AGE_MS
+33203: +      ) {
+33204: +        await removeIfPresent(path, dependencies.remove);
+33205: +      }
+33206: +      continue;
+33207: +    }
+33208: +
+33209: +    const match = /^rust-src-([a-f0-9]{64})\.tar\.vfsbr$/.exec(entry.name);
+33210: +    if (!match || match[1] === activeSha256) continue;
+33211: +    const stat = await statIfPresent(path, dependencies);
+33212: +    if (stat === null) continue;
+33213: +    priorArchives.push({ path, mtime: stat.mtime?.getTime() ?? 0 });
+33214: +  }
+33215: +
+33216: +  priorArchives.sort(
+33217: +    (left, right) =>
+33218: +      right.mtime - left.mtime || right.path.localeCompare(left.path),
+33219: +  );
+33220: +  for (const candidate of priorArchives.slice(
+33221: +    DEV_RUST_SRC_RETAINED_ASSETS - 1,
+33222: +  )) {
+33223: +    await removeIfPresent(candidate.path, dependencies.remove);
+33224: +  }
+33225: +}
+33226: +
+33227: +async function validateAssetDestination(path: string): Promise<void> {
+33228: +  const stat = await statIfPresent(path, defaultPruneDependencies);
+33229: +  if (stat !== null && !stat.isFile) {
+33230: +    throw new Error(
+33231: +      `development rust-src destination is not a regular file: ${path}`,
+33232: +    );
+33233: +  }
+33234: +}
+33235: +
+33236: +function bytesToHex(bytes: Uint8Array): string {
+33237: +  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+33238: +    "",
+33239: +  );
+33240: +}
+33241: +
+33242: +export async function writeRustSrcDevAsset(
+33243: +  directory = DEV_RUST_SRC_DIRECTORY,
+33244: +  prepare = prepareInstalledRustSrcArchive,
+33245: +): Promise<string> {
+33246: +  const { archive } = await prepare();
+33247: +  const digest = await crypto.subtle.digest("SHA-256", archive as BufferSource);
+33248: +  const sha256 = bytesToHex(new Uint8Array(digest));
+33249: +  const assetPath = `${directory}/rust-src-${sha256}.tar.vfsbr`;
+33250: +  const sidecarPath = `${directory}/rust-src.sha256`;
+33251: +  const temporaryAsset = `${assetPath}.${crypto.randomUUID()}.tmp`;
+33252: +  const temporarySidecar = `${sidecarPath}.${crypto.randomUUID()}.tmp`;
+33253: +
+33254: +  await Deno.mkdir(directory, { recursive: true });
+33255: +  try {
+33256: +    await Deno.writeFile(temporaryAsset, archive);
+33257: +    await validateAssetDestination(assetPath);
+33258: +    await Deno.rename(temporaryAsset, assetPath);
+33259: +    await Deno.writeTextFile(temporarySidecar, `${sha256}\n`);
+33260: +    await Deno.rename(temporarySidecar, sidecarPath);
+33261: +    await pruneDevelopmentRustSrcAssets(directory, sha256);
+33262: +  } catch (error) {
+33263: +    const cleanup = await Promise.allSettled([
+33264: +      removeIfPresent(temporaryAsset, Deno.remove),
+33265: +      removeIfPresent(temporarySidecar, Deno.remove),
+33266: +    ]);
+33267: +    const cleanupErrors = cleanup.flatMap((result) =>
+33268: +      result.status === "rejected" ? [result.reason] : [],
+33269: +    );
+33270: +    if (cleanupErrors.length > 0) {
+33271: +      throw new AggregateError(
+33272: +        [error, ...cleanupErrors],
+33273: +        "development rust-src preparation and cleanup failed",
+33274: +      );
+33275: +    }
+33276: +    throw error;
+33277: +  }
+33278: +
+33279: +  return sha256;
+33280: +}
+33281: +
+33282: +if (import.meta.main) {
+33283: +  const sha256 = await writeRustSrcDevAsset();
+33284: +  console.log(`prepared validated rust-src development asset ${sha256}`);
+33285: +}
+33286: diff --git a/scripts/publish-pages-dist.sh b/scripts/publish-pages-dist.sh
+33287: index f4d9095d..4ff55de3 100644
+33288: --- a/scripts/publish-pages-dist.sh
+33289: +++ b/scripts/publish-pages-dist.sh
+33290: @@ -17,26 +17,74 @@ command -v gh >/dev/null 2>&1 || fail "gh is not installed"
+33291:  gh auth status >/dev/null 2>&1 || fail "gh is not authenticated"
+33292:  test "$(git branch --show-current)" = "main" || fail "Current branch must be main"
+33293:  test -z "$(git status --porcelain)" || fail "Working tree must be clean"
+33294:  
+33295:  git fetch --quiet origin main
+33296:  
+33297:  SOURCE_SHA="$(git rev-parse HEAD)"
+33298:  REMOTE_MAIN_SHA="$(git rev-parse origin/main)"
+33299:  test "$SOURCE_SHA" = "$REMOTE_MAIN_SHA" || fail "Local HEAD must equal origin/main"
+33300:  
+33301: +REMOTE_URL="$(git remote get-url origin)"
+33302: +REMOTE_DIST_SHA="$(
+33303: +  git ls-remote \
+33304: +    "$REMOTE_URL" \
+33305: +    refs/heads/pages-dist |
+33306: +  awk '{print $1}'
+33307: +)"
+33308: +PREVIOUS_BUILD_EPOCH=0
+33309: +
+33310: +if [ -n "$REMOTE_DIST_SHA" ]; then
+33311: +  git fetch \
+33312: +    --quiet \
+33313: +    --no-tags \
+33314: +    --depth=1 \
+33315: +    origin \
+33316: +    refs/heads/pages-dist
+33317: +  test "$(git rev-parse FETCH_HEAD)" = "$REMOTE_DIST_SHA" || \
+33318: +    fail "Fetched pages-dist SHA changed while establishing build epoch"
+33319: +
+33320: +  if git cat-file -e "$REMOTE_DIST_SHA:.rubrc-pages-build.json" 2>/dev/null; then
+33321: +    if ! PREVIOUS_BUILD_EPOCH="$(
+33322: +      git show "$REMOTE_DIST_SHA:.rubrc-pages-build.json" |
+33323: +      node -e '
+33324: +        const fs = require("node:fs");
+33325: +        const metadata = JSON.parse(fs.readFileSync(0, "utf8"));
+33326: +        if (metadata.version !== 1 || typeof metadata.sourceSha !== "string") {
+33327: +          throw new Error("invalid previous deployment metadata");
+33328: +        }
+33329: +        if (metadata.buildEpoch === undefined) {
+33330: +          process.stdout.write("0");
+33331: +        } else if (
+33332: +          Number.isSafeInteger(metadata.buildEpoch) &&
+33333: +          metadata.buildEpoch > 0
+33334: +        ) {
+33335: +          process.stdout.write(String(metadata.buildEpoch));
+33336: +        } else {
+33337: +          throw new Error("invalid previous deployment build epoch");
+33338: +        }
+33339: +      '
+33340: +    )"; then
+33341: +      fail "Could not establish the previous deployment build epoch"
+33342: +    fi
+33343: +  fi
+33344: +fi
+33345: +
+33346: +BUILD_EPOCH=$((PREVIOUS_BUILD_EPOCH + 1))
+33347: +
+33348:  # 4.2 ローカルビルド
+33349:  rm -rf page/dist
+33350:  
+33351:  bun install --frozen-lockfile
+33352: -bun run build:prod
+33353: +SOURCE_SHA="$SOURCE_SHA" BUILD_EPOCH="$BUILD_EPOCH" bun run build:prod
+33354:  bun run vfs:prepare:prod
+33355: +bun run rust-src:prepare-asset
+33356:  
+33357:  (
+33358:    cd page
+33359:    bunx mini-coi -sw dist/mini-coi.js
+33360:    sed -i '/<head>/a \    <script src="./mini-coi.js" scope="./"></script>' dist/index.html
+33361:  )
+33362:  
+33363:  # 4.3 v1-distの取得
+33364:  rm -rf page/dist/v1
+33365:  mkdir -p page/dist/v1
+33366: @@ -45,25 +93,26 @@ git fetch \
+33367:    --quiet \
+33368:    --no-tags \
+33369:    --depth=1 \
+33370:    origin \
+33371:    refs/heads/v1-dist
+33372:  
+33373:  git archive --format=tar FETCH_HEAD | tar -xf - -C page/dist/v1
+33374:  test -f page/dist/v1/index.html || fail "v1 snapshot is missing index.html"
+33375:  
+33376:  # 4.4 metadata
+33377: -SOURCE_SHA="$SOURCE_SHA" node -e "
+33378: +SOURCE_SHA="$SOURCE_SHA" BUILD_EPOCH="$BUILD_EPOCH" node -e "
+33379:  const fs = require('fs');
+33380:  fs.writeFileSync('page/dist/.rubrc-pages-build.json', JSON.stringify({
+33381:    version: 1,
+33382: -  sourceSha: process.env.SOURCE_SHA
+33383: +  sourceSha: process.env.SOURCE_SHA,
+33384: +  buildEpoch: Number(process.env.BUILD_EPOCH)
+33385:  }, null, 2));
+33386:  "
+33387:  
+33388:  node scripts/verify-vfs-asset.mjs page/dist
+33389:  touch page/dist/.nojekyll
+33390:  node scripts/verify-vfs-asset.mjs page/dist
+33391:  
+33392:  # 5. pages-distを独立一時リポジトリからpush
+33393:  TEMP_DIR="$(mktemp -d)"
+33394:  trap 'rm -rf "$TEMP_DIR"' EXIT
+33395: @@ -73,28 +122,20 @@ mkdir -p "$SITE_REPO"
+33396:  
+33397:  cp -a page/dist/. "$SITE_REPO/"
+33398:  
+33399:  git -C "$SITE_REPO" init --quiet
+33400:  git -C "$SITE_REPO" config user.name "rubrc-pages-publisher"
+33401:  git -C "$SITE_REPO" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+33402:  git -C "$SITE_REPO" add --all
+33403:  git -C "$SITE_REPO" commit --quiet -m "Deploy Pages for ${SOURCE_SHA}"
+33404:  
+33405:  DIST_SHA="$(git -C "$SITE_REPO" rev-parse HEAD)"
+33406: -REMOTE_URL="$(git remote get-url origin)"
+33407: -
+33408: -REMOTE_DIST_SHA="$(
+33409: -  git ls-remote \
+33410: -    "$REMOTE_URL" \
+33411: -    refs/heads/pages-dist |
+33412: -  awk '{print $1}'
+33413: -)"
+33414:  
+33415:  if [ -z "$REMOTE_DIST_SHA" ]; then
+33416:    git -C "$SITE_REPO" push \
+33417:      "$REMOTE_URL" \
+33418:      HEAD:refs/heads/pages-dist
+33419:  else
+33420:    git -C "$SITE_REPO" push \
+33421:      --force-with-lease="refs/heads/pages-dist:${REMOTE_DIST_SHA}" \
+33422:      "$REMOTE_URL" \
+33423:      HEAD:refs/heads/pages-dist
+36578: diff --git a/scripts/sysroot_cache.ts b/scripts/sysroot_cache.ts
+36579: index c3517c9f..34b6b08f 100644
+36580: --- a/scripts/sysroot_cache.ts
+36581: +++ b/scripts/sysroot_cache.ts
+36582: @@ -30,57 +30,192 @@ export interface SysrootCacheOptions {
+36583:    cacheDir: string;
+36584:    workspaceSysroot: string;
+36585:    url: string;
+36586:    deps: SysrootCacheDeps;
+36587:  }
+36588:  
+36589:  const DEFAULT_TRIPLE = "wasm32-wasip1";
+36590:  const DEFAULT_CACHE_DIR = ".rubrc-cache/sysroot";
+36591:  const DEFAULT_WORKSPACE_SYSROOT = "test_workspace_rustc/sysroot";
+36592:  const DEFAULT_BASE_URL = "https://oligamiq.github.io/rust_wasm/v0.2.0";
+36593: +const REQUIRED_RUST_SRC_ENTRIES = [
+36594: +  "core/src/lib.rs",
+36595: +  "alloc/src/lib.rs",
+36596: +  "std/src/lib.rs",
+36597: +] as const;
+36598: +
+36599: +export function rustSrcToolchainIdentity(
+36600: +  rustcVerboseVersion: string,
+36601: +  sysroot: string,
+36602: +): string {
+36603: +  return JSON.stringify({
+36604: +    schema: 1,
+36605: +    rustc: rustcVerboseVersion.trim(),
+36606: +    sysroot,
+36607: +  });
+36608: +}
+36609: +
+36610: +export function rustSrcCacheMatchesIdentity(
+36611: +  expected: string,
+36612: +  cached: string,
+36613: +): boolean {
+36614: +  return expected === cached.trim();
+36615: +}
+36616: +
+36617: +async function archiveSha256(archive: Uint8Array): Promise<string> {
+36618: +  const bytes = new Uint8Array(archive.byteLength);
+36619: +  bytes.set(archive);
+36620: +  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+36621: +  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(
+36622: +    "",
+36623: +  );
+36624: +}
+36625: +
+36626: +export async function createRustSrcCacheMetadata(
+36627: +  toolchainIdentity: string,
+36628: +  archive: Uint8Array,
+36629: +): Promise<string> {
+36630: +  return JSON.stringify({
+36631: +    schema: 2,
+36632: +    toolchainIdentity,
+36633: +    archiveSha256: await archiveSha256(archive),
+36634: +  });
+36635: +}
+36636: +
+36637: +export async function rustSrcCacheMatchesMetadata(
+36638: +  expectedToolchainIdentity: string,
+36639: +  archive: Uint8Array,
+36640: +  cachedMetadata: string,
+36641: +): Promise<boolean> {
+36642: +  try {
+36643: +    const metadata = JSON.parse(cachedMetadata) as Record<string, unknown>;
+36644: +    return metadata.schema === 2 &&
+36645: +      metadata.toolchainIdentity === expectedToolchainIdentity &&
+36646: +      metadata.archiveSha256 === await archiveSha256(archive);
+36647: +  } catch {
+36648: +    return false;
+36649: +  }
+36650: +}
+36651: +
+36652: +export function deterministicRustSrcTarArgs(libraryPath: string): string[] {
+36653: +  return [
+36654: +    "--create",
+36655: +    "--file",
+36656: +    "-",
+36657: +    "--sort=name",
+36658: +    "--mtime=@0",
+36659: +    "--owner=0",
+36660: +    "--group=0",
+36661: +    "--numeric-owner",
+36662: +    "--mode=u+rwX,go+rX,go-w",
+36663: +    "--pax-option=delete=atime,delete=ctime",
+36664: +    "--directory",
+36665: +    libraryPath,
+36666: +    ".",
+36667: +  ];
+36668: +}
+36669: +
+36670: +type RustSrcArchiveEntryLister = (
+36671: +  archive: Uint8Array,
+36672: +) => Promise<readonly string[]>;
+36673: +
+36674: +async function listRustSrcArchiveEntries(
+36675: +  archive: Uint8Array,
+36676: +): Promise<readonly string[]> {
+36677: +  const buffer = new ArrayBuffer(archive.byteLength);
+36678: +  new Uint8Array(buffer).set(archive);
+36679: +  const stream = new Blob([buffer]).stream().pipeThrough(
+36680: +    new DecompressionStream("brotli"),
+36681: +  );
+36682: +  const entries: string[] = [];
+36683: +  await parseTar(stream, (file) => entries.push(file.name));
+36684: +  return entries;
+36685: +}
+36686: +
+36687: +export async function validateRustSrcArchive(
+36688: +  archive: Uint8Array,
+36689: +  listEntries: RustSrcArchiveEntryLister = listRustSrcArchiveEntries,
+36690: +): Promise<boolean> {
+36691: +  try {
+36692: +    const normalized = new Set<string>();
+36693: +    for (const entry of await listEntries(archive)) {
+36694: +      const name = validateTarEntryName(entry);
+36695: +      if (name !== null) normalized.add(name);
+36696: +    }
+36697: +    return REQUIRED_RUST_SRC_ENTRIES.every((entry) => normalized.has(entry));
+36698: +  } catch {
+36699: +    return false;
+36700: +  }
+36701: +}
+36702:  
+36703:  export function sysrootCachePaths(
+36704:    options: Partial<Omit<SysrootCacheOptions, "deps">> = {},
+36705:  ): SysrootCachePaths {
+36706:    const triple = options.triple ?? DEFAULT_TRIPLE;
+36707:    const cacheDir = options.cacheDir ?? DEFAULT_CACHE_DIR;
+36708:    return {
+36709:      cacheDir,
+36710:      cacheArchive: `${cacheDir}/${triple}.tar.br`,
+36711:      expandedSysroot: options.workspaceSysroot ?? DEFAULT_WORKSPACE_SYSROOT,
+36712:      sysrootLibDir: `${
+36713:        options.workspaceSysroot ?? DEFAULT_WORKSPACE_SYSROOT
+36714:      }/lib/rustlib/${triple}/lib`,
+36715:      url: options.url ?? `${DEFAULT_BASE_URL}/${triple}.tar.br`,
+36716:    };
+36717:  }
+36718:  
+36719: +export async function prepareCachedArchive(
+36720: +  options: Pick<
+36721: +    Partial<SysrootCacheOptions>,
+36722: +    "triple" | "cacheDir" | "url" | "deps"
+36723: +  > = {},
+36724: +): Promise<{
+36725: +  archive: Uint8Array;
+36726: +  source: SysrootCacheSource;
+36727: +  cacheArchive: string;
+36728: +  url: string;
+36729: +}> {
+36730: +  const triple = options.triple ?? DEFAULT_TRIPLE;
+36731: +  const cacheDir = options.cacheDir ?? DEFAULT_CACHE_DIR;
+36732: +  const cacheArchive = `${cacheDir}/${triple}.tar.br`;
+36733: +  const url = options.url ?? `${DEFAULT_BASE_URL}/${triple}.tar.br`;
+36734: +  const deps = options.deps ?? denoSysrootCacheDeps;
+36735: +
+36736: +  await deps.mkdir(cacheDir);
+36737: +  if (await deps.exists(cacheArchive)) {
+36738: +    return {
+36739: +      archive: await deps.readFile(cacheArchive),
+36740: +      source: "cache",
+36741: +      cacheArchive,
+36742: +      url,
+36743: +    };
+36744: +  }
+36745: +
+36746: +  const archive = await deps.fetchBytes(url);
+36747: +  const temporaryArchive = `${cacheArchive}.${crypto.randomUUID()}.tmp`;
+36748: +  try {
+36749: +    await deps.writeFile(temporaryArchive, archive);
+36750: +    await deps.rename(temporaryArchive, cacheArchive);
+36751: +    return { archive, source: "download", cacheArchive, url };
+36752: +  } finally {
+36753: +    await deps.remove(temporaryArchive);
+36754: +  }
+36755: +}
+36756: +
+36757:  export async function prepareCachedSysroot(
+36758:    options: Partial<SysrootCacheOptions> = {},
+36759:  ): Promise<SysrootCacheResult> {
+36760:    const paths = sysrootCachePaths(options);
+36761:    const deps = options.deps ?? denoSysrootCacheDeps;
+36762:  
+36763:    await deps.remove(paths.expandedSysroot);
+36764: -  await deps.mkdir(paths.cacheDir);
+36765: -
+36766: -  let source: SysrootCacheSource;
+36767: -  let archive: Uint8Array;
+36768: -  if (await deps.exists(paths.cacheArchive)) {
+36769: -    source = "cache";
+36770: -    archive = await deps.readFile(paths.cacheArchive);
+36771: -  } else {
+36772: -    source = "download";
+36773: -    archive = await deps.fetchBytes(paths.url);
+36774: -    await deps.writeFile(`${paths.cacheArchive}.tmp`, archive);
+36775: -    await deps.rename(`${paths.cacheArchive}.tmp`, paths.cacheArchive);
+36776: -  }
+36777: +  const { archive, source } = await prepareCachedArchive(options);
+36778:  
+36779:    await deps.mkdir(paths.sysrootLibDir);
+36780:    await deps.extractTarBr(archive, paths.sysrootLibDir);
+36781:  
+36782:    return { ...paths, source };
+36783:  }
+36784:  
+36785:  const denoSysrootCacheDeps: SysrootCacheDeps = {
+36786:    async exists(path) {
+36787:      try {
+36788: @@ -130,24 +265,21 @@ export function validateTarEntryName(name: string): string | null {
+36789:    if (name.startsWith("/") || name === ".." || name.startsWith("../")) {
+36790:      throw new Error(`unsafe sysroot archive entry: ${name}`);
+36791:    }
+36792:  
+36793:    const parts: string[] = [];
+36794:    for (const part of name.split("/")) {
+36795:      if (part === "" || part === ".") {
+36796:        continue;
+36797:      }
+36798:      if (part === "..") {
+36799: -      if (parts.length === 0) {
+36800: -        throw new Error(`unsafe sysroot archive entry: ${name}`);
+36801: -      }
+36802: -      parts.pop();
+36803: +      throw new Error(`unsafe sysroot archive entry: ${name}`);
+36804:      } else {
+36805:        parts.push(part);
+36806:      }
+36807:    }
+36808:  
+36809:    if (parts.length === 0) {
+36810:      return null;
+36811:    }
+36812:    return parts.join("/");
+36813:  }

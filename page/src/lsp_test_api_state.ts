@@ -29,6 +29,7 @@ export type StartupTestState = {
   inlayHintVersion?: number;
   cargoCallsBeforeProjectActivation: number;
   projectProgress?: CrateGraphProgress;
+  error?: string;
 };
 
 export type LspTestGenerationState<TMonaco, TEditor, TModel> = {
@@ -80,11 +81,13 @@ export type LspTestGenerationMetadata = {
   startup: StartupTestState;
 };
 
-type GenerationState<TMonaco, TEditor, TModel> = LspTestGenerationState<
-  TMonaco,
-  TEditor,
-  TModel
-> & { generation?: symbol };
+type GenerationState<TMonaco, TEditor, TModel> =
+  & LspTestGenerationState<
+    TMonaco,
+    TEditor,
+    TModel
+  >
+  & { generation?: symbol };
 
 export function captureLspTestGeneration<TMonaco, TEditor, TModel>(
   state: LspTestGenerationState<TMonaco, TEditor, TModel>,
@@ -97,8 +100,11 @@ export function captureLspTestGeneration<TMonaco, TEditor, TModel>(
   const generation = generationState.generation;
   return {
     record(producer) {
-      if (generation === undefined || generationState.generation !== generation)
+      if (
+        generation === undefined || generationState.generation !== generation
+      ) {
         return false;
+      }
       producer(state);
       return true;
     },
@@ -161,18 +167,14 @@ export function beginLspTestGeneration<TMonaco, TEditor, TModel>(
       if (generationState.generation !== generation) return;
       state.completedGenerations ??= [];
       state.completedGenerations.push({
-        runtime:
-          state.runtime === undefined
-            ? undefined
-            : {
-                ...state.runtime,
-                queuedTargets: [...state.runtime.queuedTargets],
-                completedTargets: [...state.runtime.completedTargets],
-              },
-        startup:
-          state.startup === undefined
-            ? undefined
-            : { ...state.startup, history: [...state.startup.history] },
+        runtime: state.runtime === undefined ? undefined : {
+          ...state.runtime,
+          queuedTargets: [...state.runtime.queuedTargets],
+          completedTargets: [...state.runtime.completedTargets],
+        },
+        startup: state.startup === undefined
+          ? undefined
+          : { ...state.startup, history: [...state.startup.history] },
         lifecycleEvents: [...(state.lifecycleEvents ?? [])],
         runtimeHistory: (state.runtimeHistory ?? []).map((runtime) => ({
           ...runtime,

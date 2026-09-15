@@ -5,6 +5,7 @@ import {
   RuntimeSupervisor,
 } from "./app_runtime.ts";
 import type { Ctx } from "./ctx.ts";
+import { getRustAnalyzerParallelism } from "./runtime_parallelism.ts";
 
 mock.module("monaco-languageclient", () => ({
   MonacoLanguageClient: class {},
@@ -117,6 +118,7 @@ test("startRustLspClient registers runtime VFS writer and reader channels", asyn
             procMacro: { enable: false },
             checkOnSave: { enable: false },
             cachePriming: { enable: false },
+            numThreads: getRustAnalyzerParallelism().mainLoopThreads,
           },
           null,
         ]);

@@ -8,29 +8,43 @@ const assert = (condition: unknown, message: string) => {
 
 Deno.test("signed LSP output routes away from terminal", () => {
   const calls: string[] = [];
-  routeTerminalWrite(
+  const lspResult = routeTerminalWrite(
     -1,
     [1, 2],
-    () => calls.push("lsp"),
-    () => calls.push("terminal"),
+    () => {
+      calls.push("lsp");
+      return "lsp-result";
+    },
+    () => {
+      calls.push("terminal");
+      return "terminal-result";
+    },
   );
-  routeTerminalWrite(
+  const terminalResult = routeTerminalWrite(
     7,
     [3],
-    () => calls.push("lsp"),
-    () => calls.push("terminal"),
+    () => {
+      calls.push("lsp");
+      return "lsp-result";
+    },
+    () => {
+      calls.push("terminal");
+      return "terminal-result";
+    },
   );
   assert(calls.join(",") === "lsp,terminal", `wrong routing: ${calls}`);
+  assert(lspResult === "lsp-result", "LSP result was not propagated");
+  assert(terminalResult === "terminal-result", "terminal result was not propagated");
 });
 
-Deno.test("spawned terminal writes reach LSP transport and preserve terminals", () => {
+Deno.test("spawned terminal writes reach LSP transport and preserve terminals", async () => {
   const routeWasiTerminalWrite = (
     lspDispatch as unknown as {
       routeWasiTerminalWrite?: (
         args: { session_id: number; data: unknown },
-        lsp: (message: { data: unknown }) => void,
-        terminal: (sessionId: number, data: unknown) => void,
-      ) => void;
+        lsp: (message: { data: unknown }) => unknown,
+        terminal: (sessionId: number, data: unknown) => unknown,
+      ) => unknown;
     }
   ).routeWasiTerminalWrite;
   assert(
@@ -39,17 +53,29 @@ Deno.test("spawned terminal writes reach LSP transport and preserve terminals", 
   );
 
   const calls: string[] = [];
-  routeWasiTerminalWrite(
+  const lspResult = routeWasiTerminalWrite(
     { session_id: -1, data: [1, 2] },
-    ({ data }) => calls.push(`lsp:${data}`),
+    ({ data }) => {
+      calls.push(`lsp:${data}`);
+      return Promise.resolve("lsp-delivered");
+    },
     (sessionId, data) => calls.push(`terminal:${sessionId}:${data}`),
   );
-  routeWasiTerminalWrite(
+  const terminalResult = routeWasiTerminalWrite(
     { session_id: 7, data: [3] },
     ({ data }) => calls.push(`lsp:${data}`),
-    (sessionId, data) => calls.push(`terminal:${sessionId}:${data}`),
+    (sessionId, data) => {
+      calls.push(`terminal:${sessionId}:${data}`);
+      return "terminal-delivered";
+    },
   );
 
+  assert(lspResult instanceof Promise, "spawned LSP promise was not propagated");
+  assert(
+    await lspResult === "lsp-delivered",
+    "spawned LSP delivery result was lost",
+  );
+  assert(terminalResult === "terminal-delivered", "terminal result was lost");
   assert(
     calls.join("|") === "lsp:1,2|terminal:7:3",
     `wrong spawned terminal routing: ${calls}`,
@@ -145,10 +171,14 @@ Deno.test("worker terminal forwarding observes rejected channel calls", async ()
     new URL("./util_cmd.ts", import.meta.url),
   );
   assert(
-    source.includes(
-      "observeAsyncFailure(lsp({ data: data as any }), console.error)",
+    !source.includes("new SharedObjectRef(ctx.ls_id)"),
+    "utility worker still owns a second unordered LSP channel",
+  );
+  assert(
+    /routeTerminalWrite\([\s\S]*?\(\) => animal\.call_unknown_fn\(idx, unknown\)/.test(
+      source,
     ),
-    "LSP forwarding rejection is not observed",
+    "utility LSP output does not delegate through the ordered farm callback",
   );
   assert(
     /observeAsyncFailure\(\s*terminal\(\{\s*sessionId,\s*data: data as any\s*\}\),\s*console\.error,?\s*\)/.test(

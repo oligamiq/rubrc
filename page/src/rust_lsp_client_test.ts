@@ -280,16 +280,18 @@ Deno.test("RustLspResourceOwner rejects and cleans every late resource acquisiti
         disposalError.errors.includes(cleanupError),
       "late async cleanup failure did not participate in disposal",
     );
-    for (const name of [
-      "sync",
-      "client",
-      "connection",
-      "shared-ref",
-      "progress",
-      "test-api",
-      "readiness",
-      "model-listener",
-    ]) {
+    for (
+      const name of [
+        "sync",
+        "client",
+        "connection",
+        "shared-ref",
+        "progress",
+        "test-api",
+        "readiness",
+        "model-listener",
+      ]
+    ) {
       assert(calls[name] === 1, `${name} late cleanup count changed`);
     }
     assert(unhandled === 0, "late async cleanup rejection was unobserved");
@@ -314,8 +316,9 @@ Deno.test("RustLspResourceOwner abort skips graceful stop and disposes remaining
     needsStop: () => true,
     stop: async () => {
       called("client");
-      if (transportClosed)
+      if (transportClosed) {
         throw new Error("client stopped over closed transport");
+      }
     },
   });
   owner.setConnection({
@@ -335,15 +338,17 @@ Deno.test("RustLspResourceOwner abort skips graceful stop and disposes remaining
   await owner.dispose();
 
   assert(calls.client === undefined, "abort attempted graceful client stop");
-  for (const name of [
-    "test-api",
-    "progress",
-    "model-listener",
-    "readiness",
-    "sync",
-    "transport",
-    "shared-ref",
-  ]) {
+  for (
+    const name of [
+      "test-api",
+      "progress",
+      "model-listener",
+      "readiness",
+      "sync",
+      "transport",
+      "shared-ref",
+    ]
+  ) {
     assert(calls[name] === 1, `${name} abort cleanup count changed`);
   }
 });
@@ -452,7 +457,7 @@ Deno.test("browser startup receives the named model and starts lightweight", asy
     "client starts before the initial VFS write",
   );
   assert(
-    source.includes("createRustAnalyzerConfigurationState()") &&
+    source.includes("createRustAnalyzerConfigurationState(") &&
       source.includes(
         "initializationOptions: analyzerConfiguration.initializationOptions()",
       ),
@@ -488,6 +493,12 @@ Deno.test("project activation preserves the staged readiness order", async () =>
       order.push("didOpen waiter armed");
       return Promise.resolve().then(() => {
         order.push("didOpen complete");
+      });
+    },
+    waitForVersionForwarded: (_uri: string, version: number) => {
+      order.push(`version barrier:${version}`);
+      return Promise.resolve().then(() => {
+        order.push(`version forwarded:${version}`);
       });
     },
   };
@@ -576,6 +587,8 @@ Deno.test("project activation preserves the staged readiness order", async () =>
         "setModelLanguage(rust)",
         "didOpen complete",
         "semanticWarming",
+        "version barrier:7",
+        "version forwarded:7",
         "latest diagnostics",
         "explicit inlayHint complete",
       ].join(","),
@@ -1268,7 +1281,9 @@ Deno.test("analyzer test callback disposal preserves a newer client", async () =
     requestCompletion: state.requestCompletion,
     requestDefinition: state.requestDefinition,
   };
-  const result = await secondRequests.requestSyntaxTree?.("file:///src/main.rs");
+  const result = await secondRequests.requestSyntaxTree?.(
+    "file:///src/main.rs",
+  );
   await secondRequests.requestCrateGraph?.();
   await secondRequests.requestCompletion?.("file:///src/main.rs", {
     line: 2,

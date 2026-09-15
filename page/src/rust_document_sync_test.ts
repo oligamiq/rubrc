@@ -83,6 +83,42 @@ Deno.test("didOpen completion follows the VFS write and LSP continuation", async
   );
 });
 
+Deno.test("version barrier waits until the matching LSP document update is forwarded", async () => {
+  const sync = new RustDocumentSync(async () => {});
+  const uri = "file:///src/main.rs";
+  const opened = document(uri, "fn main() {}", 1);
+  await sync.middleware.didOpen!(opened, async () => {});
+  await sync.waitForVersionForwarded(uri, 1);
+
+  let release!: () => void;
+  const forwarding = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let barrierSettled = false;
+  const barrier = sync.waitForVersionForwarded(uri, 2).then(() => {
+    barrierSettled = true;
+  });
+  const changed = sync.middleware.didChange!(
+    { document: document(uri, "fn main() { let x = 1; }", 2) } as never,
+    async () => {
+      await forwarding;
+    },
+  );
+
+  await Promise.resolve();
+  assert(
+    !barrierSettled,
+    "version barrier resolved before didChange forwarding",
+  );
+  release();
+  await changed;
+  await barrier;
+  assert(
+    barrierSettled,
+    "version barrier did not resolve after didChange forwarding",
+  );
+});
+
 Deno.test("didOpen completion rejects with the original continuation error", async () => {
   const sync = new RustDocumentSync(async () => {});
   const opened = document("file:///src/main.rs", "fn main() {}", 1);

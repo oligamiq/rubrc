@@ -49,6 +49,7 @@ These modules are invoked directly by the VFS runtime instead of being launched 
 - **No OS Subprocesses**: There is no general OS subprocess model; toolchain commands are directly dispatched Wasm modules.
 - **Serialized Execution**: While multiple terminal sessions are supported, compiler and Cargo invocations are currently serialized internally (via `CARGO_RUN_LOCK` and `RUSTC_RUN_LOCK`).
 - **Singleton Language Server**: A single embedded rust-analyzer instance serves the Monaco editor. Starting another instance from the shell is prevented while the editor's language server is active.
+- **Adaptive rust-analyzer parallelism**: The browser passes a conservative, capped `rust-analyzer.numThreads` value derived from `navigator.hardwareConcurrency`; unavailable or single-core environments retain the one-thread fallback. This is separate from the VFS virtual thread pool.
 - **Stability Issues**: Commands still occasionally throw errors that can render the session unusable.
 - **Performance**: In original v2 development measurements, one tested workflow improved from approximately 61s down to 12s. Actual results depend heavily on the browser, hardware, cache state, and workload. Bugs and performance constraints still exist.
 

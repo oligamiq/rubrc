@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import { handleLocalCratesProxyRequest } from "./local_crates_proxy.mjs";
 
 const DEFAULT_ROOT = fileURLToPath(new URL("../page/dist/", import.meta.url));
 const CROSS_ORIGIN_ISOLATION_HEADERS = {
@@ -133,9 +134,16 @@ async function serveFile(request, response, path, handle, fileStat) {
   }
 }
 
-async function handleRequest(rootDirectory, request, response) {
+async function handleRequest(rootDirectory, request, response, proxyFetchImpl) {
   for (const [name, value] of Object.entries(CROSS_ORIGIN_ISOLATION_HEADERS)) {
     response.setHeader(name, value);
+  }
+  if (
+    await handleLocalCratesProxyRequest(request, response, {
+      fetchImpl: proxyFetchImpl,
+    })
+  ) {
+    return;
   }
   if (request.method !== "GET" && request.method !== "HEAD") {
     response.statusCode = 405;
@@ -206,10 +214,13 @@ async function handleRequest(rootDirectory, request, response) {
   );
 }
 
-export function createBrowserStaticServer(rootDirectory = DEFAULT_ROOT) {
+export function createBrowserStaticServer(
+  rootDirectory = DEFAULT_ROOT,
+  { proxyFetchImpl = globalThis.fetch } = {},
+) {
   const root = resolve(rootDirectory);
   return createServer((request, response) => {
-    void handleRequest(root, request, response).catch((error) => {
+    void handleRequest(root, request, response, proxyFetchImpl).catch((error) => {
       if (isClientAbort(error, request, response)) return;
       console.error("Browser static server request failed", error);
       if (response.headersSent) {
@@ -231,8 +242,9 @@ export async function startBrowserStaticServer({
   rootDirectory = DEFAULT_ROOT,
   hostname = "127.0.0.1",
   port = 4173,
+  proxyFetchImpl = globalThis.fetch,
 } = {}) {
-  const server = createBrowserStaticServer(rootDirectory);
+  const server = createBrowserStaticServer(rootDirectory, { proxyFetchImpl });
   await new Promise((resolvePromise, reject) => {
     const onError = (error) => reject(error);
     server.once("error", onError);

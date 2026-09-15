@@ -23,6 +23,7 @@ Deno.test("lightweight rust-analyzer options have the exact startup shape", () =
       procMacro: { enable: false },
       checkOnSave: { enable: false },
       cachePriming: { enable: false },
+      numThreads: 1,
     },
     "lightweight options include project paths or differ from the startup shape",
   );
@@ -54,6 +55,7 @@ Deno.test("full rust-analyzer settings preserve the validated project shape", ()
       procMacro: { enable: false },
       checkOnSave: { enable: false },
       cachePriming: { enable: false },
+      numThreads: 1,
     },
     "full project settings differ from the validated integration",
   );
@@ -110,5 +112,20 @@ Deno.test("rust-analyzer configuration responses switch from lightweight to the 
     configuration.response([{ section: "rust-analyzer" }]),
     [createRustAnalyzerProjectSettings()],
     "project workspace/configuration response stayed lightweight",
+  );
+});
+
+Deno.test("rust-analyzer configuration carries the selected thread count", () => {
+  const configuration = createRustAnalyzerConfigurationState(4);
+  assertEquals(
+    configuration.initializationOptions().numThreads,
+    4,
+    "lightweight settings did not carry the selected thread count",
+  );
+  configuration.activateProject();
+  assertEquals(
+    configuration.response([{ section: "rust-analyzer" }])[0]?.numThreads,
+    4,
+    "project settings did not carry the selected thread count",
   );
 });

@@ -107,17 +107,17 @@ const taskStateForPhase = (
       break;
     case "analyzer-initializing":
       state =
-        task.id === "editor"
+        task.id === "editor" ||
+          task.id === "rust-src" ||
+          task.id === "target-sysroot"
           ? "complete"
-          : task.id === "analyzer" ||
-              task.id === "rust-src" ||
-              task.id === "target-sysroot"
+          : task.id === "analyzer"
             ? "running"
             : "pending";
       break;
     case "sysroots-loading":
       state =
-        task.id === "editor" || task.id === "analyzer"
+        task.id === "editor"
           ? "complete"
           : task.id === "rust-src" || task.id === "target-sysroot"
             ? "running"
@@ -237,14 +237,14 @@ export class StartupCoordinator {
       void prefetch.catch(() => undefined);
       await vfsRuntime;
       signal.throwIfAborted();
-      this.#setPhase(generation, "analyzer-initializing");
-      analyzer = await this.#dependencies.initializeAnalyzer(model, signal);
-      this.#session = analyzer;
-      signal.throwIfAborted();
       await prefetch;
       signal.throwIfAborted();
       this.#setPhase(generation, "sysroots-loading");
       await this.#dependencies.installSysroots(signal);
+      signal.throwIfAborted();
+      this.#setPhase(generation, "analyzer-initializing");
+      analyzer = await this.#dependencies.initializeAnalyzer(model, signal);
+      this.#session = analyzer;
       signal.throwIfAborted();
       this.#setPhase(generation, "project-activating");
       await analyzer.activateProject(

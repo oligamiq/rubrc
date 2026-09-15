@@ -38,10 +38,13 @@ type DebugShellStartMessage = {
   lspInputBytes?: number[];
   installStartupSysroots?: boolean;
   env?: string[];
+  initialInput?: string;
 };
 
 type WorkerScope = {
-  onmessage: ((event: { data: DebugShellStartMessage }) => void | Promise<void>) | null;
+  onmessage:
+    | ((event: { data: DebugShellStartMessage }) => void | Promise<void>)
+    | null;
   postMessage(message: unknown): void;
 };
 
@@ -56,6 +59,7 @@ workerScope.onmessage = async (event) => {
     lspInputBytes = [],
     installStartupSysroots = false,
     env = [],
+    initialInput = "",
   } = event.data;
   let output = "";
   let terminalOutput = "";
@@ -97,11 +101,12 @@ workerScope.onmessage = async (event) => {
       animal.wasiThreadImport,
       animal.get_share_memory(),
       (_index, rawMessage: unknown) => {
-        const message =
-          typeof rawMessage === "object" && rawMessage !== null
-            ? rawMessage as { name?: string }
-            : {};
-        if (isHttpBridgeMessage(rawMessage) || isChildProcessMessage(rawMessage)) {
+        const message = typeof rawMessage === "object" && rawMessage !== null
+          ? rawMessage as { name?: string }
+          : {};
+        if (
+          isHttpBridgeMessage(rawMessage) || isChildProcessMessage(rawMessage)
+        ) {
           return animal.call_unknown_fn(_index, rawMessage);
         } else if (message.name === "terminalWrite") {
           if (installStartupSysroots) {
@@ -123,7 +128,9 @@ workerScope.onmessage = async (event) => {
           if (message.name === "sysrootArchiveGetMeta") {
             return { has_archive: false, data_len: 0 };
           }
-          return message.name === "sysrootReadArchiveChunk" ? { chunk: [] } : {};
+          return message.name === "sysrootReadArchiveChunk"
+            ? { chunk: [] }
+            : {};
         } else {
           throw new Error(
             `unexpected host callback: ${message.name ?? "unknown"}`,
@@ -183,6 +190,9 @@ workerScope.onmessage = async (event) => {
     }
 
     const sessionId = installStartupSysroots ? 0 : 1;
+    if (initialInput !== "") {
+      dispatchBytes(sessionId, 4, new TextEncoder().encode(initialInput));
+    }
     if (!installStartupSysroots) {
       root.dispatch(sessionId, 3, 0, 0);
     }

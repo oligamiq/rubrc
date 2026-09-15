@@ -64,7 +64,7 @@ export const custom_instantiate = async (
     console.warn("call_unknown_fn is not set", idx, unknown);
   },
 ): Promise<VfsInstance> => {
-  const debugTraceEnabled = import.meta.env.VITE_RUBRC_LSP_TEST === "1";
+  const debugTraceEnabled = import.meta.env?.VITE_RUBRC_LSP_TEST === "1";
   let hostCallId = 0;
   const tracedCallUnknownFn = (idx: number, unknown: unknown): unknown => {
     const name =

@@ -1,0 +1,2354 @@
+1522: diff --git a/crates/vfs/src/lib.rs b/crates/vfs/src/lib.rs
+1523: index 6e478e0f..76440a7f 100644
+1524: --- a/crates/vfs/src/lib.rs
+1525: +++ b/crates/vfs/src/lib.rs
+1526: @@ -1,53 +1,65 @@
+1527:  use const_struct::*;
+1528:  use std::any::TypeId;
+1529:  use std::cell::{Cell, RefCell};
+1530:  use std::collections::{HashMap, VecDeque};
+1531:  use std::ffi::OsStr;
+1532:  use std::ops::Deref;
+1533:  use std::path::{Component, Path, PathBuf};
+1534: -use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+1535: +use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
+1536:  use wasi_virt_layer::__private::wasip1::{self, Ciovec, Dircookie, Fd, Size};
+1537:  use wasi_virt_layer::memory::{
+1538:      WasmAccessName, WasmPathAccess, WasmPathComponent, WasmPathComponentCommon,
+1539:  };
+1540:  use wasi_virt_layer::wasi::file::Wasip1LFSBase;
+1541:  use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
+1542:  
+1543: +mod debug_state;
+1544:  mod filesystem_sync;
+1545:  pub mod memory_manager;
+1546: +#[cfg(feature = "debugging")]
+1547: +use debug_state::ThreadPoolState;
+1548: +use debug_state::{DebugState, PipeKind, is_lifecycle_event};
+1549:  use memory_manager::*;
+1550:  
+1551:  wit_bindgen::generate!({
+1552:      world: "vfs-host",
+1553:  });
+1554:  
+1555:  const LSP_SESSION_ID: u32 = 0xFFFFFFFF;
+1556:  const EVENT_TYPE_LSP: u32 = 6;
+1557:  const EVENT_TYPE_WRITE_FILE: u32 = 7;
+1558: +const EVENT_TYPE_BOOTSTRAP_RUST_SRC: u32 = 8;
+1559: +const SHELL_EVENT_BOOTSTRAP_RUST_SRC: u32 = 6;
+1560:  const EVENT_TYPE_DEBUG_FIXED_RUSTC: u32 = 1007;
+1561:  const EVENT_TYPE_DEBUG_RESERVE_SELF: u32 = 1008;
+1562:  const EVENT_TYPE_DEBUG_RESERVE_RUSTC: u32 = 1009;
+1563:  pub static THREAD_SESSIONS: std::sync::LazyLock<dashmap::DashMap<std::thread::ThreadId, u32>> =
+1564:      std::sync::LazyLock::new(|| dashmap::DashMap::new());
+1565:  
+1566:  static LSP_STDIN: std::sync::LazyLock<(parking_lot::Mutex<Vec<u8>>, parking_lot::Condvar)> =
+1567:      std::sync::LazyLock::new(|| {
+1568:          (
+1569:              parking_lot::Mutex::new(Vec::new()),
+1570:              parking_lot::Condvar::new(),
+1571:          )
+1572:      });
+1573:  
+1574:  static DEBUG_TERMINAL_CAPTURE: AtomicBool = AtomicBool::new(false);
+1575: -static DEBUG_TERMINAL_OUTPUT: std::sync::LazyLock<parking_lot::Mutex<Vec<u8>>> =
+1576: -    std::sync::LazyLock::new(|| parking_lot::Mutex::new(Vec::new()));
+1577: +static DEBUG_INVOCATION_ID: AtomicUsize = AtomicUsize::new(1);
+1578: +static DEBUG_RA_BOUNDARY_DROPPED: AtomicUsize = AtomicUsize::new(0);
+1579: +static DEBUG_TERMINAL_OUTPUT: std::sync::LazyLock<parking_lot::Mutex<DebugState>> =
+1580: +    std::sync::LazyLock::new(|| parking_lot::Mutex::new(DebugState::new(64 * 1024)));
+1581: +#[cfg(test)]
+1582: +static DEBUG_RA_BOUNDARY_AFTER_FIRST_GATE: std::sync::LazyLock<
+1583: +    parking_lot::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
+1584: +> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+1585:  
+1586:  #[derive(Default)]
+1587:  struct CargoOutput {
+1588:      stdout: Vec<u8>,
+1589:      stderr: Vec<u8>,
+1590:  }
+1591:  
+1592:  #[derive(Default)]
+1593:  struct VirtualPipe {
+1594:      buffer: VecDeque<u8>,
+1595: @@ -74,105 +86,132 @@ impl VirtualPipe {
+1596:      }
+1597:  
+1598:      fn write(&mut self, buf: &[u8]) -> usize {
+1599:          self.buffer.extend(buf.iter().copied());
+1600:          buf.len()
+1601:      }
+1602:  
+1603:      fn drain(&mut self) -> Vec<u8> {
+1604:          self.buffer.drain(..).collect()
+1605:      }
+1606: +
+1607: +    fn buffered_len(&self) -> usize {
+1608: +        self.buffer.len()
+1609: +    }
+1610:  }
+1611:  
+1612:  struct ChildProcessStdio {
+1613:      owner: std::thread::ThreadId,
+1614: +    debug_invocation_id: Option<usize>,
+1615:      cwd: Vec<u8>,
+1616:      stdin: VirtualPipe,
+1617:      stdout: VirtualPipe,
+1618:      stderr: VirtualPipe,
+1619:  }
+1620:  
+1621:  impl ChildProcessStdio {
+1622: -    fn new(cwd: Vec<u8>, stdin: Vec<u8>) -> Self {
+1623: +    fn new(cwd: Vec<u8>, stdin: Vec<u8>, debug_invocation_id: Option<usize>) -> Self {
+1624:          Self {
+1625:              owner: std::thread::current().id(),
+1626: +            debug_invocation_id,
+1627:              cwd,
+1628:              stdin: VirtualPipe::closed_with(stdin),
+1629:              stdout: VirtualPipe::default(),
+1630:              stderr: VirtualPipe::default(),
+1631:          }
+1632:      }
+1633:  
+1634:      fn is_owner(&self) -> bool {
+1635:          self.owner == std::thread::current().id()
+1636:      }
+1637:  }
+1638:  
+1639:  static CHILD_PROCESS_STDIO: std::sync::LazyLock<parking_lot::Mutex<Option<ChildProcessStdio>>> =
+1640:      std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+1641:  
+1642:  struct ChildProcessStdioGuard {
+1643:      previous: Option<ChildProcessStdio>,
+1644: +    debug_invocation_id: Option<usize>,
+1645:      active: bool,
+1646:  }
+1647:  
+1648:  impl ChildProcessStdioGuard {
+1649: -    fn new(cwd: Vec<u8>, stdin: Vec<u8>) -> Self {
+1650: +    fn new(cwd: Vec<u8>, stdin: Vec<u8>, debug_invocation_id: Option<usize>) -> Self {
+1651:          let previous = {
+1652:              let mut process = CHILD_PROCESS_STDIO.lock();
+1653: -            process.replace(ChildProcessStdio::new(cwd, stdin))
+1654: +            process.replace(ChildProcessStdio::new(cwd, stdin, debug_invocation_id))
+1655:          };
+1656:          Self {
+1657:              previous,
+1658: +            debug_invocation_id,
+1659:              active: true,
+1660:          }
+1661:      }
+1662:  
+1663:      fn finish(mut self) -> CargoOutput {
+1664: -        let mut current = self.restore();
+1665: -        if !current.cwd.is_empty() {
+1666: +        let (output, cwd) = self.drain_and_restore();
+1667: +        if !cwd.is_empty() {
+1668:              debug_trace(&format!(
+1669:                  "child-process:cwd {}",
+1670: -                String::from_utf8_lossy(&current.cwd)
+1671: +                String::from_utf8_lossy(&cwd)
+1672:              ));
+1673:          }
+1674: -        CargoOutput {
+1675: -            stdout: current.stdout.drain(),
+1676: -            stderr: current.stderr.drain(),
+1677: -        }
+1678: +        output
+1679:      }
+1680:  
+1681: -    fn restore(&mut self) -> ChildProcessStdio {
+1682: +    fn drain_and_restore(&mut self) -> (CargoOutput, Vec<u8>) {
+1683:          let mut process = CHILD_PROCESS_STDIO.lock();
+1684: -        let current = process
+1685: -            .take()
+1686: -            .unwrap_or_else(|| ChildProcessStdio::new(Vec::new(), Vec::new()));
+1687: +        let current =
+1688: +            process.get_or_insert_with(|| ChildProcessStdio::new(Vec::new(), Vec::new(), None));
+1689: +        let cwd = std::mem::take(&mut current.cwd);
+1690: +        let stdout = current.stdout.drain();
+1691: +        let stderr = current.stderr.drain();
+1692: +        if let Some(invocation_id) = self.debug_invocation_id {
+1693: +            with_debug_state(|state| {
+1694: +                state.set_pipe_state(invocation_id, PipeKind::Stdout, stdout.len(), true);
+1695: +                state.set_pipe_state(invocation_id, PipeKind::Stderr, stderr.len(), true);
+1696: +                state.push_event(&format!("stdio:drained id={invocation_id}"));
+1697: +            });
+1698: +        }
+1699:          *process = self.previous.take();
+1700:          self.active = false;
+1701: -        current
+1702: +        (CargoOutput { stdout, stderr }, cwd)
+1703:      }
+1704:  }
+1705:  
+1706:  impl Drop for ChildProcessStdioGuard {
+1707:      fn drop(&mut self) {
+1708:          if self.active {
+1709: -            *CHILD_PROCESS_STDIO.lock() = self.previous.take();
+1710: +            let _ = self.drain_and_restore();
+1711: +        }
+1712: +        if let Some(invocation_id) = self.debug_invocation_id {
+1713: +            with_debug_state(|state| {
+1714: +                state.push_event(&format!("stdio:restored id={invocation_id}"));
+1715: +            });
+1716:          }
+1717:      }
+1718:  }
+1719:  
+1720:  fn with_child_process_stdio<T>(
+1721:      cwd: Vec<u8>,
+1722:      stdin: Vec<u8>,
+1723: +    debug_invocation_id: Option<usize>,
+1724:      f: impl FnOnce() -> T,
+1725:  ) -> (T, CargoOutput) {
+1726: -    let guard = ChildProcessStdioGuard::new(cwd, stdin);
+1727: +    let guard = ChildProcessStdioGuard::new(cwd, stdin, debug_invocation_id);
+1728: +    if let Some(invocation_id) = debug_invocation_id {
+1729: +        with_debug_state(|state| {
+1730: +            state.set_pipe_state(invocation_id, PipeKind::Stdout, 0, false);
+1731: +            state.set_pipe_state(invocation_id, PipeKind::Stderr, 0, false);
+1732: +            state.push_event(&format!("stdio:installed id={invocation_id}"));
+1733: +        });
+1734: +    }
+1735:      let result = f();
+1736:      (result, guard.finish())
+1737:  }
+1738:  
+1739:  thread_local! {
+1740:      static CARGO_OUTPUT: RefCell<Option<CargoOutput>> = const { RefCell::new(None) };
+1741:      static RUSTC_ACTIVE: Cell<bool> = const { Cell::new(false) };
+1742:  }
+1743:  
+1744:  pub(crate) static CARGO_RUN_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+1745: @@ -212,74 +251,106 @@ impl Drop for RustcInvocationState {
+1746:      }
+1747:  }
+1748:  
+1749:  fn run_rustc_invocation(
+1750:      env: Vec<String>,
+1751:      args: Vec<String>,
+1752:      cwd: Vec<u8>,
+1753:      stdin: Vec<u8>,
+1754:      run: impl FnOnce(),
+1755:  ) -> (CargoOutput, i32) {
+1756: +    let debug_invocation_id = next_debug_invocation_id();
+1757: +    if let Some(invocation_id) = debug_invocation_id {
+1758: +        with_debug_state(|state| {
+1759: +            state.rustc_enter(invocation_id);
+1760: +            state.push_event(&format!("rustc:enter id={invocation_id}"));
+1761: +        });
+1762: +    }
+1763:      let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+1764: -        let _invocation_state = RustcInvocationState::new(env, args);
+1765: +        let _invocation_state = RustcInvocationState::new(env.clone(), args.clone());
+1766: +        crate::debug_trace(&format!("wasi-ext-spawn:run-rustc:enter args={:?}", args));
+1767:          debug_trace("wasi-ext-spawn:run-rustc:enter");
+1768: -        let ((), child_output) = with_child_process_stdio(cwd, stdin, run);
+1769: +        let ((), child_output) = with_child_process_stdio(cwd, stdin, debug_invocation_id, run);
+1770:          let status = RUSTC_EXIT_STATUS.load(Ordering::SeqCst);
+1771:          debug_trace(&format!("wasi-ext-spawn:run-rustc:return status={status}"));
+1772:          (child_output, status)
+1773:      }));
+1774:  
+1775: -    match result {
+1776: +    let result = match result {
+1777:          Ok(result) => result,
+1778:          Err(payload) => {
+1779:              let message = if let Some(message) = payload.downcast_ref::<&str>() {
+1780:                  *message
+1781:              } else if let Some(message) = payload.downcast_ref::<String>() {
+1782:                  message.as_str()
+1783:              } else {
+1784:                  "unknown panic payload"
+1785:              };
+1786:              debug_trace(&format!("wasi-ext-spawn:run-rustc:panic {message}"));
+1787:              (
+1788:                  CargoOutput {
+1789:                      stdout: Vec::new(),
+1790:                      stderr: bounded_rustc_panic_error(message),
+1791:                  },
+1792:                  RUSTC_PANIC_STATUS,
+1793:              )
+1794:          }
+1795: +    };
+1796: +    if let Some(invocation_id) = debug_invocation_id {
+1797: +        with_debug_state(|state| {
+1798: +            state.push_event(&format!(
+1799: +                "rustc:return id={invocation_id} status={}",
+1800: +                result.1
+1801: +            ));
+1802: +            state.rustc_return(invocation_id);
+1803: +        });
+1804:      }
+1805: +    result
+1806:  }
+1807:  
+1808:  struct RustcActiveGuard;
+1809:  
+1810:  impl Drop for RustcActiveGuard {
+1811:      fn drop(&mut self) {
+1812:          RUSTC_ACTIVE.with(|active| active.set(false));
+1813:      }
+1814:  }
+1815:  
+1816:  pub(crate) fn run_cargo() {
+1817: +    let debug_invocation_id = next_debug_invocation_id();
+1818: +    if let Some(invocation_id) = debug_invocation_id {
+1819: +        with_debug_state(|state| {
+1820: +            state.cargo_enter(invocation_id);
+1821: +            state.push_event(&format!("cargo:enter id={invocation_id}"));
+1822: +        });
+1823: +    }
+1824: +    let _debug_invocation_guard = CargoDebugInvocationGuard(debug_invocation_id);
+1825:      CARGO_EXIT_STATUS.store(0, Ordering::SeqCst);
+1826:      MEMORY_MANAGER.ensure_once::<cargo_opt>(&CARGO_RESERVE_ONCE, CARGO_CONFIG);
+1827:      debug_trace(&format!(
+1828:          "cargo:memory:after-ensure pages={}",
+1829:          memory_size::<cargo_opt>()
+1830:      ));
+1831:      debug_trace("cargo:_reset:enter");
+1832:      cargo_opt::_reset();
+1833:      debug_trace(&format!(
+1834:          "cargo:memory:after-reset pages={}",
+1835:          memory_size::<cargo_opt>()
+1836:      ));
+1837:      debug_trace("cargo:_reset:return");
+1838:      debug_trace("cargo:_main:enter");
+1839: +    if let Some(invocation_id) = debug_invocation_id {
+1840: +        with_debug_state(|state| {
+1841: +            state.set_wait("cargo-main");
+1842: +            state.push_event(&format!("wait=cargo-main id={invocation_id}"));
+1843: +        });
+1844: +    }
+1845:      cargo_opt::_main();
+1846:      debug_trace(&format!(
+1847:          "cargo:memory:after-main pages={}",
+1848:          memory_size::<cargo_opt>()
+1849:      ));
+1850:      debug_trace("cargo:_main:return");
+1851:  }
+1852:  
+1853:  pub(crate) fn run_rustc() {
+1854:      RUSTC_EXIT_STATUS.store(0, Ordering::SeqCst);
+1855: @@ -322,64 +393,220 @@ fn capture_cargo_output(stderr: bool, buf: &[u8]) -> bool {
+1856:          };
+1857:          if stderr {
+1858:              output.stderr.extend_from_slice(buf);
+1859:          } else {
+1860:              output.stdout.extend_from_slice(buf);
+1861:          }
+1862:          true
+1863:      })
+1864:  }
+1865:  
+1866: -pub(crate) fn debug_trace(message: &str) {
+1867: +fn next_debug_invocation_id() -> Option<usize> {
+1868: +    DEBUG_TERMINAL_CAPTURE
+1869: +        .load(Ordering::Relaxed)
+1870: +        .then(|| DEBUG_INVOCATION_ID.fetch_add(1, Ordering::Relaxed))
+1871: +}
+1872: +
+1873: +struct CargoDebugInvocationGuard(Option<usize>);
+1874: +
+1875: +impl Drop for CargoDebugInvocationGuard {
+1876: +    fn drop(&mut self) {
+1877: +        if let Some(invocation_id) = self.0 {
+1878: +            with_debug_state(|state| {
+1879: +                state.push_event(&format!("cargo:return id={invocation_id}"));
+1880: +                state.cargo_return(invocation_id);
+1881: +            });
+1882: +        }
+1883: +    }
+1884: +}
+1885: +
+1886: +fn with_debug_state(f: impl FnOnce(&mut DebugState)) {
+1887:      if DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
+1888: -        let mut output = DEBUG_TERMINAL_OUTPUT.lock();
+1889: -        output.extend_from_slice(b"\r\n[vfs-debug] ");
+1890: -        output.extend_from_slice(message.as_bytes());
+1891: -        output.extend_from_slice(b"\r\n");
+1892: +        let mut state = DEBUG_TERMINAL_OUTPUT.lock();
+1893: +        if DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
+1894: +            f(&mut state);
+1895: +        }
+1896: +    }
+1897: +}
+1898: +
+1899: +pub(crate) fn debug_trace(message: &str) {
+1900: +    if is_lifecycle_event(message) {
+1901: +        with_debug_state(|state| state.push_event(message));
+1902: +    }
+1903: +}
+1904: +
+1905: +#[repr(u32)]
+1906: +enum RaBoundaryStage {
+1907: +    FfiEnter = 1,
+1908: +    FfiReturn = 2,
+1909: +    BuffersBorrowed = 3,
+1910: +    BuffersCopyEnter = 4,
+1911: +    BuffersCopied = 5,
+1912: +    BuffersFreeEnter = 6,
+1913: +    BuffersFreed = 7,
+1914: +    InvokeReturn = 8,
+1915: +    MetadataInvokeEnter = 9,
+1916: +    MetadataInvokeReturn = 10,
+1917: +    MetadataUtf8Enter = 11,
+1918: +    MetadataUtf8Return = 12,
+1919: +    MetadataParseEnter = 13,
+1920: +    MetadataParseReturn = 14,
+1921: +    MetadataFinished = 15,
+1922: +    WorkspaceCargoSpawnEnter = 16,
+1923: +    WorkspaceCargoSpawnReturn = 17,
+1924: +    WorkspaceCargoJoinEnter = 18,
+1925: +    WorkspaceCargoJoinReturn = 19,
+1926: +    WorkspaceCargoJoinError = 20,
+1927: +    WorkspaceCargoMapReturn = 21,
+1928: +    WorkspaceLoadReturn = 22,
+1929: +    ScopeUnwind = 23,
+1930: +    WorkspaceInlineTaskEnter = 24,
+1931: +    WorkspaceInlineTaskReturn = 25,
+1932: +    WorkspaceInlineJoinEnter = 26,
+1933: +    WorkspaceInlineJoinReturn = 27,
+1934: +    WorkspaceInlineJoinError = 28,
+1935: +    WorkspaceInlineLoadReturn = 29,
+1936: +}
+1937: +
+1938: +fn format_ra_boundary(trace_id: u32, stage: u32, value_1: u32, value_2: u32) -> String {
+1939: +    let stage = match stage {
+1940: +        value if value == RaBoundaryStage::FfiEnter as u32 => "ffi:enter",
+1941: +        value if value == RaBoundaryStage::FfiReturn as u32 => "ffi:return",
+1942: +        value if value == RaBoundaryStage::BuffersBorrowed as u32 => "buffers:borrowed",
+1943: +        value if value == RaBoundaryStage::BuffersCopyEnter as u32 => "buffers:copy-enter",
+1944: +        value if value == RaBoundaryStage::BuffersCopied as u32 => "buffers:copied",
+1945: +        value if value == RaBoundaryStage::BuffersFreeEnter as u32 => "buffers:free-enter",
+1946: +        value if value == RaBoundaryStage::BuffersFreed as u32 => "buffers:freed",
+1947: +        value if value == RaBoundaryStage::InvokeReturn as u32 => "invoke:return",
+1948: +        value if value == RaBoundaryStage::MetadataInvokeEnter as u32 => "metadata:invoke-enter",
+1949: +        value if value == RaBoundaryStage::MetadataInvokeReturn as u32 => "metadata:invoke-return",
+1950: +        value if value == RaBoundaryStage::MetadataUtf8Enter as u32 => "metadata:utf8-enter",
+1951: +        value if value == RaBoundaryStage::MetadataUtf8Return as u32 => "metadata:utf8-return",
+1952: +        value if value == RaBoundaryStage::MetadataParseEnter as u32 => "metadata:parse-enter",
+1953: +        value if value == RaBoundaryStage::MetadataParseReturn as u32 => "metadata:parse-return",
+1954: +        value if value == RaBoundaryStage::MetadataFinished as u32 => "metadata:finished",
+1955: +        value if value == RaBoundaryStage::WorkspaceCargoSpawnEnter as u32 => {
+1956: +            "workspace:cargo-spawn-enter"
+1957: +        }
+1958: +        value if value == RaBoundaryStage::WorkspaceCargoSpawnReturn as u32 => {
+1959: +            "workspace:cargo-spawn-return"
+1960: +        }
+1961: +        value if value == RaBoundaryStage::WorkspaceCargoJoinEnter as u32 => {
+1962: +            "workspace:cargo-join-enter"
+1963: +        }
+1964: +        value if value == RaBoundaryStage::WorkspaceCargoJoinReturn as u32 => {
+1965: +            "workspace:cargo-join-return"
+1966: +        }
+1967: +        value if value == RaBoundaryStage::WorkspaceCargoJoinError as u32 => {
+1968: +            "workspace:cargo-join-error"
+1969: +        }
+1970: +        value if value == RaBoundaryStage::WorkspaceCargoMapReturn as u32 => {
+1971: +            "workspace:cargo-map-return"
+1972: +        }
+1973: +        value if value == RaBoundaryStage::WorkspaceLoadReturn as u32 => "workspace:load-return",
+1974: +        value if value == RaBoundaryStage::ScopeUnwind as u32 => "scope:unwind",
+1975: +        value if value == RaBoundaryStage::WorkspaceInlineTaskEnter as u32 => {
+1976: +            "workspace:inline-task-enter"
+1977: +        }
+1978: +        value if value == RaBoundaryStage::WorkspaceInlineTaskReturn as u32 => {
+1979: +            "workspace:inline-task-return"
+1980: +        }
+1981: +        value if value == RaBoundaryStage::WorkspaceInlineJoinEnter as u32 => {
+1982: +            "workspace:inline-join-enter"
+1983: +        }
+1984: +        value if value == RaBoundaryStage::WorkspaceInlineJoinReturn as u32 => {
+1985: +            "workspace:inline-join-return"
+1986: +        }
+1987: +        value if value == RaBoundaryStage::WorkspaceInlineJoinError as u32 => {
+1988: +            "workspace:inline-join-error"
+1989: +        }
+1990: +        value if value == RaBoundaryStage::WorkspaceInlineLoadReturn as u32 => {
+1991: +            "workspace:inline-load-return"
+1992: +        }
+1993: +        _ => "unknown",
+1994: +    };
+1995: +    format!("[ra-wasi-boundary] id={trace_id} stage={stage} value_1={value_1} value_2={value_2}")
+1996: +}
+1997: +
+1998: +#[unsafe(no_mangle)]
+1999: +pub extern "C" fn host_trace_boundary(
+2000: +    trace_id: u32,
+2001: +    stage: u32,
+2002: +    value_1: u32,
+2003: +    value_2: u32,
+2004: +) -> u32 {
+2005: +    if !DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
+2006: +        return 0;
+2007: +    }
+2008: +    #[cfg(test)]
+2009: +    if let Some(after_first_gate) = DEBUG_RA_BOUNDARY_AFTER_FIRST_GATE.lock().take() {
+2010: +        after_first_gate();
+2011: +    }
+2012: +    let Some(mut output) = DEBUG_TERMINAL_OUTPUT.try_lock() else {
+2013: +        DEBUG_RA_BOUNDARY_DROPPED.fetch_add(1, Ordering::Relaxed);
+2014: +        return 0;
+2015: +    };
+2016: +    if !DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
+2017: +        return 0;
+2018: +    }
+2019: +    output.push_event(&format_ra_boundary(trace_id, stage, value_1, value_2));
+2020: +    0
+2021: +}
+2022: +
+2023: +fn set_debug_terminal_capture(enabled: bool, trace_value: Option<&str>) {
+2024: +    let enabled = enabled && trace_value == Some("1");
+2025: +    DEBUG_TERMINAL_CAPTURE.store(false, Ordering::SeqCst);
+2026: +    *DEBUG_TERMINAL_OUTPUT.lock() = DebugState::new(64 * 1024);
+2027: +    DEBUG_RA_BOUNDARY_DROPPED.store(0, Ordering::Relaxed);
+2028: +    if enabled {
+2029: +        DEBUG_TERMINAL_CAPTURE.store(true, Ordering::SeqCst);
+2030:      }
+2031:  }
+2032:  
+2033:  struct Wit;
+2034:  
+2035:  impl Guest for Wit {
+2036:      fn init() {}
+2037:      fn main() {
+2038:          let threads = std::env::var("VFS_THREADS")
+2039:              .unwrap_or_else(|_| "8".to_string())
+2040:              .parse::<usize>()
+2041:              .unwrap_or(8);
+2042:  
+2043:          unsafe { THREAD_POOL.init() };
+2044: +        debug_trace("pool:init");
+2045:  
+2046:          for i in 1..=threads {
+2047:              println!("$$1");
+2048:              MEMORY_MANAGER.reserve_for_thread();
+2049:              println!("d = memory_reserved");
+2050:  
+2051:              println!("$$2");
+2052:  
+2053:              print!(
+2054:                  "\x1b[2K\r\x1b[36mInitializing Thread Pool: {}/{} ...\x1b[0m",
+2055:                  i, threads
+2056:              );
+2057:  
+2058:              println!("$$3");
+2059:  
+2060:              let _ = std::io::Write::flush(&mut std::io::stdout());
+2061:  
+2062:              println!("$$4");
+2063:  
+2064:              THREAD_POOL.set_capacity(i);
+2065: +            debug_trace(&format!("pool:capacity capacity={i}"));
+2066:  
+2067:              println!("$$5");
+2068:  
+2069:              THREAD_POOL.flush_capacity().wait();
+2070: +            debug_trace(&format!("pool:flush-return capacity={i}"));
+2071:  
+2072:              println!("$$6");
+2073:          }
+2074:          eprintln!(
+2075:              "\x1b[2K\r\x1b[32mThread Pool Initialized ({} threads)\x1b[0m",
+2076:              threads
+2077:          );
+2078:  
+2079:          let root = initialized_lfs_root();
+2080:          if let Err(error) = filesystem_sync::import_host_authoritative(
+2081: @@ -431,29 +658,35 @@ impl Guest for Wit {
+2082:              &VIRTUAL_FILE_SYSTEM.lfs,
+2083:              root,
+2084:              Path::new("."),
+2085:              filesystem_sync::DEFAULT_SYNC_LIMITS,
+2086:              &[],
+2087:          ) {
+2088:              eprintln!("failed to flush VFS files to host: {error}");
+2089:          }
+2090:      }
+2091:  
+2092: +    fn rust_src_load_state() -> u32 {
+2093: +        unsafe { crate::shell::vfs_shell_rust_src_load_state() }
+2094: +    }
+2095: +
+2096:      fn dispatch(session_id: u32, event_type: u32, arg1: u32, arg2: u32) {
+2097:          if session_id == LSP_SESSION_ID {
+2098:              if LSP_START_ONCE.try_start() {
+2099:                  MEMORY_MANAGER.reserve_for_thread();
+2100:                  std::thread::spawn(move || {
+2101:                      crate::shell::vfs_set_current_session_id(LSP_SESSION_ID);
+2102:                      crate::command::set_lsp_opt_args(&["rust-analyzer"]);
+2103:                      MEMORY_MANAGER.ensure_once::<lsp_opt>(&LSP_RESERVE_ONCE, LSP_CONFIG);
+2104: +                    lsp_opt::_reset();
+2105:                      lsp_opt::_start();
+2106: +                    lsp_opt::_main();
+2107:                  });
+2108:              }
+2109:          }
+2110:  
+2111:          if event_type == 1 {
+2112:              let mut env = VIRTUAL_SHELL_ENV.lock();
+2113:              env.env
+2114:                  .retain(|s| !s.starts_with("COLUMNS=") && !s.starts_with("LINES="));
+2115:              env.env.push(format!("COLUMNS={}", arg1));
+2116:              env.env.push(format!("LINES={}", arg2));
+2117: @@ -525,20 +758,25 @@ impl Guest for Wit {
+2118:                              let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(
+2119:                                  current_vfs_parent,
+2120:                                  &name_str,
+2121:                                  content.as_bytes().to_vec(),
+2122:                              );
+2123:                          }
+2124:                      }
+2125:                  }
+2126:              }
+2127:              return;
+2128: +        } else if event_type == EVENT_TYPE_BOOTSTRAP_RUST_SRC {
+2129: +            unsafe {
+2130: +                crate::shell::vfs_shell_dispatch(session_id, SHELL_EVENT_BOOTSTRAP_RUST_SRC, 0, 0);
+2131: +            }
+2132: +            return;
+2133:          } else if event_type == EVENT_TYPE_DEBUG_FIXED_RUSTC {
+2134:              let run_marker = arg1;
+2135:              crate::debug_trace(&format!("debug-rustc:enter run={run_marker}"));
+2136:              let fixed_args: &[&str] = &[
+2137:                  "rustc",
+2138:                  "/src/main.rs",
+2139:                  "--sysroot",
+2140:                  "/sysroot",
+2141:                  "--target",
+2142:                  "wasm32-wasip1",
+2143: @@ -607,44 +845,86 @@ impl Guest for Wit {
+2144:          let ptr = unsafe { std::alloc::alloc(layout) };
+2145:          ptr as u32
+2146:      }
+2147:  
+2148:      fn free_buf(ptr: u32, len: u32) {
+2149:          let layout = std::alloc::Layout::from_size_align(len as usize, 8).unwrap();
+2150:          unsafe { std::alloc::dealloc(ptr as *mut u8, layout) };
+2151:      }
+2152:  
+2153:      fn debug_set_terminal_capture(enabled: bool) {
+2154: -        if enabled {
+2155: -            DEBUG_TERMINAL_OUTPUT.lock().clear();
+2156: -        }
+2157: -        DEBUG_TERMINAL_CAPTURE.store(enabled, Ordering::SeqCst);
+2158: +        let trace_value = std::env::var("VFS_DEBUG_TRACE").ok();
+2159: +        set_debug_terminal_capture(enabled, trace_value.as_deref());
+2160:      }
+2161:  
+2162:      fn debug_terminal_output_len() -> u32 {
+2163:          DEBUG_TERMINAL_OUTPUT
+2164:              .try_lock()
+2165: -            .map_or(0, |output| output.len() as u32)
+2166: +            .map_or(0, |output| output.buffered_len() as u32)
+2167:      }
+2168:  
+2169:      fn debug_read_terminal_output(ptr: u32, len: u32) -> u32 {
+2170:          let Some(mut output) = DEBUG_TERMINAL_OUTPUT.try_lock() else {
+2171:              return 0;
+2172:          };
+2173: -        let read_len = usize::min(output.len(), len as usize);
+2174: +        let drained = output.drain(len as usize);
+2175: +        let read_len = drained.len();
+2176:          if read_len != 0 {
+2177:              let destination = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u8, read_len) };
+2178: -            destination.copy_from_slice(&output[..read_len]);
+2179: -            output.drain(..read_len);
+2180: +            destination.copy_from_slice(&drained);
+2181:          }
+2182:          read_len as u32
+2183:      }
+2184: +
+2185: +    fn debug_capture_wait_snapshot() {
+2186: +        if !DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
+2187: +            return;
+2188: +        }
+2189: +
+2190: +        #[cfg(feature = "debugging")]
+2191: +        {
+2192: +            if !THREAD_POOL.is_initialized() {
+2193: +                let mut state = DEBUG_TERMINAL_OUTPUT.lock();
+2194: +                state.set_ra_boundary_dropped(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed));
+2195: +                let snapshot = state.snapshot_line_thread_pool_uninitialized();
+2196: +                state.push_snapshot(&snapshot);
+2197: +                return;
+2198: +            }
+2199: +            let trace = THREAD_POOL.trace_snapshot();
+2200: +            let mut state = DEBUG_TERMINAL_OUTPUT.lock();
+2201: +            state.set_ra_boundary_dropped(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed));
+2202: +            let snapshot = state.snapshot_line(ThreadPoolState {
+2203: +                capacity: trace.capacity,
+2204: +                worker_count: trace.worker_count,
+2205: +                queued_task_count: trace.queued_task_count,
+2206: +                in_flight_runs: trace.in_flight_runs,
+2207: +                run_enqueued: trace.run_enqueued,
+2208: +                run_started: trace.run_started,
+2209: +                run_completed: trace.run_completed,
+2210: +                add_thread_requested: trace.add_thread_requested,
+2211: +                add_thread_completed: trace.add_thread_completed,
+2212: +                add_thread_disconnected: trace.add_thread_disconnected,
+2213: +                terminate_requested: trace.terminate_requested,
+2214: +                terminate_completed: trace.terminate_completed,
+2215: +                terminate_disconnected: trace.terminate_disconnected,
+2216: +            });
+2217: +            state.push_snapshot(&snapshot);
+2218: +        }
+2219: +
+2220: +        #[cfg(not(feature = "debugging"))]
+2221: +        {
+2222: +            let mut state = DEBUG_TERMINAL_OUTPUT.lock();
+2223: +            state.set_ra_boundary_dropped(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed));
+2224: +            let snapshot = state.snapshot_line_trace_disabled();
+2225: +            state.push_snapshot(&snapshot);
+2226: +        }
+2227: +    }
+2228:  }
+2229:  
+2230:  #[cfg(not(test))]
+2231:  export!(Wit);
+2232:  
+2233:  pub struct VirtualEnvState {
+2234:      pub env: Vec<String>,
+2235:  }
+2236:  
+2237:  impl<'a> VirtualEnv<'a> for VirtualEnvState {
+2238: @@ -673,21 +953,33 @@ pub static VIRTUAL_SHELL_ENV: std::sync::LazyLock<parking_lot::Mutex<VirtualEnvS
+2239:  
+2240:  #[derive(Debug)]
+2241:  pub struct ShellVirtualStdIO;
+2242:  
+2243:  impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
+2244:      fn write(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+2245:          {
+2246:              let mut process = CHILD_PROCESS_STDIO.lock();
+2247:              if let Some(process) = process.as_mut() {
+2248:                  if process.is_owner() {
+2249: -                    return Ok(process.stdout.write(buf));
+2250: +                    let written = process.stdout.write(buf);
+2251: +                    if let Some(invocation_id) = process.debug_invocation_id {
+2252: +                        // Keep writes ordered before EOF updates in the guard's drop path.
+2253: +                        with_debug_state(|state| {
+2254: +                            state.set_pipe_state(
+2255: +                                invocation_id,
+2256: +                                PipeKind::Stdout,
+2257: +                                process.stdout.buffered_len(),
+2258: +                                false,
+2259: +                            );
+2260: +                        });
+2261: +                    }
+2262: +                    return Ok(written);
+2263:                  }
+2264:              }
+2265:          }
+2266:  
+2267:          if capture_cargo_output(false, buf) {
+2268:              return Ok(buf.len());
+2269:          }
+2270:  
+2271:          let id = crate::shell::CURRENT_CONTEXT_ID
+2272:              .with(|id| id.get())
+2273: @@ -737,21 +1029,32 @@ impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
+2274:                      wasi_virt_layer::wasi::file::stdio::DefaultStdIO::write(buf)
+2275:                  }
+2276:              }
+2277:          }
+2278:      }
+2279:      fn ewrite(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+2280:          {
+2281:              let mut process = CHILD_PROCESS_STDIO.lock();
+2282:              if let Some(process) = process.as_mut() {
+2283:                  if process.is_owner() {
+2284: -                    return Ok(process.stderr.write(buf));
+2285: +                    let written = process.stderr.write(buf);
+2286: +                    if let Some(invocation_id) = process.debug_invocation_id {
+2287: +                        with_debug_state(|state| {
+2288: +                            state.set_pipe_state(
+2289: +                                invocation_id,
+2290: +                                PipeKind::Stderr,
+2291: +                                process.stderr.buffered_len(),
+2292: +                                false,
+2293: +                            );
+2294: +                        });
+2295: +                    }
+2296: +                    return Ok(written);
+2297:                  }
+2298:              }
+2299:          }
+2300:  
+2301:          if capture_cargo_output(true, buf) {
+2302:              return Ok(buf.len());
+2303:          }
+2304:  
+2305:          let id = crate::shell::CURRENT_CONTEXT_ID
+2306:              .with(|id| id.get())
+2307: @@ -2479,174 +2782,493 @@ pub extern "C" fn sysroot_read_file_chunk(vfs_shell_data_ptr: i32, chunk_len: i3
+2308:      crate::vfs::host::bridge::Downloader::sysroot_read_file_chunk(
+2309:          local_buf.as_mut_ptr() as i32,
+2310:          chunk_len,
+2311:      );
+2312:      vfs_shell::memcpy(vfs_shell_data_ptr as *mut u8, local_buf.as_slice());
+2313:  }
+2314:  
+2315:  #[unsafe(no_mangle)]
+2316:  pub extern "C" fn terminal_write(session_id: u32, vfs_shell_data_ptr: i32, data_len: i32) {
+2317:      let data = vfs_shell::get_array(vfs_shell_data_ptr as *const u8, data_len as usize);
+2318: -    if DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed) {
+2319: -        DEBUG_TERMINAL_OUTPUT.lock().extend_from_slice(&data);
+2320: -        return;
+2321: -    }
+2322:      crate::vfs::host::bridge::Terminal::terminal_write(session_id, data.as_ptr() as i32, data_len);
+2323:  }
+2324:  
+2325: +#[cfg(target_os = "wasi")]
+2326: +const WASM_PAGE_BYTES: usize = 64 * 1024;
+2327: +const LSP_RESULT_ALIGNMENT: usize = 8;
+2328: +
+2329: +#[derive(Clone, Copy, Debug)]
+2330: +struct LspResultRegion {
+2331: +    ptr: usize,
+2332: +    capacity: usize,
+2333: +}
+2334: +
+2335: +#[derive(Clone, Copy, Debug)]
+2336: +struct LspResultAllocation {
+2337: +    requested: usize,
+2338: +    capacity: usize,
+2339: +}
+2340: +
+2341: +#[derive(Default)]
+2342: +struct LspResultAllocator {
+2343: +    free_regions: Vec<LspResultRegion>,
+2344: +    allocations: HashMap<usize, LspResultAllocation>,
+2345: +}
+2346: +
+2347: +impl LspResultAllocator {
+2348: +    fn allocate(
+2349: +        &mut self,
+2350: +        requested: usize,
+2351: +        mut grow: impl FnMut(usize) -> Result<LspResultRegion, String>,
+2352: +    ) -> Result<usize, String> {
+2353: +        let capacity = requested
+2354: +            .checked_add(LSP_RESULT_ALIGNMENT - 1)
+2355: +            .map(|value| value & !(LSP_RESULT_ALIGNMENT - 1))
+2356: +            .ok_or_else(|| "LSP result allocation size overflowed".to_string())?;
+2357: +
+2358: +        let index = match self
+2359: +            .free_regions
+2360: +            .iter()
+2361: +            .position(|region| region.capacity >= capacity)
+2362: +        {
+2363: +            Some(index) => index,
+2364: +            None => {
+2365: +                let region = grow(capacity)?;
+2366: +                if region.capacity < capacity {
+2367: +                    return Err("LSP result memory reservation was too small".to_string());
+2368: +                }
+2369: +                self.free_regions.push(region);
+2370: +                self.free_regions.len() - 1
+2371: +            }
+2372: +        };
+2373: +
+2374: +        let region = self.free_regions[index];
+2375: +        let ptr = region.ptr;
+2376: +        if region.capacity == capacity {
+2377: +            self.free_regions.swap_remove(index);
+2378: +        } else {
+2379: +            self.free_regions[index].ptr += capacity;
+2380: +            self.free_regions[index].capacity -= capacity;
+2381: +        }
+2382: +        self.allocations.insert(
+2383: +            ptr,
+2384: +            LspResultAllocation {
+2385: +                requested,
+2386: +                capacity,
+2387: +            },
+2388: +        );
+2389: +        Ok(ptr)
+2390: +    }
+2391: +
+2392: +    fn free(&mut self, ptr: usize, requested: usize) -> bool {
+2393: +        let Some(allocation) = self.allocations.remove(&ptr) else {
+2394: +            return false;
+2395: +        };
+2396: +        if allocation.requested != requested {
+2397: +            self.allocations.insert(ptr, allocation);
+2398: +            return false;
+2399: +        }
+2400: +
+2401: +        self.free_regions.push(LspResultRegion {
+2402: +            ptr,
+2403: +            capacity: allocation.capacity,
+2404: +        });
+2405: +        self.free_regions.sort_unstable_by_key(|region| region.ptr);
+2406: +        let mut merged: Vec<LspResultRegion> = Vec::with_capacity(self.free_regions.len());
+2407: +        for region in self.free_regions.drain(..) {
+2408: +            if let Some(previous) = merged.last_mut()
+2409: +                && previous.ptr.checked_add(previous.capacity) == Some(region.ptr)
+2410: +            {
+2411: +                previous.capacity += region.capacity;
+2412: +                continue;
+2413: +            }
+2414: +            merged.push(region);
+2415: +        }
+2416: +        self.free_regions = merged;
+2417: +        true
+2418: +    }
+2419: +}
+2420: +
+2421: +fn write_lsp_result_bytes(
+2422: +    allocator: &mut LspResultAllocator,
+2423: +    bytes: &[u8],
+2424: +    grow: impl FnMut(usize) -> Result<LspResultRegion, String>,
+2425: +    copy: impl FnOnce(usize, &[u8]),
+2426: +) -> Result<(usize, usize), String> {
+2427: +    if bytes.is_empty() {
+2428: +        return Ok((0, 0));
+2429: +    }
+2430: +    let ptr = allocator.allocate(bytes.len(), grow)?;
+2431: +    copy(ptr, bytes);
+2432: +    Ok((ptr, bytes.len()))
+2433: +}
+2434: +
+2435: +static LSP_RESULT_ALLOCATOR: std::sync::LazyLock<parking_lot::Mutex<LspResultAllocator>> =
+2436: +    std::sync::LazyLock::new(|| parking_lot::Mutex::new(LspResultAllocator::default()));
+2437: +
+2438: +fn claim_lsp_result_pages(
+2439: +    pages: i32,
+2440: +    mut logical_size: impl FnMut() -> i32,
+2441: +    mut reserve: impl FnMut(i32) -> i32,
+2442: +    mut compare_exchange: impl FnMut(i32, i32) -> i32,
+2443: +) -> Result<i32, String> {
+2444: +    if pages <= 0 {
+2445: +        return Err("LSP result memory growth must be positive".to_string());
+2446: +    }
+2447: +
+2448: +    let mut current = logical_size();
+2449: +    current
+2450: +        .checked_add(pages)
+2451: +        .ok_or_else(|| "LSP result memory size overflowed".to_string())?;
+2452: +    // Reserve once before CAS so every published logical range is already backed.
+2453: +    if reserve(pages) < 0 {
+2454: +        return Err("failed to reserve LSP result memory".to_string());
+2455: +    }
+2456: +
+2457: +    loop {
+2458: +        let next = current
+2459: +            .checked_add(pages)
+2460: +            .ok_or_else(|| "LSP result memory size overflowed".to_string())?;
+2461: +        let observed = compare_exchange(current, next);
+2462: +        if observed != current {
+2463: +            current = observed;
+2464: +            continue;
+2465: +        }
+2466: +        return Ok(current);
+2467: +    }
+2468: +}
+2469: +
+2470: +#[cfg(target_os = "wasi")]
+2471: +fn reserve_lsp_result_region(minimum: usize) -> Result<LspResultRegion, String> {
+2472: +    let pages = minimum
+2473: +        .div_ceil(WASM_PAGE_BYTES)
+2474: +        .try_into()
+2475: +        .map_err(|_| "LSP result allocation exceeds wasm32 memory".to_string())?;
+2476: +    let current = claim_lsp_result_pages(
+2477: +        pages,
+2478: +        memory_size::<lsp_opt>,
+2479: +        memory_reserve::<lsp_opt>,
+2480: +        |current, next| __wasip1_vfs_lsp_opt_own_memory_size_compare_exchange(current, next),
+2481: +    )?;
+2482: +    let ptr = usize::try_from(current)
+2483: +        .ok()
+2484: +        .and_then(|page| page.checked_mul(WASM_PAGE_BYTES))
+2485: +        .ok_or_else(|| "LSP result pointer overflowed".to_string())?;
+2486: +    let capacity = usize::try_from(pages)
+2487: +        .ok()
+2488: +        .and_then(|page| page.checked_mul(WASM_PAGE_BYTES))
+2489: +        .ok_or_else(|| "LSP result capacity overflowed".to_string())?;
+2490: +    Ok(LspResultRegion { ptr, capacity })
+2491: +}
+2492: +
+2493: +#[cfg(not(target_os = "wasi"))]
+2494: +fn reserve_lsp_result_region(_minimum: usize) -> Result<LspResultRegion, String> {
+2495: +    Err("LSP result memory is only available on WASI".to_string())
+2496: +}
+2497: +
+2498: +fn encode_lsp_result_abi(ptr: usize, len: usize) -> Result<(i32, i32), String> {
+2499: +    let ptr =
+2500: +        u32::try_from(ptr).map_err(|_| "LSP result pointer exceeds wasm32 memory".to_string())?;
+2501: +    let len = i32::try_from(len).map_err(|_| "LSP result length exceeds i32".to_string())?;
+2502: +    Ok((ptr as i32, len))
+2503: +}
+2504: +
+2505: +fn decode_lsp_result_pointer(ptr: i32) -> usize {
+2506: +    (ptr as u32) as usize
+2507: +}
+2508: +
+2509: +fn allocate_lsp_result(bytes: &[u8]) -> Result<(i32, i32), String> {
+2510: +    let mut allocator = LSP_RESULT_ALLOCATOR.lock();
+2511: +    let (ptr, len) = write_lsp_result_bytes(
+2512: +        &mut allocator,
+2513: +        bytes,
+2514: +        reserve_lsp_result_region,
+2515: +        |ptr, bytes| lsp_opt::memcpy(ptr as *mut u8, bytes),
+2516: +    )?;
+2517: +    match encode_lsp_result_abi(ptr, len) {
+2518: +        Ok(result) => Ok(result),
+2519: +        Err(error) => {
+2520: +            allocator.free(ptr, len);
+2521: +            Err(error)
+2522: +        }
+2523: +    }
+2524: +}
+2525: +
+2526: +#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+2527: +enum LspHostProgram {
+2528: +    Cargo,
+2529: +    Rustc,
+2530: +}
+2531: +
+2532: +fn lsp_host_program(args: &[String]) -> Option<LspHostProgram> {
+2533: +    match args.first().map(String::as_str) {
+2534: +        Some("cargo") => Some(LspHostProgram::Cargo),
+2535: +        Some("rustc") => Some(LspHostProgram::Rustc),
+2536: +        _ => None,
+2537: +    }
+2538: +}
+2539: +
+2540: +#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+2541: +enum HostCargoTracePhase {
+2542: +    Request,
+2543: +    Response(i32),
+2544: +    Reject(i32),
+2545: +}
+2546: +
+2547: +fn format_host_cargo_trace(id: usize, phase: HostCargoTracePhase) -> String {
+2548: +    match phase {
+2549: +        HostCargoTracePhase::Request => format!("host-cargo:request id={id}"),
+2550: +        HostCargoTracePhase::Response(status) => {
+2551: +            format!("host-cargo:response id={id} status={status}")
+2552: +        }
+2553: +        HostCargoTracePhase::Reject(status) => {
+2554: +            format!("host-cargo:reject id={id} status={status}")
+2555: +        }
+2556: +    }
+2557: +}
+2558: +
+2559: +fn format_host_cargo_map(id: usize, ra_trace_id: Option<u32>) -> Option<String> {
+2560: +    ra_trace_id.map(|ra_trace_id| format!("host-cargo:map id={id} ra_id={ra_trace_id}"))
+2561: +}
+2562: +
+2563: +fn request_ra_trace_id(request: &serde_json::Value) -> Option<u32> {
+2564: +    request
+2565: +        .get("trace_id")
+2566: +        .and_then(serde_json::Value::as_u64)
+2567: +        .and_then(|value| u32::try_from(value).ok())
+2568: +}
+2569: +
+2570: +fn trace_host_cargo(id: Option<usize>, phase: HostCargoTracePhase) {
+2571: +    if let Some(id) = id {
+2572: +        debug_trace(&format_host_cargo_trace(id, phase));
+2573: +    }
+2574: +}
+2575: +
+2576: +fn trace_host_run_cargo(id: Option<usize>, phase: &str) {
+2577: +    if let Some(id) = id {
+2578: +        debug_trace(&format!("host-run-cargo:{phase} id={id}"));
+2579: +    }
+2580: +}
+2581: +
+2582:  #[unsafe(no_mangle)]
+2583:  pub extern "C" fn host_run_cargo(
+2584:      req_ptr: i32,
+2585:      req_len: i32,
+2586:      out_stdout_ptr: i32,
+2587:      out_stdout_len: i32,
+2588:      out_stderr_ptr: i32,
+2589:      out_stderr_len: i32,
+2590:      out_status: i32,
+2591:  ) -> i32 {
+2592: +    let debug_invocation_id = next_debug_invocation_id();
+2593: +    trace_host_cargo(debug_invocation_id, HostCargoTracePhase::Request);
+2594:      let req_data = lsp_opt::get_array(req_ptr as *const u8, req_len as usize);
+2595:      let request: serde_json::Value = match serde_json::from_slice(&req_data) {
+2596:          Ok(request) => request,
+2597:          Err(error) => {
+2598:              let stderr = format!("invalid cargo request: {error}");
+2599: -            write_cargo_result(
+2600: +            return write_cargo_result(
+2601: +                debug_invocation_id,
+2602:                  Vec::new(),
+2603:                  stderr.into_bytes(),
+2604:                  1,
+2605:                  out_stdout_ptr,
+2606:                  out_stdout_len,
+2607:                  out_stderr_ptr,
+2608:                  out_stderr_len,
+2609:                  out_status,
+2610:              );
+2611: -            return 0;
+2612:          }
+2613:      };
+2614: +    let ra_trace_id = request_ra_trace_id(&request);
+2615: +    if let Some(debug_invocation_id) = debug_invocation_id
+2616: +        && let Some(mapping) = format_host_cargo_map(debug_invocation_id, ra_trace_id)
+2617: +    {
+2618: +        debug_trace(&mapping);
+2619: +    }
+2620:  
+2621:      let Some(args) = request.get("args").and_then(serde_json::Value::as_array) else {
+2622: -        write_cargo_result(
+2623: +        return write_cargo_result(
+2624: +            debug_invocation_id,
+2625:              Vec::new(),
+2626:              b"cargo request is missing args".to_vec(),
+2627:              1,
+2628:              out_stdout_ptr,
+2629:              out_stdout_len,
+2630:              out_stderr_ptr,
+2631:              out_stderr_len,
+2632:              out_status,
+2633:          );
+2634: -        return 0;
+2635:      };
+2636:      let args = args
+2637:          .iter()
+2638:          .filter_map(serde_json::Value::as_str)
+2639:          .map(str::to_owned)
+2640:          .collect::<Vec<_>>();
+2641: -
+2642: +    let Some(program) = lsp_host_program(&args) else {
+2643: +        return write_cargo_result(
+2644: +            debug_invocation_id,
+2645: +            Vec::new(),
+2646: +            format!(
+2647: +                "unsupported LSP host program: {}",
+2648: +                args.first().map(String::as_str).unwrap_or("missing")
+2649: +            )
+2650: +            .into_bytes(),
+2651: +            127,
+2652: +            out_stdout_ptr,
+2653: +            out_stdout_len,
+2654: +            out_stderr_ptr,
+2655: +            out_stderr_len,
+2656: +            out_status,
+2657: +        );
+2658: +    };
+2659:      let _run_guard = CARGO_RUN_LOCK.lock();
+2660:      let old_env = {
+2661:          let mut env = VIRTUAL_SHELL_ENV.lock();
+2662:          let old = env.env.clone();
+2663:          if let Some(envs) = request.get("envs").and_then(serde_json::Value::as_object) {
+2664:              for (key, value) in envs {
+2665:                  let Some(value) = value.as_str() else {
+2666:                      continue;
+2667:                  };
+2668:                  env.env
+2669:                      .retain(|entry| !entry.starts_with(&format!("{key}=")));
+2670:                  env.env.push(format!("{key}={value}"));
+2671:              }
+2672:          }
+2673:          old
+2674:      };
+2675: -    let old_cwd = std::env::current_dir().ok();
+2676: -    if let Some(cwd) = request.get("cwd").and_then(serde_json::Value::as_str) {
+2677: -        if let Err(error) = std::env::set_current_dir(cwd) {
+2678: -            VIRTUAL_SHELL_ENV.lock().env = old_env;
+2679: -            write_cargo_result(
+2680: -                Vec::new(),
+2681: -                format!("failed to set cwd `{cwd}`: {error}").into_bytes(),
+2682: -                1,
+2683: -                out_stdout_ptr,
+2684: -                out_stdout_len,
+2685: -                out_stderr_ptr,
+2686: -                out_stderr_len,
+2687: -                out_status,
+2688: -            );
+2689: -            return 0;
+2690: -        }
+2691: -    }
+2692: -
+2693: -    command::set_cargo_opt_args(&args);
+2694: -    CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
+2695: -    run_cargo();
+2696: -    let output = CARGO_OUTPUT
+2697: -        .with(|output| output.borrow_mut().take())
+2698: -        .unwrap_or_default();
+2699: -    let status = CARGO_EXIT_STATUS.load(Ordering::SeqCst);
+2700: +    let (output, status) = match program {
+2701: +        LspHostProgram::Cargo => {
+2702: +            let old_cwd = std::env::current_dir().ok();
+2703: +            if let Some(cwd) = request.get("cwd").and_then(serde_json::Value::as_str)
+2704: +                && let Err(error) = std::env::set_current_dir(cwd)
+2705: +            {
+2706: +                VIRTUAL_SHELL_ENV.lock().env = old_env;
+2707: +                return write_cargo_result(
+2708: +                    debug_invocation_id,
+2709: +                    Vec::new(),
+2710: +                    format!("failed to set cwd `{cwd}`: {error}").into_bytes(),
+2711: +                    1,
+2712: +                    out_stdout_ptr,
+2713: +                    out_stdout_len,
+2714: +                    out_stderr_ptr,
+2715: +                    out_stderr_len,
+2716: +                    out_status,
+2717: +                );
+2718: +            }
+2719:  
+2720: -    if let Some(old_cwd) = old_cwd {
+2721: -        let _ = std::env::set_current_dir(old_cwd);
+2722: -    }
+2723: +            command::set_cargo_opt_args(&args);
+2724: +            CARGO_OUTPUT.with(|output| *output.borrow_mut() = Some(CargoOutput::default()));
+2725: +            trace_host_run_cargo(debug_invocation_id, "cargo:run_cargo");
+2726: +            run_cargo();
+2727: +            trace_host_run_cargo(debug_invocation_id, "cargo:run_cargo completed");
+2728: +            let output = CARGO_OUTPUT
+2729: +                .with(|output| output.borrow_mut().take())
+2730: +                .unwrap_or_default();
+2731: +            let status = CARGO_EXIT_STATUS.load(Ordering::SeqCst);
+2732: +            if let Some(old_cwd) = old_cwd {
+2733: +                let _ = std::env::set_current_dir(old_cwd);
+2734: +            }
+2735: +            (output, status)
+2736: +        }
+2737: +        LspHostProgram::Rustc => {
+2738: +            trace_host_run_cargo(debug_invocation_id, "rustc:waiting for RUSTC_RUN_LOCK");
+2739: +            let _rustc_guard = RUSTC_RUN_LOCK.lock();
+2740: +            trace_host_run_cargo(debug_invocation_id, "rustc:acquired RUSTC_RUN_LOCK");
+2741: +            let mut args = args;
+2742: +            if !args
+2743: +                .iter()
+2744: +                .skip(1)
+2745: +                .any(|arg| arg == "--sysroot" || arg.starts_with("--sysroot="))
+2746: +            {
+2747: +                args.push("--sysroot".to_string());
+2748: +                args.push("/sysroot".to_string());
+2749: +            }
+2750: +            let env = VIRTUAL_SHELL_ENV.lock().env.clone();
+2751: +            let cwd = request
+2752: +                .get("cwd")
+2753: +                .and_then(serde_json::Value::as_str)
+2754: +                .unwrap_or_default()
+2755: +                .as_bytes()
+2756: +                .to_vec();
+2757: +            run_rustc_invocation(env, args, cwd, Vec::new(), run_rustc)
+2758: +        }
+2759: +    };
+2760:      VIRTUAL_SHELL_ENV.lock().env = old_env;
+2761:  
+2762:      write_cargo_result(
+2763: +        debug_invocation_id,
+2764:          output.stdout,
+2765:          output.stderr,
+2766:          status,
+2767:          out_stdout_ptr,
+2768:          out_stdout_len,
+2769:          out_stderr_ptr,
+2770:          out_stderr_len,
+2771:          out_status,
+2772: -    );
+2773: -    0
+2774: +    )
+2775:  }
+2776:  
+2777:  #[unsafe(no_mangle)]
+2778:  pub extern "C" fn host_free_memory(ptr: i32, len: i32) {
+2779:      if ptr == 0 || len <= 0 {
+2780:          return;
+2781:      }
+2782: -    let slice = std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize);
+2783: -    unsafe {
+2784: -        drop(Box::from_raw(slice));
+2785: -    }
+2786: +    LSP_RESULT_ALLOCATOR
+2787: +        .lock()
+2788: +        .free(decode_lsp_result_pointer(ptr), len as usize);
+2789:  }
+2790:  
+2791:  #[allow(clippy::too_many_arguments)]
+2792:  fn write_cargo_result(
+2793: +    debug_invocation_id: Option<usize>,
+2794:      stdout: Vec<u8>,
+2795:      stderr: Vec<u8>,
+2796:      status: i32,
+2797:      out_stdout_ptr: i32,
+2798:      out_stdout_len: i32,
+2799:      out_stderr_ptr: i32,
+2800:      out_stderr_len: i32,
+2801:      out_status: i32,
+2802: -) {
+2803: -    fn into_raw(data: Vec<u8>) -> (i32, i32) {
+2804: -        if data.is_empty() {
+2805: -            return (0, 0);
+2806: +) -> i32 {
+2807: +    crate::debug_trace(&format!(
+2808: +        "write_cargo_result: stdout={} bytes, stderr={} bytes, status={}",
+2809: +        stdout.len(),
+2810: +        stderr.len(),
+2811: +        status
+2812: +    ));
+2813: +    let (stdout_ptr, stdout_len) = match allocate_lsp_result(&stdout) {
+2814: +        Ok(result) => result,
+2815: +        Err(_) => {
+2816: +            trace_host_cargo(debug_invocation_id, HostCargoTracePhase::Reject(1));
+2817: +            crate::debug_trace("write_cargo_result: allocate stdout failed");
+2818: +            return 1;
+2819:          }
+2820: -        let data = data.into_boxed_slice();
+2821: -        let len = data.len() as i32;
+2822: -        let ptr = Box::into_raw(data) as *mut u8 as i32;
+2823: -        (ptr, len)
+2824: -    }
+2825: -
+2826: -    let (stdout_ptr, stdout_len) = into_raw(stdout);
+2827: -    let (stderr_ptr, stderr_len) = into_raw(stderr);
+2828: +    };
+2829: +    let (stderr_ptr, stderr_len) = match allocate_lsp_result(&stderr) {
+2830: +        Ok(result) => result,
+2831: +        Err(_) => {
+2832: +            LSP_RESULT_ALLOCATOR
+2833: +                .lock()
+2834: +                .free(decode_lsp_result_pointer(stdout_ptr), stdout_len as usize);
+2835: +            trace_host_cargo(debug_invocation_id, HostCargoTracePhase::Reject(1));
+2836: +            return 1;
+2837: +        }
+2838: +    };
+2839:      lsp_opt::memcpy(out_stdout_ptr as *mut u8, &stdout_ptr.to_ne_bytes());
+2840:      lsp_opt::memcpy(out_stdout_len as *mut u8, &stdout_len.to_ne_bytes());
+2841:      lsp_opt::memcpy(out_stderr_ptr as *mut u8, &stderr_ptr.to_ne_bytes());
+2842:      lsp_opt::memcpy(out_stderr_len as *mut u8, &stderr_len.to_ne_bytes());
+2843:      lsp_opt::memcpy(out_status as *mut u8, &status.to_ne_bytes());
+2844: +    trace_host_cargo(debug_invocation_id, HostCargoTracePhase::Response(status));
+2845: +    0
+2846:  }
+2847:  
+2848:  #[cfg(test)]
+2849:  mod cwd_aware_fs_tests {
+2850:      use super::*;
+2851:      use std::sync::{Arc, Barrier, LazyLock, mpsc};
+2852:      use std::time::{Duration, Instant};
+2853:      use wasi_virt_layer::memory::{WasmAccessName, WasmAccessRaw};
+2854:  
+2855:      macro_rules! direct_memory_wasm {
+2856: @@ -3735,37 +4357,76 @@ mod cwd_aware_fs_tests {
+2857:          assert!(!write_was_available);
+2858:          assert!(!drop_finished_early);
+2859:          assert!(!fixture.fs.fd_map.contains_key(&cwd_fd));
+2860:      }
+2861:  }
+2862:  
+2863:  #[cfg(test)]
+2864:  mod invocation_state_tests {
+2865:      use super::*;
+2866:  
+2867: +    #[cfg(not(target_family = "wasm"))]
+2868: +    #[unsafe(export_name = "vfs_shell_alloc_buf")]
+2869: +    extern "C" fn native_test_vfs_shell_alloc_buf(_len: u32) -> u32 {
+2870: +        0
+2871: +    }
+2872: +
+2873: +    #[cfg(not(target_family = "wasm"))]
+2874: +    #[unsafe(export_name = "vfs_shell_free_buf")]
+2875: +    extern "C" fn native_test_vfs_shell_free_buf(_ptr: u32, _len: u32) {}
+2876: +
+2877: +    #[cfg(not(target_family = "wasm"))]
+2878: +    #[unsafe(export_name = "vfs_shell_write_stdout")]
+2879: +    extern "C" fn native_test_vfs_shell_write_stdout(_id: u32, _ptr: u32, len: u32) -> u32 {
+2880: +        len
+2881: +    }
+2882: +
+2883: +    #[cfg(not(target_family = "wasm"))]
+2884: +    #[unsafe(export_name = "vfs_shell_write_stderr")]
+2885: +    extern "C" fn native_test_vfs_shell_write_stderr(_id: u32, _ptr: u32, len: u32) -> u32 {
+2886: +        len
+2887: +    }
+2888: +
+2889:      struct ChildProcessStdioReset {
+2890:          previous: Option<ChildProcessStdio>,
+2891:      }
+2892:  
+2893:      impl ChildProcessStdioReset {
+2894:          fn install(current: Option<ChildProcessStdio>) -> Self {
+2895:              let previous = std::mem::replace(&mut *CHILD_PROCESS_STDIO.lock(), current);
+2896:              Self { previous }
+2897:          }
+2898:      }
+2899:  
+2900:      impl Drop for ChildProcessStdioReset {
+2901:          fn drop(&mut self) {
+2902:              *CHILD_PROCESS_STDIO.lock() = self.previous.take();
+2903:          }
+2904:      }
+2905:  
+2906: +    struct DebugCaptureReset;
+2907: +
+2908: +    impl DebugCaptureReset {
+2909: +        fn install() -> Self {
+2910: +            set_debug_terminal_capture(false, Some("1"));
+2911: +            *DEBUG_TERMINAL_OUTPUT.lock() = DebugState::new(64 * 1024);
+2912: +            Self
+2913: +        }
+2914: +    }
+2915: +
+2916: +    impl Drop for DebugCaptureReset {
+2917: +        fn drop(&mut self) {
+2918: +            set_debug_terminal_capture(false, Some("1"));
+2919: +            *DEBUG_TERMINAL_OUTPUT.lock() = DebugState::new(64 * 1024);
+2920: +        }
+2921: +    }
+2922: +
+2923:      fn install_sentinel_invocation_state(
+2924:          env: Vec<String>,
+2925:          args: Vec<String>,
+2926:          stdout: Vec<u8>,
+2927:      ) -> RustcInvocationState {
+2928:          let state = RustcInvocationState::new(env, args);
+2929:          CARGO_OUTPUT.with(|output| {
+2930:              let mut output = output.borrow_mut();
+2931:              let output = output.as_mut().unwrap();
+2932:              output.stdout = stdout;
+2933: @@ -3826,20 +4487,21 @@ mod invocation_state_tests {
+2934:          let sentinel_cwd = b"/outer".to_vec();
+2935:  
+2936:          let _outer_state = install_sentinel_invocation_state(
+2937:              sentinel_env.clone(),
+2938:              sentinel_args.clone(),
+2939:              sentinel_stdout.clone(),
+2940:          );
+2941:          let _outer_child = ChildProcessStdioReset::install(Some(ChildProcessStdio::new(
+2942:              sentinel_cwd.clone(),
+2943:              Vec::new(),
+2944: +            None,
+2945:          )));
+2946:  
+2947:          let stderr = bounded_rustc_cwd_error(&sentinel_cwd, &"x".repeat(MAX_CHILD_ERROR_BYTES));
+2948:  
+2949:          assert_eq!(RUSTC_CWD_ERROR_STATUS, 1);
+2950:          assert_eq!(stderr.len(), MAX_CHILD_ERROR_BYTES);
+2951:          assert_eq!(VIRTUAL_SHELL_ENV.lock().env, sentinel_env);
+2952:          assert_eq!(command::VIRTUAL_ARGS.lock().args, sentinel_args);
+2953:          CARGO_OUTPUT.with(|output| {
+2954:              assert_eq!(output.borrow().as_ref().unwrap().stdout, sentinel_stdout);
+2955: @@ -3895,21 +4557,21 @@ mod invocation_state_tests {
+2956:          let sentinel_stdout = b"outer-output".to_vec();
+2957:          let sentinel_cwd = b"/outer".to_vec();
+2958:          let child_stdout = b"child-output".to_vec();
+2959:  
+2960:          let _outer_state = install_sentinel_invocation_state(
+2961:              sentinel_env.clone(),
+2962:              sentinel_args.clone(),
+2963:              sentinel_stdout.clone(),
+2964:          );
+2965:          let mut sentinel_child =
+2966: -            ChildProcessStdio::new(sentinel_cwd.clone(), b"outer-input".to_vec());
+2967: +            ChildProcessStdio::new(sentinel_cwd.clone(), b"outer-input".to_vec(), None);
+2968:          sentinel_child.stdout.write(&child_stdout);
+2969:          sentinel_child.stderr.write(b"child-error");
+2970:          let _outer_child = ChildProcessStdioReset::install(Some(sentinel_child));
+2971:  
+2972:          let replacement_seen = Cell::new(false);
+2973:          let (panic_output, status) = run_rustc_invocation(
+2974:              vec!["INNER_ENV=1".to_string()],
+2975:              vec!["inner-rustc".to_string()],
+2976:              b"/inner".to_vec(),
+2977:              b"inner-input".to_vec(),
+2978: @@ -4022,20 +4684,76 @@ mod invocation_state_tests {
+2979:              panic_output.stderr,
+2980:              b"embedded rustc panicked: rustc invocation failed without prior child stdio"
+2981:          );
+2982:          assert_eq!(VIRTUAL_SHELL_ENV.lock().env, sentinel_env);
+2983:          assert_eq!(command::VIRTUAL_ARGS.lock().args, sentinel_args);
+2984:          CARGO_OUTPUT.with(|output| {
+2985:              assert_eq!(output.borrow().as_ref().unwrap().stdout, sentinel_stdout);
+2986:          });
+2987:          assert!(CHILD_PROCESS_STDIO.lock().is_none());
+2988:      }
+2989: +
+2990: +    #[test]
+2991: +    fn invocation_panic_emits_drained_once_before_stdio_is_restored() {
+2992: +        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+2993: +        let _debug_capture_reset = DebugCaptureReset::install();
+2994: +        let _outer_child = ChildProcessStdioReset::install(None);
+2995: +        set_debug_terminal_capture(true, Some("1"));
+2996: +
+2997: +        let (_, status) =
+2998: +            run_rustc_invocation(Vec::new(), Vec::new(), Vec::new(), Vec::new(), || {
+2999: +                let mut process = CHILD_PROCESS_STDIO.lock();
+3000: +                let process = process.as_mut().expect("child stdio must be installed");
+3001: +                process.stdout.write(b"panic stdout");
+3002: +                process.stderr.write(b"panic stderr");
+3003: +                panic!("intentional stdio lifecycle panic");
+3004: +            });
+3005: +
+3006: +        assert_eq!(status, RUSTC_PANIC_STATUS);
+3007: +        let events = String::from_utf8(DEBUG_TERMINAL_OUTPUT.lock().drain(usize::MAX))
+3008: +            .expect("debug events must be valid UTF-8");
+3009: +
+3010: +        let drained = events.find("stdio:drained").expect("missing drained event");
+3011: +        let restored = events
+3012: +            .find("stdio:restored")
+3013: +            .expect("missing restored event");
+3014: +        assert!(drained < restored);
+3015: +        assert_eq!(events.matches("stdio:drained").count(), 1);
+3016: +    }
+3017: +
+3018: +    #[test]
+3019: +    fn debug_capture_requires_exact_guest_trace_value() {
+3020: +        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+3021: +        let _debug_capture_reset = DebugCaptureReset::install();
+3022: +
+3023: +        set_debug_terminal_capture(true, None);
+3024: +        debug_trace("command:return");
+3025: +        assert!(!DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed));
+3026: +        assert_eq!(DEBUG_TERMINAL_OUTPUT.lock().buffered_len(), 0);
+3027: +
+3028: +        set_debug_terminal_capture(true, Some("true"));
+3029: +        debug_trace("command:return");
+3030: +        assert!(!DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed));
+3031: +        assert_eq!(DEBUG_TERMINAL_OUTPUT.lock().buffered_len(), 0);
+3032: +
+3033: +        set_debug_terminal_capture(true, Some("1"));
+3034: +        debug_trace("command:return");
+3035: +        with_debug_state(|state| state.cargo_enter(77));
+3036: +        assert!(DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed));
+3037: +
+3038: +        set_debug_terminal_capture(false, Some("1"));
+3039: +        debug_trace("command:return");
+3040: +        assert!(!DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed));
+3041: +        let state = DEBUG_TERMINAL_OUTPUT.lock();
+3042: +        assert_eq!(state.buffered_len(), 0);
+3043: +        assert!(state.snapshot_line_trace_disabled().contains("cargo=none"));
+3044: +    }
+3045:  }
+3046:  
+3047:  #[cfg(test)]
+3048:  mod http_tests {
+3049:      use super::{
+3050:          CHILD_STATE_COMPLETED, CHILD_STATE_RUNNING, CHILD_STATE_UPLOADING, DEBUG_TERMINAL_OUTPUT,
+3051:          Guest, MAX_CHILD_ERROR_BYTES, MAX_CHILD_MODULE_BYTES, RequestGuard, Wit,
+3052:          allocate_cargo_owned, bounded_child_result, checked_child_module_size,
+3053:          decode_cargo_spawn_list, finish_child_request, format_http_response,
+3054:          recover_child_process_with, resolve_child_program, should_import_recovered_child,
+3055: @@ -4255,10 +4973,460 @@ mod http_tests {
+3056:              assert_eq!(end_calls.get(), 0, "state {state} was acknowledged");
+3057:              assert!(active.get(), "state {state} allowed a new request");
+3058:              let start_new_request = || !active.get();
+3059:              assert!(
+3060:                  !start_new_request(),
+3061:                  "state {state} started a new request before recovery"
+3062:              );
+3063:          }
+3064:      }
+3065:  }
+3066: +
+3067: +#[cfg(test)]
+3068: +mod lsp_cargo_result_tests {
+3069: +    use super::{
+3070: +        DEBUG_RA_BOUNDARY_AFTER_FIRST_GATE, DEBUG_RA_BOUNDARY_DROPPED, DEBUG_TERMINAL_CAPTURE,
+3071: +        DEBUG_TERMINAL_OUTPUT, HostCargoTracePhase, LspHostProgram, LspResultAllocator,
+3072: +        LspResultRegion, RUSTC_RUN_LOCK, RaBoundaryStage, claim_lsp_result_pages,
+3073: +        decode_lsp_result_pointer, encode_lsp_result_abi, format_host_cargo_map,
+3074: +        format_host_cargo_trace, format_ra_boundary, host_trace_boundary, lsp_host_program,
+3075: +        request_ra_trace_id, set_debug_terminal_capture, write_lsp_result_bytes,
+3076: +    };
+3077: +    use std::cell::{Cell, RefCell};
+3078: +    use std::sync::{
+3079: +        Arc, Barrier,
+3080: +        atomic::{AtomicI32, AtomicUsize, Ordering},
+3081: +    };
+3082: +
+3083: +    struct RaBoundaryGateReset;
+3084: +
+3085: +    impl Drop for RaBoundaryGateReset {
+3086: +        fn drop(&mut self) {
+3087: +            *DEBUG_RA_BOUNDARY_AFTER_FIRST_GATE.lock() = None;
+3088: +        }
+3089: +    }
+3090: +
+3091: +    #[test]
+3092: +    fn lsp_result_reservation_reserves_once_across_logical_contention() {
+3093: +        let attempts = Cell::new(0);
+3094: +        let reservations = RefCell::new(Vec::new());
+3095: +        let claims = RefCell::new(Vec::new());
+3096: +
+3097: +        let start = claim_lsp_result_pages(
+3098: +            2,
+3099: +            || 10,
+3100: +            |pages| {
+3101: +                reservations.borrow_mut().push(pages);
+3102: +                0
+3103: +            },
+3104: +            |current, next| {
+3105: +                claims.borrow_mut().push((current, next));
+3106: +                let attempt = attempts.get();
+3107: +                attempts.set(attempt + 1);
+3108: +                if attempt == 0 { 12 } else { current }
+3109: +            },
+3110: +        )
+3111: +        .expect("the second logical claim should win");
+3112: +
+3113: +        assert_eq!(start, 12);
+3114: +        assert_eq!(&*claims.borrow(), &[(10, 12), (12, 14)]);
+3115: +        assert_eq!(&*reservations.borrow(), &[2]);
+3116: +    }
+3117: +
+3118: +    #[test]
+3119: +    fn lsp_result_reservation_failure_publishes_no_logical_region() {
+3120: +        let reservations = Cell::new(0);
+3121: +        let claims = RefCell::new(Vec::new());
+3122: +        let result = claim_lsp_result_pages(
+3123: +            2,
+3124: +            || 10,
+3125: +            |_| {
+3126: +                reservations.set(reservations.get() + 1);
+3127: +                -1
+3128: +            },
+3129: +            |current, next| {
+3130: +                claims.borrow_mut().push((current, next));
+3131: +                current
+3132: +            },
+3133: +        );
+3134: +
+3135: +        assert_eq!(
+3136: +            result,
+3137: +            Err("failed to reserve LSP result memory".to_string())
+3138: +        );
+3139: +        assert_eq!(reservations.get(), 1);
+3140: +        assert!(claims.borrow().is_empty());
+3141: +    }
+3142: +
+3143: +    #[test]
+3144: +    fn concurrent_lsp_result_reservations_are_distinct_and_fully_backed() {
+3145: +        let logical_pages = Arc::new(AtomicI32::new(10));
+3146: +        let physical_pages = Arc::new(AtomicI32::new(10));
+3147: +        let reservation_calls = Arc::new(AtomicUsize::new(0));
+3148: +        let claim_barrier = Arc::new(Barrier::new(2));
+3149: +
+3150: +        let workers = (0..2)
+3151: +            .map(|_| {
+3152: +                let logical_pages = Arc::clone(&logical_pages);
+3153: +                let physical_pages = Arc::clone(&physical_pages);
+3154: +                let reservation_calls = Arc::clone(&reservation_calls);
+3155: +                let claim_barrier = Arc::clone(&claim_barrier);
+3156: +                std::thread::spawn(move || {
+3157: +                    claim_lsp_result_pages(
+3158: +                        2,
+3159: +                        || {
+3160: +                            let current = logical_pages.load(Ordering::SeqCst);
+3161: +                            claim_barrier.wait();
+3162: +                            current
+3163: +                        },
+3164: +                        |pages| {
+3165: +                            reservation_calls.fetch_add(1, Ordering::SeqCst);
+3166: +                            physical_pages.fetch_add(pages, Ordering::SeqCst);
+3167: +                            1
+3168: +                        },
+3169: +                        |current, next| {
+3170: +                            assert!(physical_pages.load(Ordering::SeqCst) >= next);
+3171: +                            logical_pages
+3172: +                                .compare_exchange(current, next, Ordering::SeqCst, Ordering::SeqCst)
+3173: +                                .unwrap_or_else(|observed| observed)
+3174: +                        },
+3175: +                    )
+3176: +                })
+3177: +            })
+3178: +            .collect::<Vec<_>>();
+3179: +
+3180: +        let mut starts = workers
+3181: +            .into_iter()
+3182: +            .map(|worker| worker.join().unwrap().unwrap())
+3183: +            .collect::<Vec<_>>();
+3184: +        starts.sort_unstable();
+3185: +
+3186: +        assert_eq!(starts, [10, 12]);
+3187: +        assert_eq!(reservation_calls.load(Ordering::SeqCst), 2);
+3188: +        assert_eq!(physical_pages.load(Ordering::SeqCst), 14);
+3189: +        assert_eq!(logical_pages.load(Ordering::SeqCst), 14);
+3190: +        assert!(starts.iter().all(|start| start + 2 <= 14));
+3191: +    }
+3192: +
+3193: +    #[test]
+3194: +    fn cargo_result_bytes_are_returned_from_lsp_memory() {
+3195: +        let rustc_version = b"rustc 1.95.0 (59807616e 2026-04-14)\n";
+3196: +        let target_memory = RefCell::new(vec![0u8; 32]);
+3197: +        let mut allocator = LspResultAllocator::default();
+3198: +
+3199: +        let (ptr, len) = write_lsp_result_bytes(
+3200: +            &mut allocator,
+3201: +            rustc_version,
+3202: +            |minimum| {
+3203: +                let mut memory = target_memory.borrow_mut();
+3204: +                let ptr = memory.len();
+3205: +                let capacity = minimum.max(64);
+3206: +                memory.resize(ptr + capacity, 0);
+3207: +                Ok(LspResultRegion { ptr, capacity })
+3208: +            },
+3209: +            |ptr, bytes| {
+3210: +                target_memory.borrow_mut()[ptr..ptr + bytes.len()].copy_from_slice(bytes);
+3211: +            },
+3212: +        )
+3213: +        .expect("rustc version should fit in target memory");
+3214: +
+3215: +        assert_eq!(len, rustc_version.len());
+3216: +        assert_eq!(&target_memory.borrow()[ptr..ptr + len], rustc_version);
+3217: +
+3218: +        assert!(allocator.free(ptr, len));
+3219: +        let (reused_ptr, reused_len) = write_lsp_result_bytes(
+3220: +            &mut allocator,
+3221: +            b"cargo 1.95.0\n",
+3222: +            |_| panic!("freed target memory was not reused"),
+3223: +            |ptr, bytes| {
+3224: +                target_memory.borrow_mut()[ptr..ptr + bytes.len()].copy_from_slice(bytes);
+3225: +            },
+3226: +        )
+3227: +        .expect("freed target memory should be reusable");
+3228: +        assert_eq!(reused_ptr, ptr);
+3229: +        assert_eq!(
+3230: +            &target_memory.borrow()[reused_ptr..reused_ptr + reused_len],
+3231: +            b"cargo 1.95.0\n"
+3232: +        );
+3233: +    }
+3234: +
+3235: +    #[test]
+3236: +    fn rustc_requests_are_dispatched_to_embedded_rustc() {
+3237: +        assert_eq!(
+3238: +            lsp_host_program(&["rustc".to_string(), "--version".to_string()]),
+3239: +            Some(LspHostProgram::Rustc)
+3240: +        );
+3241: +        assert_eq!(
+3242: +            lsp_host_program(&["cargo".to_string(), "metadata".to_string()]),
+3243: +            Some(LspHostProgram::Cargo)
+3244: +        );
+3245: +    }
+3246: +
+3247: +    #[test]
+3248: +    fn four_host_cargo_calls_have_distinct_paired_trace_ids() {
+3249: +        let ids = [31, 32, 33, 34];
+3250: +        let pairs = ids.map(|id| {
+3251: +            (
+3252: +                format_host_cargo_trace(id, HostCargoTracePhase::Request),
+3253: +                format_host_cargo_trace(id, HostCargoTracePhase::Response(0)),
+3254: +            )
+3255: +        });
+3256: +
+3257: +        for ((request, response), id) in pairs.iter().zip(ids) {
+3258: +            assert_eq!(request, &format!("host-cargo:request id={id}"));
+3259: +            assert_eq!(response, &format!("host-cargo:response id={id} status=0"));
+3260: +        }
+3261: +        assert_eq!(
+3262: +            format_host_cargo_trace(35, HostCargoTracePhase::Reject(1)),
+3263: +            "host-cargo:reject id=35 status=1"
+3264: +        );
+3265: +        assert_eq!(
+3266: +            ids.into_iter()
+3267: +                .collect::<std::collections::HashSet<_>>()
+3268: +                .len(),
+3269: +            4
+3270: +        );
+3271: +    }
+3272: +
+3273: +    #[test]
+3274: +    fn ra_boundary_formats_fixed_stages_and_optional_host_mapping() {
+3275: +        assert_eq!(
+3276: +            format_ra_boundary(9, RaBoundaryStage::FfiReturn as u32, 0, 2106),
+3277: +            "[ra-wasi-boundary] id=9 stage=ffi:return value_1=0 value_2=2106",
+3278: +        );
+3279: +        assert_eq!(
+3280: +            format_ra_boundary(9, u32::MAX, 1, 2),
+3281: +            "[ra-wasi-boundary] id=9 stage=unknown value_1=1 value_2=2",
+3282: +        );
+3283: +        assert_eq!(
+3284: +            format_host_cargo_map(7, Some(9)),
+3285: +            Some("host-cargo:map id=7 ra_id=9".into())
+3286: +        );
+3287: +        assert_eq!(format_host_cargo_map(7, None), None);
+3288: +    }
+3289: +
+3290: +    #[test]
+3291: +    fn ra_boundary_formats_all_fixed_stage_labels() {
+3292: +        let stages = [
+3293: +            (RaBoundaryStage::FfiEnter, "ffi:enter"),
+3294: +            (RaBoundaryStage::FfiReturn, "ffi:return"),
+3295: +            (RaBoundaryStage::BuffersBorrowed, "buffers:borrowed"),
+3296: +            (RaBoundaryStage::BuffersCopyEnter, "buffers:copy-enter"),
+3297: +            (RaBoundaryStage::BuffersCopied, "buffers:copied"),
+3298: +            (RaBoundaryStage::BuffersFreeEnter, "buffers:free-enter"),
+3299: +            (RaBoundaryStage::BuffersFreed, "buffers:freed"),
+3300: +            (RaBoundaryStage::InvokeReturn, "invoke:return"),
+3301: +            (
+3302: +                RaBoundaryStage::MetadataInvokeEnter,
+3303: +                "metadata:invoke-enter",
+3304: +            ),
+3305: +            (
+3306: +                RaBoundaryStage::MetadataInvokeReturn,
+3307: +                "metadata:invoke-return",
+3308: +            ),
+3309: +            (RaBoundaryStage::MetadataUtf8Enter, "metadata:utf8-enter"),
+3310: +            (RaBoundaryStage::MetadataUtf8Return, "metadata:utf8-return"),
+3311: +            (RaBoundaryStage::MetadataParseEnter, "metadata:parse-enter"),
+3312: +            (
+3313: +                RaBoundaryStage::MetadataParseReturn,
+3314: +                "metadata:parse-return",
+3315: +            ),
+3316: +            (RaBoundaryStage::MetadataFinished, "metadata:finished"),
+3317: +            (
+3318: +                RaBoundaryStage::WorkspaceCargoSpawnEnter,
+3319: +                "workspace:cargo-spawn-enter",
+3320: +            ),
+3321: +            (
+3322: +                RaBoundaryStage::WorkspaceCargoSpawnReturn,
+3323: +                "workspace:cargo-spawn-return",
+3324: +            ),
+3325: +            (
+3326: +                RaBoundaryStage::WorkspaceCargoJoinEnter,
+3327: +                "workspace:cargo-join-enter",
+3328: +            ),
+3329: +            (
+3330: +                RaBoundaryStage::WorkspaceCargoJoinReturn,
+3331: +                "workspace:cargo-join-return",
+3332: +            ),
+3333: +            (
+3334: +                RaBoundaryStage::WorkspaceCargoJoinError,
+3335: +                "workspace:cargo-join-error",
+3336: +            ),
+3337: +            (
+3338: +                RaBoundaryStage::WorkspaceCargoMapReturn,
+3339: +                "workspace:cargo-map-return",
+3340: +            ),
+3341: +            (
+3342: +                RaBoundaryStage::WorkspaceLoadReturn,
+3343: +                "workspace:load-return",
+3344: +            ),
+3345: +            (RaBoundaryStage::ScopeUnwind, "scope:unwind"),
+3346: +            (
+3347: +                RaBoundaryStage::WorkspaceInlineTaskEnter,
+3348: +                "workspace:inline-task-enter",
+3349: +            ),
+3350: +            (
+3351: +                RaBoundaryStage::WorkspaceInlineTaskReturn,
+3352: +                "workspace:inline-task-return",
+3353: +            ),
+3354: +            (
+3355: +                RaBoundaryStage::WorkspaceInlineJoinEnter,
+3356: +                "workspace:inline-join-enter",
+3357: +            ),
+3358: +            (
+3359: +                RaBoundaryStage::WorkspaceInlineJoinReturn,
+3360: +                "workspace:inline-join-return",
+3361: +            ),
+3362: +            (
+3363: +                RaBoundaryStage::WorkspaceInlineJoinError,
+3364: +                "workspace:inline-join-error",
+3365: +            ),
+3366: +            (
+3367: +                RaBoundaryStage::WorkspaceInlineLoadReturn,
+3368: +                "workspace:inline-load-return",
+3369: +            ),
+3370: +        ];
+3371: +        assert_eq!(stages.len(), 29);
+3372: +
+3373: +        for (stage, label) in stages {
+3374: +            assert_eq!(
+3375: +                format_ra_boundary(9, stage as u32, 1, 2),
+3376: +                format!("[ra-wasi-boundary] id=9 stage={label} value_1=1 value_2=2")
+3377: +            );
+3378: +        }
+3379: +    }
+3380: +
+3381: +    #[test]
+3382: +    fn ra_boundary_sink_is_gated_nonblocking_and_accepts_unknown_stages() {
+3383: +        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+3384: +        set_debug_terminal_capture(false, Some("1"));
+3385: +
+3386: +        {
+3387: +            let _output = DEBUG_TERMINAL_OUTPUT.lock();
+3388: +            assert_eq!(host_trace_boundary(9, u32::MAX, 1, 2), 0);
+3389: +            assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 0);
+3390: +        }
+3391: +
+3392: +        set_debug_terminal_capture(true, Some("1"));
+3393: +        {
+3394: +            let _output = DEBUG_TERMINAL_OUTPUT.lock();
+3395: +            assert_eq!(host_trace_boundary(9, u32::MAX, 1, 2), 0);
+3396: +            assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 1);
+3397: +        }
+3398: +
+3399: +        assert_eq!(host_trace_boundary(9, u32::MAX, 1, 2), 0);
+3400: +        let captured = String::from_utf8(DEBUG_TERMINAL_OUTPUT.lock().drain(usize::MAX)).unwrap();
+3401: +        assert!(captured.contains("id=9 stage=unknown value_1=1 value_2=2"));
+3402: +        set_debug_terminal_capture(false, Some("1"));
+3403: +    }
+3404: +
+3405: +    #[test]
+3406: +    fn ra_boundary_does_not_append_after_capture_is_reset() {
+3407: +        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+3408: +        let _gate_reset = RaBoundaryGateReset;
+3409: +        set_debug_terminal_capture(true, Some("1"));
+3410: +
+3411: +        let after_first_gate = Arc::new(Barrier::new(2));
+3412: +        let resume = Arc::new(Barrier::new(2));
+3413: +        *DEBUG_RA_BOUNDARY_AFTER_FIRST_GATE.lock() = Some(Arc::new({
+3414: +            let after_first_gate = Arc::clone(&after_first_gate);
+3415: +            let resume = Arc::clone(&resume);
+3416: +            move || {
+3417: +                after_first_gate.wait();
+3418: +                resume.wait();
+3419: +            }
+3420: +        }));
+3421: +
+3422: +        let output = DEBUG_TERMINAL_OUTPUT.lock();
+3423: +        std::thread::scope(|scope| {
+3424: +            let caller =
+3425: +                scope.spawn(|| host_trace_boundary(91, RaBoundaryStage::FfiReturn as u32, 0, 2106));
+3426: +            after_first_gate.wait();
+3427: +            drop(output);
+3428: +            set_debug_terminal_capture(false, Some("1"));
+3429: +            resume.wait();
+3430: +            assert_eq!(caller.join().unwrap(), 0);
+3431: +        });
+3432: +
+3433: +        assert!(!DEBUG_TERMINAL_CAPTURE.load(Ordering::Relaxed));
+3434: +        assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 0);
+3435: +        assert_eq!(DEBUG_TERMINAL_OUTPUT.lock().buffered_len(), 0);
+3436: +    }
+3437: +
+3438: +    #[test]
+3439: +    fn ra_boundary_drop_counter_resets_on_capture_transitions() {
+3440: +        let _rustc_lock = RUSTC_RUN_LOCK.lock();
+3441: +        set_debug_terminal_capture(true, Some("1"));
+3442: +        {
+3443: +            let _output = DEBUG_TERMINAL_OUTPUT.lock();
+3444: +            assert_eq!(
+3445: +                host_trace_boundary(9, RaBoundaryStage::FfiEnter as u32, 0, 0),
+3446: +                0
+3447: +            );
+3448: +        }
+3449: +        assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 1);
+3450: +
+3451: +        set_debug_terminal_capture(false, Some("1"));
+3452: +        assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 0);
+3453: +        DEBUG_RA_BOUNDARY_DROPPED.store(7, Ordering::Relaxed);
+3454: +        set_debug_terminal_capture(true, Some("1"));
+3455: +        assert_eq!(DEBUG_RA_BOUNDARY_DROPPED.load(Ordering::Relaxed), 0);
+3456: +        set_debug_terminal_capture(false, Some("1"));
+3457: +    }
+3458: +
+3459: +    #[test]
+3460: +    fn ra_boundary_trace_id_is_observation_only() {
+3461: +        assert_eq!(
+3462: +            request_ra_trace_id(&serde_json::json!({ "trace_id": 9 })),
+3463: +            Some(9)
+3464: +        );
+3465: +        assert_eq!(request_ra_trace_id(&serde_json::json!({})), None);
+3466: +        assert_eq!(
+3467: +            request_ra_trace_id(&serde_json::json!({ "trace_id": "9" })),
+3468: +            None
+3469: +        );
+3470: +        assert_eq!(
+3471: +            request_ra_trace_id(&serde_json::json!({ "trace_id": u64::from(u32::MAX) + 1 })),
+3472: +            None
+3473: +        );
+3474: +    }
+3475: +
+3476: +    #[test]
+3477: +    fn lsp_result_pointer_preserves_the_wasm32_bit_pattern() {
+3478: +        assert_eq!(
+3479: +            encode_lsp_result_abi(i32::MAX as usize + 1, 7),
+3480: +            Ok((i32::MIN, 7))
+3481: +        );
+3482: +    }
+3483: +
+3484: +    #[test]
+3485: +    fn high_bit_lsp_result_pointer_frees_and_reuses_the_allocation() {
+3486: +        let high_pointer = 0x8000_0000usize;
+3487: +        let mut allocator = LspResultAllocator::default();
+3488: +        let (pointer, length) = write_lsp_result_bytes(
+3489: +            &mut allocator,
+3490: +            b"high pointer",
+3491: +            |_| {
+3492: +                Ok(LspResultRegion {
+3493: +                    ptr: high_pointer,
+3494: +                    capacity: 64,
+3495: +                })
+3496: +            },
+3497: +            |_, _| {},
+3498: +        )
+3499: +        .unwrap();
+3500: +        let (abi_pointer, abi_length) = encode_lsp_result_abi(pointer, length).unwrap();
+3501: +
+3502: +        assert!(abi_pointer < 0);
+3503: +        assert_eq!(decode_lsp_result_pointer(abi_pointer), high_pointer);
+3504: +        assert!(allocator.free(decode_lsp_result_pointer(abi_pointer), abi_length as usize));
+3505: +
+3506: +        let (reused_pointer, _) = write_lsp_result_bytes(
+3507: +            &mut allocator,
+3508: +            b"reuse",
+3509: +            |_| panic!("high allocation was not freed"),
+3510: +            |_, _| {},
+3511: +        )
+3512: +        .unwrap();
+3513: +        assert_eq!(reused_pointer, high_pointer);
+3514: +    }
+3515: +}
+25265: diff --git a/page/src/rust_lsp_client_dispose.ts b/page/src/rust_lsp_client_dispose.ts
+25266: new file mode 100644
+25267: index 00000000..f334ec73
+25268: --- /dev/null
+25269: +++ b/page/src/rust_lsp_client_dispose.ts
+25270: @@ -0,0 +1,95 @@
+25271: +import { closeUnderlyingChannel } from "./shared_object_channel.ts";
+25272: +
+25273: +export async function disposeRustLspResources(
+25274: +  sync: { dispose(): Promise<void> } | undefined,
+25275: +  client: { needsStop(): boolean; stop(): Promise<void> } | undefined,
+25276: +  connection: { dispose(): void } | undefined,
+25277: +  vfsSharedRef: unknown | undefined,
+25278: +  progressDisposable?: { dispose(): void },
+25279: +  testApiDisposable?: { dispose(): void },
+25280: +): Promise<void> {
+25281: +  const errors: unknown[] = [];
+25282: +
+25283: +  try {
+25284: +    testApiDisposable?.dispose();
+25285: +  } catch (e) {
+25286: +    errors.push(e);
+25287: +  }
+25288: +
+25289: +  try {
+25290: +    progressDisposable?.dispose();
+25291: +  } catch (e) {
+25292: +    errors.push(e);
+25293: +  }
+25294: +
+25295: +  try {
+25296: +    if (sync) await sync.dispose();
+25297: +  } catch (e) {
+25298: +    errors.push(e);
+25299: +  }
+25300: +
+25301: +  try {
+25302: +    if (client?.needsStop()) await client.stop();
+25303: +  } catch (e) {
+25304: +    errors.push(e);
+25305: +  }
+25306: +
+25307: +  try {
+25308: +    connection?.dispose();
+25309: +  } catch (e) {
+25310: +    errors.push(e);
+25311: +  }
+25312: +
+25313: +  try {
+25314: +    if (vfsSharedRef) closeUnderlyingChannel(vfsSharedRef);
+25315: +  } catch (e) {
+25316: +    errors.push(e);
+25317: +  }
+25318: +
+25319: +  if (errors.length > 0) {
+25320: +    throw new AggregateError(errors, "LSP resource cleanup failed");
+25321: +  }
+25322: +}
+25323: +
+25324: +export class RustLspResourceOwner {
+25325: +  private sync: { dispose(): Promise<void> } | undefined;
+25326: +  private client: { needsStop(): boolean; stop(): Promise<void> } | undefined;
+25327: +  private connection: { dispose(): void } | undefined;
+25328: +  private vfsSharedRef: unknown | undefined;
+25329: +  private progressDisposable: { dispose(): void } | undefined;
+25330: +  private testApiDisposable: { dispose(): void } | undefined;
+25331: +
+25332: +  private disposePromise: Promise<void> | undefined;
+25333: +
+25334: +  setSync(s: { dispose(): Promise<void> }) {
+25335: +    this.sync = s;
+25336: +  }
+25337: +  setClient(c: { needsStop(): boolean; stop(): Promise<void> }) {
+25338: +    this.client = c;
+25339: +  }
+25340: +  setConnection(c: { dispose(): void }) {
+25341: +    this.connection = c;
+25342: +  }
+25343: +  setVfsSharedRef(r: unknown) {
+25344: +    this.vfsSharedRef = r;
+25345: +  }
+25346: +  setProgressDisposable(disposable: { dispose(): void }) {
+25347: +    this.progressDisposable = disposable;
+25348: +  }
+25349: +  setTestApiDisposable(disposable: { dispose(): void }) {
+25350: +    this.testApiDisposable = disposable;
+25351: +  }
+25352: +
+25353: +  dispose(): Promise<void> {
+25354: +    if (this.disposePromise) return this.disposePromise;
+25355: +    this.disposePromise = disposeRustLspResources(
+25356: +      this.sync,
+25357: +      this.client,
+25358: +      this.connection,
+25359: +      this.vfsSharedRef,
+25360: +      this.progressDisposable,
+25361: +      this.testApiDisposable,
+25362: +    );
+25363: +    return this.disposePromise;
+25364: +  }
+25365: +}
+30216: diff --git a/page/src/workspace_fs.ts b/page/src/workspace_fs.ts
+30217: new file mode 100644
+30218: index 00000000..e0d6fc67
+30219: --- /dev/null
+30220: +++ b/page/src/workspace_fs.ts
+30221: @@ -0,0 +1,253 @@
+30222: +import {
+30223: +  Directory,
+30224: +  File,
+30225: +  type Inode,
+30226: +  PreopenDirectory,
+30227: +} from "@bjorn3/browser_wasi_shim";
+30228: +import { default_value } from "./config.ts";
+30229: +
+30230: +export type WorkspaceChange = {
+30231: +  kind: "added" | "updated" | "deleted";
+30232: +  path: string;
+30233: +};
+30234: +
+30235: +export class WorkspaceFsError extends Error {
+30236: +  constructor(
+30237: +    readonly code:
+30238: +      | "InvalidPath"
+30239: +      | "NotFound"
+30240: +      | "Exists"
+30241: +      | "NotDirectory"
+30242: +      | "IsDirectory"
+30243: +      | "NotEmpty",
+30244: +    path: string,
+30245: +  ) {
+30246: +    super(`${code}: ${path}`);
+30247: +  }
+30248: +}
+30249: +
+30250: +export type WorkspaceWriteOptions = {
+30251: +  create: boolean;
+30252: +  overwrite: boolean;
+30253: +  notify: boolean;
+30254: +};
+30255: +type Metadata = { ctime: number; mtime: number };
+30256: +
+30257: +const bytes = (text: string) => new TextEncoder().encode(text);
+30258: +
+30259: +export class WorkspaceFileSystem {
+30260: +  readonly rootContents: Map<string, Inode>;
+30261: +  readonly rootDirectory: Directory;
+30262: +  readonly sysrootContents = new Map<string, Inode>();
+30263: +  readonly preopen: PreopenDirectory;
+30264: +  private readonly listeners = new Set<(change: WorkspaceChange) => void>();
+30265: +  private readonly metadata = new WeakMap<Inode, Metadata>();
+30266: +
+30267: +  constructor(mainSource: string) {
+30268: +    const src = new Directory(
+30269: +      new Map([["main.rs", new File(bytes(mainSource))]]),
+30270: +    );
+30271: +    this.rootContents = new Map<string, Inode>([
+30272: +      ["sysroot", new Directory(this.sysrootContents)],
+30273: +      ["src", src],
+30274: +      [
+30275: +        "Cargo.toml",
+30276: +        new File(
+30277: +          bytes(
+30278: +            `[package]\nname = "main"\nversion = "0.1.0"\nedition = "2021"\n`,
+30279: +          ),
+30280: +        ),
+30281: +      ],
+30282: +      [
+30283: +        ".cargo",
+30284: +        new Directory(new Map([["config.toml", new File(new Uint8Array())]])),
+30285: +      ],
+30286: +      [
+30287: +        "rust-project.json",
+30288: +        new File(bytes(JSON.stringify({
+30289: +          sysroot_src: "/sysroot/lib/rustlib/src/rust/library",
+30290: +          crates: [{ root_module: "/src/main.rs", edition: "2021", deps: [] }],
+30291: +        }))),
+30292: +      ],
+30293: +    ]);
+30294: +    this.preopen = new PreopenDirectory("/", this.rootContents);
+30295: +    this.rootDirectory = this.preopen.dir;
+30296: +  }
+30297: +
+30298: +  onDidChange(
+30299: +    listener: (change: WorkspaceChange) => void,
+30300: +  ): { dispose(): void } {
+30301: +    this.listeners.add(listener);
+30302: +    return { dispose: () => this.listeners.delete(listener) };
+30303: +  }
+30304: +
+30305: +  lookup(path: string): Inode {
+30306: +    let inode: Inode = this.rootDirectory;
+30307: +    for (const part of this.parts(path)) {
+30308: +      if (!(inode instanceof Directory)) {
+30309: +        throw new WorkspaceFsError("NotDirectory", path);
+30310: +      }
+30311: +      const next = inode.contents.get(part);
+30312: +      if (!next) throw new WorkspaceFsError("NotFound", path);
+30313: +      inode = next;
+30314: +    }
+30315: +    return inode;
+30316: +  }
+30317: +
+30318: +  stat(
+30319: +    path: string,
+30320: +  ): {
+30321: +    type: "file" | "directory";
+30322: +    size: number;
+30323: +    ctime: number;
+30324: +    mtime: number;
+30325: +  } {
+30326: +    const inode = this.lookup(path);
+30327: +    const now = Date.now();
+30328: +    const metadata = this.metadata.get(inode) ?? { ctime: now, mtime: now };
+30329: +    this.metadata.set(inode, metadata);
+30330: +    return {
+30331: +      type: inode instanceof Directory ? "directory" : "file",
+30332: +      size: inode instanceof File ? inode.data.byteLength : 0,
+30333: +      ...metadata,
+30334: +    };
+30335: +  }
+30336: +
+30337: +  readFile(path: string): Uint8Array {
+30338: +    const inode = this.lookup(path);
+30339: +    if (!(inode instanceof File)) {
+30340: +      throw new WorkspaceFsError("IsDirectory", path);
+30341: +    }
+30342: +    return inode.data;
+30343: +  }
+30344: +
+30345: +  readdir(path: string): string[] {
+30346: +    const inode = this.lookup(path);
+30347: +    if (!(inode instanceof Directory)) {
+30348: +      throw new WorkspaceFsError("NotDirectory", path);
+30349: +    }
+30350: +    return [...inode.contents.keys()];
+30351: +  }
+30352: +
+30353: +  writeFile(
+30354: +    path: string,
+30355: +    content: Uint8Array,
+30356: +    options: WorkspaceWriteOptions,
+30357: +  ): void {
+30358: +    const { parent, name } = this.parent(path);
+30359: +    const current = parent.contents.get(name);
+30360: +    if (!current && !options.create) {
+30361: +      throw new WorkspaceFsError("NotFound", path);
+30362: +    }
+30363: +    if (current && !options.overwrite) {
+30364: +      throw new WorkspaceFsError("Exists", path);
+30365: +    }
+30366: +    if (current instanceof Directory) {
+30367: +      throw new WorkspaceFsError("IsDirectory", path);
+30368: +    }
+30369: +    const file = current instanceof File ? current : new File(new Uint8Array());
+30370: +    file.data = content.slice();
+30371: +    parent.contents.set(name, file);
+30372: +    const old = this.metadata.get(file);
+30373: +    this.metadata.set(file, {
+30374: +      ctime: old?.ctime ?? Date.now(),
+30375: +      mtime: Date.now(),
+30376: +    });
+30377: +    if (options.notify) {
+30378: +      this.emit({ kind: current ? "updated" : "added", path });
+30379: +    }
+30380: +  }
+30381: +
+30382: +  mkdir(path: string, notify: boolean): void {
+30383: +    const { parent, name } = this.parent(path);
+30384: +    if (parent.contents.has(name)) throw new WorkspaceFsError("Exists", path);
+30385: +    parent.contents.set(name, new Directory(new Map()));
+30386: +    if (notify) this.emit({ kind: "added", path });
+30387: +  }
+30388: +
+30389: +  delete(path: string, recursive: boolean, notify: boolean): void {
+30390: +    const { parent, name } = this.parent(path);
+30391: +    const inode = parent.contents.get(name);
+30392: +    if (!inode) throw new WorkspaceFsError("NotFound", path);
+30393: +    if (inode instanceof Directory && inode.contents.size > 0 && !recursive) {
+30394: +      throw new WorkspaceFsError("NotEmpty", path);
+30395: +    }
+30396: +    parent.contents.delete(name);
+30397: +    if (notify) this.emit({ kind: "deleted", path });
+30398: +  }
+30399: +
+30400: +  rename(from: string, to: string, overwrite: boolean, notify: boolean): void {
+30401: +    const sourcePath = `/${this.parts(from).join("/")}`;
+30402: +    const destinationPath = `/${this.parts(to).join("/")}`;
+30403: +    if (sourcePath === "/" || destinationPath === "/") {
+30404: +      throw new WorkspaceFsError("InvalidPath", sourcePath === "/" ? from : to);
+30405: +    }
+30406: +    if (sourcePath === destinationPath) return;
+30407: +    if (destinationPath.startsWith(`${sourcePath}/`)) {
+30408: +      throw new WorkspaceFsError("InvalidPath", to);
+30409: +    }
+30410: +    const source = this.parent(sourcePath);
+30411: +    const inode = source.parent.contents.get(source.name);
+30412: +    if (!inode) throw new WorkspaceFsError("NotFound", sourcePath);
+30413: +    const destination = this.parent(destinationPath);
+30414: +    const existing = destination.parent.contents.get(destination.name);
+30415: +    if (existing && !overwrite) {
+30416: +      throw new WorkspaceFsError("Exists", destinationPath);
+30417: +    }
+30418: +    if (existing instanceof Directory && !(inode instanceof Directory)) {
+30419: +      throw new WorkspaceFsError("IsDirectory", destinationPath);
+30420: +    }
+30421: +    if (
+30422: +      existing && !(existing instanceof Directory) && inode instanceof Directory
+30423: +    ) {
+30424: +      throw new WorkspaceFsError("NotDirectory", destinationPath);
+30425: +    }
+30426: +    if (existing instanceof Directory && existing.contents.size > 0) {
+30427: +      throw new WorkspaceFsError("NotEmpty", destinationPath);
+30428: +    }
+30429: +    destination.parent.contents.set(destination.name, inode);
+30430: +    source.parent.contents.delete(source.name);
+30431: +    if (notify) {
+30432: +      this.emit({ kind: "deleted", path: sourcePath });
+30433: +      this.emit({ kind: "added", path: destinationPath });
+30434: +    }
+30435: +  }
+30436: +
+30437: +  private parts(path: string): string[] {
+30438: +    if (
+30439: +      !path.startsWith("/") || path.includes("\\") || path.includes("\0") ||
+30440: +      /^\/[A-Za-z]:\//.test(path)
+30441: +    ) {
+30442: +      throw new WorkspaceFsError("InvalidPath", path);
+30443: +    }
+30444: +    const parts = path.split("/").filter(Boolean);
+30445: +    if (parts.includes("..")) throw new WorkspaceFsError("InvalidPath", path);
+30446: +    return parts.filter((part) => part !== ".");
+30447: +  }
+30448: +
+30449: +  private parent(path: string): { parent: Directory; name: string } {
+30450: +    const parts = this.parts(path);
+30451: +    const name = parts.pop();
+30452: +    if (!name) throw new WorkspaceFsError("InvalidPath", path);
+30453: +    let parent = this.rootDirectory;
+30454: +    for (const part of parts) {
+30455: +      const inode = parent.contents.get(part);
+30456: +      if (!(inode instanceof Directory)) {
+30457: +        throw new WorkspaceFsError(inode ? "NotDirectory" : "NotFound", path);
+30458: +      }
+30459: +      parent = inode;
+30460: +    }
+30461: +    return { parent, name };
+30462: +  }
+30463: +
+30464: +  private emit(change: WorkspaceChange): void {
+30465: +    for (const listener of this.listeners) listener(change);
+30466: +  }
+30467: +}
+30468: +
+30469: +type WorkspaceGlobal = typeof globalThis & {
+30470: +  __rubrcWorkspaceFileSystem?: WorkspaceFileSystem;
+30471: +};
+30472: +const workspaceGlobal = globalThis as WorkspaceGlobal;
+30473: +export const workspaceFileSystem = workspaceGlobal
+30474: +  .__rubrcWorkspaceFileSystem ??= new WorkspaceFileSystem(default_value);

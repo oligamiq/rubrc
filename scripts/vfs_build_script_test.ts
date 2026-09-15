@@ -1,15 +1,17 @@
 import packageJson from "../package.json" with { type: "json" };
 
 const wvlCliPrefix = "wasi_virt_layer build ";
+const rustToolchainPrefix =
+  'RUSTC="$(rustup which rustc --toolchain nightly)" ';
 const copyScriptCommand = "node scripts/copy_vfs_bindings.mjs";
 
 Deno.test("vfs build scripts use the installed wasi_virt_layer CLI", () => {
   for (const scriptName of ["vfs:build", "vfs:build-debug"] as const) {
     const script = packageJson.scripts[scriptName];
 
-    if (!script.startsWith(wvlCliPrefix)) {
+    if (!script.startsWith(rustToolchainPrefix + wvlCliPrefix)) {
       throw new Error(
-        `${scriptName} must start with ${wvlCliPrefix}, got: ${script}`,
+        `${scriptName} must select the threaded reactor toolchain before ${wvlCliPrefix}, got: ${script}`,
       );
     }
 

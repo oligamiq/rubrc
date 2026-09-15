@@ -84,6 +84,30 @@ Deno.test("runtime host owner keeps sysroot and app callbacks synchronous", () =
   );
 });
 
+Deno.test("runtime host owner settles asynchronous application callbacks", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const owner = createRuntimeHostCallbackOwner({
+    signal: new AbortController().signal,
+    sysroot: () => undefined,
+    http: idleHttpOwner(),
+    child: idleChildOwner(),
+    handleSynchronousMessage: () => gate,
+  });
+
+  const callback = owner.handle({ name: "terminalWrite", args: { data: [] } });
+  assert(callback instanceof Promise, "application callback promise was not returned");
+  let settled = false;
+  const settling = owner.settle().then(() => (settled = true));
+  await Promise.resolve();
+  assert(!settled, "settle ignored the active application callback");
+
+  release();
+  await callback;
+  await settling;
+  assert(settled, "settle did not finish after application callback delivery");
+});
+
 Deno.test("runtime host owner rejects active and future dispatch after generation abort", async () => {
   const generation = new AbortController();
   const reason = new DOMException("generation replaced", "AbortError");

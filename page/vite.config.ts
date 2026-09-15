@@ -6,6 +6,7 @@ import importMetaUrlPlugin from "@codingame/esbuild-import-meta-url-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type Plugin } from "vite";
 import solidPlugin from "vite-plugin-solid";
+import { handleLocalCratesProxyRequest } from "../scripts/local_crates_proxy.mjs";
 
 const crossOriginIsolationHeaders = {
   "Cross-Origin-Embedder-Policy": "require-corp",
@@ -15,7 +16,8 @@ const crossOriginIsolationHeaders = {
 const developmentRustSrcDirectory = fileURLToPath(
   new URL("../.rubrc-cache/dev/", import.meta.url),
 );
-const developmentRustSrcSidecarPath = `${developmentRustSrcDirectory}/rust-src.sha256`;
+const developmentRustSrcSidecarPath =
+  `${developmentRustSrcDirectory}/rust-src.sha256`;
 
 type DevelopmentRustSrcAsset = {
   path: string;
@@ -45,6 +47,23 @@ function developmentRustSrcPlugin(asset: DevelopmentRustSrcAsset): Plugin {
           (error) => {
             if (!response.destroyed) next(error);
           },
+        );
+      });
+    },
+  };
+}
+
+function localCratesProxyPlugin(): Plugin {
+  return {
+    name: "rubrc-local-crates-proxy",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        void handleLocalCratesProxyRequest(request, response).then(
+          (handled) => {
+            if (!handled) next();
+          },
+          next,
         );
       });
     },
@@ -103,7 +122,8 @@ async function serveDevelopmentRustSrcAsset(
   if (requestUrl.searchParams.get("v") !== asset.sha256) {
     response.statusCode = 409;
     response.setHeader("Content-Type", "text/plain; charset=utf-8");
-    const message = `rust-src development asset revision mismatch; expected ${asset.sha256}\n`;
+    const message =
+      `rust-src development asset revision mismatch; expected ${asset.sha256}\n`;
     response.setHeader("Content-Length", String(Buffer.byteLength(message)));
     response.end(request.method === "HEAD" ? undefined : message);
     return;
@@ -167,8 +187,8 @@ export default defineConfig(async ({ command, isPreview }) => {
     ? await readDevelopmentRustSrcAsset()
     : undefined;
   const productionSourceRevision = process.env.SOURCE_SHA ?? "development";
-  const sourceRevision =
-    developmentRustSrcAsset?.sha256 ?? productionSourceRevision;
+  const sourceRevision = developmentRustSrcAsset?.sha256 ??
+    productionSourceRevision;
 
   return {
     define: {
@@ -190,7 +210,9 @@ export default defineConfig(async ({ command, isPreview }) => {
       ...(developmentRustSrcAsset
         ? [developmentRustSrcPlugin(developmentRustSrcAsset)]
         : []),
-      ...(isDevelopmentServer ? [wasiThreadShimCacheGuardPlugin()] : []),
+      ...(isDevelopmentServer
+        ? [localCratesProxyPlugin(), wasiThreadShimCacheGuardPlugin()]
+        : []),
       solidPlugin(),
       tailwindcss(),
     ],

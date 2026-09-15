@@ -15,12 +15,14 @@ import type { AppRuntime, AppRuntimeState } from "./app_runtime.ts";
 import type { AppRuntimeLifecycleEvent } from "./app_runtime.ts";
 import type { StartupSnapshot } from "./startup_coordinator.ts";
 
-type TestApi = DiagnosticsPublicationTestState &
-  LspTestGenerationState<
+type TestApi =
+  & DiagnosticsPublicationTestState
+  & LspTestGenerationState<
     typeof Monaco,
     Monaco.editor.IStandaloneCodeEditor,
     Monaco.editor.ITextModel
-  > & {
+  >
+  & {
     model?: Monaco.editor.ITextModel;
   };
 
@@ -108,10 +110,9 @@ export function recordRuntimeRemountPhase(
 ): void {
   if (!enabled) return;
   window.__rubrcLspTest ??= { ready: false, vfsWrites: [] };
-  const disposeError =
-    phase === "disposing"
-      ? undefined
-      : window.__rubrcLspTest.remount?.disposeError;
+  const disposeError = phase === "disposing"
+    ? undefined
+    : window.__rubrcLspTest.remount?.disposeError;
   window.__rubrcLspTest.remount = {
     phase,
     ...(disposeError === undefined ? {} : { disposeError }),
@@ -127,15 +128,16 @@ export function formatRuntimeTestError(
   if (!(error instanceof Error)) return String(error);
   seen.add(error);
   const label = `${error.name}: ${error.message}`;
-  const nested =
-    error instanceof AggregateError
-      ? error.errors
-      : error.cause === undefined
-        ? []
-        : [error.cause];
+  const nested = error instanceof AggregateError
+    ? error.errors
+    : error.cause === undefined
+    ? []
+    : [error.cause];
   return nested.length === 0
     ? label
-    : `${label} [${nested.map((item) => formatRuntimeTestError(item, seen)).join(", ")}]`;
+    : `${label} [${
+      nested.map((item) => formatRuntimeTestError(item, seen)).join(", ")
+    }]`;
 }
 
 export function recordRuntimeRemountDisposalFailure(error: unknown): void {
@@ -351,8 +353,9 @@ export function recordCargoHostCall(): void {
       state.startup.phase === "project-activating" ||
       state.startup.phase === "semantic-warming" ||
       state.startup.phase === "ready"
-    )
+    ) {
       return;
+    }
     state.startup.cargoCallsBeforeProjectActivation++;
   });
 }
@@ -363,15 +366,14 @@ export function createStartupTestState(
 ): StartupTestState {
   const projectProgress =
     snapshot.tasks.find((task) => task.id === "project")?.projectProgress ??
-    previous?.projectProgress;
+      previous?.projectProgress;
   const history = previous?.history ?? [];
 
   return {
     phase: snapshot.phase,
-    history:
-      history.at(-1) === snapshot.phase
-        ? [...history]
-        : [...history, snapshot.phase],
+    history: history.at(-1) === snapshot.phase
+      ? [...history]
+      : [...history, snapshot.phase],
     overlayVisible: snapshot.phase !== "ready",
     crateGraphReady: previous?.crateGraphReady ?? false,
     diagnosticsVersion: previous?.diagnosticsVersion,
@@ -379,6 +381,7 @@ export function createStartupTestState(
     cargoCallsBeforeProjectActivation:
       previous?.cargoCallsBeforeProjectActivation ?? 0,
     ...(projectProgress === undefined ? {} : { projectProgress }),
+    ...(snapshot.error === undefined ? {} : { error: snapshot.error }),
   };
 }
 

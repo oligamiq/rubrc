@@ -80,6 +80,28 @@ Deno.test("LSP decoder rejects malformed streams", () => {
   }
 });
 
+Deno.test("LSP decoder reports a nested frame body without hiding its prefix", () => {
+  const inner = encodeLspMessage({ jsonrpc: "2.0", id: 9, result: null });
+  const header = new TextEncoder().encode(
+    `Content-Length: ${inner.length}\r\n\r\n`,
+  );
+  const outer = new Uint8Array(header.length + inner.length);
+  outer.set(header);
+  outer.set(inner, header.length);
+
+  let message = "";
+  try {
+    new LspFrameDecoder().push(outer);
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assert(
+    message.includes("invalid LSP JSON body") &&
+      message.includes("Content-Length:"),
+    `nested frame diagnostic lost the body prefix: ${message}`,
+  );
+});
+
 Deno.test("ordered sender serializes writes and recovers after rejection", async () => {
   const sent: number[] = [];
   let releaseFirst!: () => void;

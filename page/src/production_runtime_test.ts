@@ -3,6 +3,7 @@ import { RuntimeSupervisor } from "./app_runtime.ts";
 import * as productionRuntime from "./production_runtime.ts";
 import {
   createProductionRuntimeDependencies,
+  resolveCratesProxyBaseUrl,
   writeFarmTerminal,
 } from "./production_runtime.ts";
 import type { RuntimeWorkerHandshake } from "./runtime_worker_protocol.ts";
@@ -12,7 +13,37 @@ const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
 };
 
-const deferred = <T,>() => {
+test("crates proxy stays remote outside loopback and uses same-origin locally", () => {
+  assert(
+    resolveCratesProxyBaseUrl({
+      hostname: "rubrc.pages.dev",
+      origin: "https://rubrc.pages.dev",
+    }) === "https://proxy.rubrc.workers.dev",
+    "production origin stopped using the restricted Worker proxy",
+  );
+  for (
+    const [hostname, origin] of [
+      ["localhost", "http://localhost:3000"],
+      ["127.0.0.1", "http://127.0.0.1:4173"],
+      ["[::1]", "http://[::1]:5173"],
+    ]
+  ) {
+    assert(
+      resolveCratesProxyBaseUrl({ hostname, origin }) ===
+        `${origin}/__rubrc_crates_proxy`,
+      `${hostname} did not use the local proxy`,
+    );
+  }
+  assert(
+    resolveCratesProxyBaseUrl({
+      hostname: "localhost.evil.example",
+      origin: "https://localhost.evil.example",
+    }) === "https://proxy.rubrc.workers.dev",
+    "localhost-like production host was treated as loopback",
+  );
+});
+
+const deferred = <T>() => {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason: unknown) => void;
   const promise = new Promise<T>((resolvePromise, rejectPromise) => {
@@ -75,9 +106,18 @@ test("partial production bridge cleanup is aborted and runtime-settled", async (
     const error = await starting;
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    assert(error instanceof AggregateError, "cleanup rejection was not aggregated");
-    assert(error.cause === primary, "partial construction primary was replaced");
-    assert(runtime.phase === "disposed", "settled partial cleanup quarantined runtime");
+    assert(
+      error instanceof AggregateError,
+      "cleanup rejection was not aggregated",
+    );
+    assert(
+      error.cause === primary,
+      "partial construction primary was replaced",
+    );
+    assert(
+      runtime.phase === "disposed",
+      "settled partial cleanup quarantined runtime",
+    );
     assert(unhandled === 0, "partial cleanup rejection was unhandled");
   } finally {
     globalThis.removeEventListener("unhandledrejection", onUnhandled);
@@ -127,7 +167,8 @@ test("forced destroy timeout still starts Animal disposal but withholds acknowle
 });
 
 test("farm terminal writes are dropped after the generation data plane detaches", () => {
-  const writes: Array<{ sessionId: number; data: Uint8Array; error: boolean }> = [];
+  const writes: Array<{ sessionId: number; data: Uint8Array; error: boolean }> =
+    [];
   const terminal = {
     write(sessionId: number, data: Uint8Array, error: boolean) {
       writes.push({ sessionId, data, error });
@@ -142,6 +183,12 @@ test("farm terminal writes are dropped after the generation data plane detaches"
   assert(writes[0].sessionId === 7, "attached write used the wrong session");
   assert(writes[0].data === data, "attached write copied the byte buffer");
   assert(writes[0].error, "attached write lost the stderr flag");
-  assert(attached.ret === 0 && attached.nwritten === 3, "attached write failed");
-  assert(detached.ret === 0 && detached.nwritten === 3, "detached write failed");
+  assert(
+    attached.ret === 0 && attached.nwritten === 3,
+    "attached write failed",
+  );
+  assert(
+    detached.ret === 0 && detached.nwritten === 3,
+    "detached write failed",
+  );
 });

@@ -3,10 +3,11 @@
 // the configured capacity when all workers are occupied.
 export const VFS_THREAD_INITIAL_CAPACITY = 8;
 
-// Fresh fork A/B confirms the main TaskPool follows numThreads: auto/2/8
-// produced 9/10/16 pre-host workers. num_cpus 1.17.0 on wasm32-wasip1-threads
-// reports get_physical()=1, so the auto main TaskPool resolves to 1.
+// wasm32-wasip1-threads reports one physical CPU even when the browser can
+// provide more Workers. Keep the browser-derived value conservative because
+// each analyzer worker shares the VFS Wasm memory and its virtual thread pool.
 export const RUST_ANALYZER_MAIN_LOOP_THREADS_WASI = 1;
+export const RUST_ANALYZER_MAIN_LOOP_THREADS_MAX = 4;
 
 export type RustAnalyzerParallelism = {
   mainLoopThreads: number;
@@ -17,8 +18,17 @@ export type RustAnalyzerParallelism = {
 export function getRustAnalyzerParallelism(
   browserHardwareConcurrency = globalThis.navigator?.hardwareConcurrency,
 ): RustAnalyzerParallelism {
+  const mainLoopThreads =
+    typeof browserHardwareConcurrency === "number" &&
+      Number.isFinite(browserHardwareConcurrency) &&
+      browserHardwareConcurrency > 1
+      ? Math.min(
+        RUST_ANALYZER_MAIN_LOOP_THREADS_MAX,
+        Math.max(2, Math.floor(browserHardwareConcurrency / 2)),
+      )
+      : RUST_ANALYZER_MAIN_LOOP_THREADS_WASI;
   return {
-    mainLoopThreads: RUST_ANALYZER_MAIN_LOOP_THREADS_WASI,
+    mainLoopThreads,
     wasiPoolInitialCapacity: VFS_THREAD_INITIAL_CAPACITY,
     ...(typeof browserHardwareConcurrency === "number" &&
     Number.isFinite(browserHardwareConcurrency) &&

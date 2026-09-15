@@ -63,7 +63,18 @@ export class LspFrameDecoder {
       const body = decoder.decode(
         this.buffer.slice(bodyStart, bodyStart + length),
       );
-      const message = JSON.parse(body);
+      let message: unknown;
+      try {
+        message = JSON.parse(body);
+      } catch (error) {
+        const prefix = body.slice(0, 120);
+        throw new Error(
+          `invalid LSP JSON body: declared=${length} prefix=${
+            JSON.stringify(prefix)
+          }`,
+          { cause: error },
+        );
+      }
       if (typeof message !== "object" || message === null) {
         throw new Error("LSP body must be a JSON object");
       }

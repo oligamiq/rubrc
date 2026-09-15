@@ -32,12 +32,14 @@ Deno.test("test API formats nested runtime cleanup failures", () => {
 
   const formatted = formatRuntimeTestError(error);
 
-  for (const message of [
-    "runtime cleanup failed",
-    "document sync disposal failed",
-    "LSP resource cleanup failed",
-    "AbortError: runtime disposed",
-  ]) {
+  for (
+    const message of [
+      "runtime cleanup failed",
+      "document sync disposal failed",
+      "LSP resource cleanup failed",
+      "AbortError: runtime disposed",
+    ]
+  ) {
     assert(formatted.includes(message), `formatted error omitted ${message}`);
   }
 });
@@ -103,9 +105,18 @@ Deno.test("test API cleanup cannot erase a newer generation", () => {
   assert(!("editor" in state), "cleanup retained editor");
   assert(!("model" in state), "cleanup retained model");
   assert(!("requestSyntaxTree" in state), "cleanup retained syntax request");
-  assert(!("requestCrateGraph" in state), "cleanup retained crate-graph request");
-  assert(!("requestCompletion" in state), "cleanup retained completion request");
-  assert(!("requestDefinition" in state), "cleanup retained definition request");
+  assert(
+    !("requestCrateGraph" in state),
+    "cleanup retained crate-graph request",
+  );
+  assert(
+    !("requestCompletion" in state),
+    "cleanup retained completion request",
+  );
+  assert(
+    !("requestDefinition" in state),
+    "cleanup retained definition request",
+  );
 });
 
 Deno.test("stale test API producer cannot record into a newer generation", () => {
@@ -441,12 +452,11 @@ const startupSnapshot = (
     {
       id: "project",
       label: "Project",
-      state:
-        phase === "failed"
-          ? "failed"
-          : phase === "ready"
-            ? "complete"
-            : "running",
+      state: phase === "failed"
+        ? "failed"
+        : phase === "ready"
+        ? "complete"
+        : "running",
       ...(projectProgress === undefined ? {} : { projectProgress }),
     },
   ],
@@ -508,5 +518,9 @@ Deno.test("startup test state preserves project progress on failure", () => {
   assert(
     failed.history.join(",") === "project-activating,failed",
     "wrong failed history",
+  );
+  assert(
+    failed.error === "startup failed",
+    "failed startup error missing from test API",
   );
 });

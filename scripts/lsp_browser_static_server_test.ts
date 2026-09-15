@@ -39,13 +39,15 @@ Deno.test("browser static server confines paths and serves GET/HEAD with explici
     );
     const base = `http://127.0.0.1:${address.port}`;
 
-    for (const [path, contentType] of [
-      ["/", "text/html; charset=utf-8"],
-      ["/assets/app.js", "text/javascript; charset=utf-8"],
-      ["/assets/app.css", "text/css; charset=utf-8"],
-      ["/assets/worker.wasm", "application/wasm"],
-      ["/rust-src.sqfs", "application/octet-stream"],
-    ]) {
+    for (
+      const [path, contentType] of [
+        ["/", "text/html; charset=utf-8"],
+        ["/assets/app.js", "text/javascript; charset=utf-8"],
+        ["/assets/app.css", "text/css; charset=utf-8"],
+        ["/assets/worker.wasm", "application/wasm"],
+        ["/rust-src.sqfs", "application/octet-stream"],
+      ]
+    ) {
       const response = await fetch(`${base}${path}`);
       assert(response.status === 200, `${path} returned ${response.status}`);
       assert(
@@ -54,7 +56,7 @@ Deno.test("browser static server confines paths and serves GET/HEAD with explici
       );
       assert(
         response.headers.get("cross-origin-embedder-policy") ===
-          "require-corp" &&
+            "require-corp" &&
           response.headers.get("cross-origin-opener-policy") === "same-origin",
         `${path} omitted cross-origin isolation`,
       );
@@ -102,12 +104,14 @@ Deno.test("browser static path resolution rejects traversal", () => {
       resolve(root, "assets/app.js"),
     "normal static path changed",
   );
-  for (const path of [
-    "/../outside.txt",
-    "/%2e%2e%2foutside.txt",
-    "/..\\outside.txt",
-    "/%00outside.txt",
-  ]) {
+  for (
+    const path of [
+      "/../outside.txt",
+      "/%2e%2e%2foutside.txt",
+      "/..\\outside.txt",
+      "/%00outside.txt",
+    ]
+  ) {
     assert(
       resolveStaticPath(root, path) === null,
       `${path} escaped static root`,
@@ -187,7 +191,9 @@ Deno.test("browser static server handles pre-header open/stream failure without 
     assert(response.status === 500, `Expected 500, got ${response.status}`);
     assert(
       response.headers.get("content-type") === "text/plain; charset=utf-8",
-      `Outer 500 omitted text/plain Content-Type, got ${response.headers.get("content-type")}`,
+      `Outer 500 omitted text/plain Content-Type, got ${
+        response.headers.get("content-type")
+      }`,
     );
     assert(body === "Internal Server Error\n", "Outer 500 body changed");
     assert(
@@ -281,9 +287,10 @@ Deno.test("browser diagnostics uses the Bun static server without changing Vite 
       harness.includes(
         'const expectedMetadataUrl = new URL("/.rubrc-pages-build.json", url).href;',
       ) &&
-      /shouldSuppressOptionalMetadataNotFound\(\s*text,\s*message\.location\(\)\.url,\s*expectedMetadataUrl,\s*\)/.test(
-        harness,
-      ),
+      /shouldSuppressOptionalMetadataNotFound\(\s*text,\s*message\.location\(\)\.url,\s*expectedMetadataUrl,\s*\)/
+        .test(
+          harness,
+        ),
     "browser harness does not bind the optional metadata 404 to its origin",
   );
   assert(
@@ -291,4 +298,97 @@ Deno.test("browser diagnostics uses the Bun static server without changing Vite 
       !vite.includes("configurePreviewServer"),
     "production Vite preview configuration changed",
   );
+});
+
+Deno.test("browser static server exposes only the constrained local crates proxy", async () => {
+  const directory = await Deno.makeTempDir();
+  await Deno.writeTextFile(`${directory}/index.html`, "<main>rubrc</main>");
+  const upstreamRequests: Array<{ url: string; method: string }> = [];
+  const server = await startBrowserStaticServer({
+    rootDirectory: directory,
+    hostname: "127.0.0.1",
+    port: 0,
+    proxyFetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
+      upstreamRequests.push({
+        url: String(input),
+        method: init?.method ?? "GET",
+      });
+      const body = String(input).includes("index.crates.io/config.json")
+        ? JSON.stringify({
+          dl: "https://static.crates.io/crates",
+          api: "https://crates.io",
+        })
+        : "proxied";
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+      });
+    },
+  });
+  try {
+    const address = server.address();
+    assert(
+      address !== null && typeof address === "object",
+      "server has no address",
+    );
+    const base = `http://127.0.0.1:${address.port}`;
+    const indexResponse = await fetch(
+      `${base}/__rubrc_crates_proxy/index/config.json?test=1`,
+    );
+    assert(indexResponse.status === 200, "index proxy request failed");
+    const localConfig = await indexResponse.json();
+    assert(
+      localConfig.dl ===
+        "https://crates.io/api/v1/crates/{crate}/{version}/download",
+      `local index did not route downloads back through the fetch wrapper: ${localConfig.dl}`,
+    );
+    assert(
+      localConfig["auth-required"] === false,
+      "local index omitted auth-required=false",
+    );
+    assert(
+      upstreamRequests[0]?.url === "https://index.crates.io/config.json?test=1",
+      `index proxy target changed: ${upstreamRequests[0]?.url}`,
+    );
+
+    const crateResponse = await fetch(
+      `${base}/__rubrc_crates_proxy/crates/serde/1.0.219/download`,
+    );
+    assert(crateResponse.status === 200, "crate proxy request failed");
+    await crateResponse.body?.cancel();
+    assert(
+      upstreamRequests[1]?.url ===
+        "https://static.crates.io/crates/serde/serde-1.0.219.crate",
+      `crate proxy target changed: ${upstreamRequests[1]?.url}`,
+    );
+
+    const rejected = await fetch(
+      `${base}/__rubrc_crates_proxy/crates/serde/1.0.219/download/extra`,
+    );
+    assert(
+      rejected.status === 404,
+      `invalid proxy path returned ${rejected.status}`,
+    );
+    await rejected.body?.cancel();
+    assert(
+      upstreamRequests.length === 2,
+      "invalid proxy path unexpectedly reached an upstream host",
+    );
+
+    const post = await fetch(`${base}/__rubrc_crates_proxy/index/config.json`, {
+      method: "POST",
+    });
+    assert(post.status === 405, `proxy POST returned ${post.status}`);
+    assert(
+      post.headers.get("allow") === "GET, HEAD",
+      "proxy 405 omitted Allow",
+    );
+    assert(
+      upstreamRequests.length === 2,
+      "unsupported proxy method unexpectedly reached upstream",
+    );
+  } finally {
+    await closeBrowserStaticServer(server);
+    await Deno.remove(directory, { recursive: true });
+  }
 });

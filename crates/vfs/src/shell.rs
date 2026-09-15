@@ -46,8 +46,8 @@ pub(crate) fn write_current_context_output(
     let Some(id) = CURRENT_CONTEXT_ID.with(|id| id.get()) else {
         return Err(wasi_virt_layer::__private::wasip1::ERRNO_BADF);
     };
-    let len = u32::try_from(buf.len())
-        .map_err(|_| wasi_virt_layer::__private::wasip1::ERRNO_OVERFLOW)?;
+    let len =
+        u32::try_from(buf.len()).map_err(|_| wasi_virt_layer::__private::wasip1::ERRNO_OVERFLOW)?;
     let shell_ptr = unsafe { vfs_shell_alloc_buf(len) };
     vfs_shell::memcpy(shell_ptr as *mut u8, buf);
     let written = unsafe {

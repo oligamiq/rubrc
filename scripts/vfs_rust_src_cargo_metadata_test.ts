@@ -6,6 +6,11 @@ import {
   PreopenDirectory,
 } from "@bjorn3/browser_wasi_shim";
 import { WASIFarm } from "@oligami/browser_wasi_shim-threads";
+import {
+  createHttpBridge,
+  isHttpBridgeMessage,
+} from "../lib/src/http_bridge.ts";
+import { createCratesProxyFetch } from "../lib/src/proxy.ts";
 import { takeExactSysrootChunk } from "../page/src/sysroot_protocol.ts";
 import { prepareReleasedRustSrcSquashfs } from "./rust_src_archive.ts";
 import { prepareCachedArchive } from "./sysroot_cache.ts";
@@ -39,6 +44,19 @@ async function decompressBrotli(bytes: Uint8Array): Promise<Uint8Array> {
 }
 
 const wasm32Tar = await decompressBrotli(wasm32.archive);
+const fetchedUrls: string[] = [];
+const proxyFetch = createCratesProxyFetch({
+  proxyBaseUrl: "https://proxy.rubrc.workers.dev",
+  fetchImpl: (input, init) => {
+    const request = new Request(input, init);
+    const headers = new Headers(request.headers);
+    headers.set("Origin", "https://oligamiq.github.io");
+    const productionRequest = new Request(request, { headers });
+    fetchedUrls.push(productionRequest.url);
+    return fetch(productionRequest);
+  },
+});
+const httpBridge = createHttpBridge(proxyFetch);
 let currentArchive: Uint8Array | null = null;
 let maxChunk = 0;
 let farmTerminalOutput = "";
@@ -73,6 +91,9 @@ const farm = new WASIFarm(
           data?: unknown;
         };
       };
+      if (isHttpBridgeMessage(message)) {
+        return httpBridge(message);
+      }
       if (value.name?.startsWith("childProcess")) {
         return { request_id: 0, state: 0, status: 0, error_len: 0 };
       }
@@ -80,7 +101,9 @@ const farm = new WASIFarm(
         const data = Array.isArray(value.args?.data)
           ? Uint8Array.from(value.args.data as number[])
           : new Uint8Array();
-        farmTerminalOutput += farmTerminalDecoder.decode(data, { stream: true });
+        farmTerminalOutput += farmTerminalDecoder.decode(data, {
+          stream: true,
+        });
         return {};
       }
       if (value.name === "sysrootStartFetch") {
@@ -120,17 +143,22 @@ const worker = new Worker(
   new URL("./vfs_debug_shell_worker.ts", import.meta.url),
   { type: "module" },
 );
-const command = [
+const rustLibrary = "/sysroot/lib/rustlib/src/rust/library";
+const commands = [[
   "cargo",
   "metadata",
   "--format-version",
   "1",
   "--manifest-path",
-  "/Cargo.toml",
-  "--offline",
-];
+  `${rustLibrary}/Cargo.toml`,
+  "--filter-platform",
+  "wasm32-wasip1-threads",
+  "--locked",
+]];
 
-const result = await new Promise<{ ok: boolean; output: string; error?: string }>(
+const result = await new Promise<
+  { ok: boolean; output: string; error?: string }
+>(
   (resolve) => {
     const timer = setTimeout(() => {
       worker.terminate();
@@ -146,10 +174,11 @@ const result = await new Promise<{ ok: boolean; output: string; error?: string }
     };
     worker.postMessage({
       wasiRef: farm.get_ref(),
-      commands: [command],
+      commands,
       threads: 2,
       timeoutMs,
       installStartupSysroots: true,
+      initialInput: `cd ${rustLibrary}\r`,
       env: [
         "RUSTUP_AUTO_INSTALL=0",
         "RUSTUP_TOOLCHAIN=/sysroot",
@@ -159,18 +188,25 @@ const result = await new Promise<{ ok: boolean; output: string; error?: string }
   },
 );
 worker.terminate();
-const combinedOutput = result.output + farmTerminalOutput + farmTerminalDecoder.decode();
+const combinedOutput = result.output + farmTerminalOutput +
+  farmTerminalDecoder.decode();
 
 console.log(combinedOutput);
+console.log(`metadata HTTP requests: ${fetchedUrls.length}`);
+for (const url of fetchedUrls) console.log(`[metadata-http] ${url}`);
 if (!result.ok) {
   throw new Error(result.error ?? "metadata debug worker failed");
 }
 if (maxChunk !== 8192) {
-  throw new Error(`startup sysroots were not streamed in 8192-byte chunks: ${maxChunk}`);
+  throw new Error(
+    `startup sysroots were not streamed in 8192-byte chunks: ${maxChunk}`,
+  );
 }
 if (/\berror:/i.test(combinedOutput) || /failed to/i.test(combinedOutput)) {
   throw new Error(`embedded cargo metadata failed:\n${combinedOutput}`);
 }
 if (!combinedOutput.includes('"packages"')) {
-  throw new Error(`cargo metadata did not emit metadata JSON:\n${combinedOutput}`);
+  throw new Error(
+    `cargo metadata did not emit metadata JSON:\n${combinedOutput}`,
+  );
 }

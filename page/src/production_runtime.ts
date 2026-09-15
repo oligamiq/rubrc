@@ -45,6 +45,25 @@ const sharedObjectFactories: RuntimeSharedObjectFactories = {
   createSharedObjectRef: (id) => new SharedObjectRef(id),
 };
 
+const PRODUCTION_CRATES_PROXY_URL = "https://proxy.rubrc.workers.dev";
+const LOCAL_CRATES_PROXY_PATH = "/__rubrc_crates_proxy";
+
+export function resolveCratesProxyBaseUrl(
+  locationValue: Pick<Location, "hostname" | "origin"> | undefined =
+    typeof location === "undefined" ? undefined : location,
+): string {
+  const hostname = locationValue?.hostname.toLowerCase();
+  if (
+    locationValue !== undefined &&
+    (hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "[::1]")
+  ) {
+    return new URL(LOCAL_CRATES_PROXY_PATH, locationValue.origin).href;
+  }
+  return PRODUCTION_CRATES_PROXY_URL;
+}
+
 const bytes = (data: unknown): Uint8Array<ArrayBuffer> => {
   if (data instanceof Uint8Array) return Uint8Array.from(data);
   if (Array.isArray(data)) return Uint8Array.from(data as number[]);
@@ -185,25 +204,25 @@ export function createProductionRuntimeDependencies(options: {
       try {
         http = (factories.createHttpBridgeOwner ?? createHttpBridgeOwner)(
           createCratesProxyFetch({
-            proxyBaseUrl: "https://proxy.rubrc.workers.dev",
+            proxyBaseUrl: resolveCratesProxyBaseUrl(),
           }),
           { signal },
         );
         partialOwners.push(http);
         child = (factories.createChildProcessBridgeOwner ??
           createChildProcessBridgeOwner)({
-          getWasiRef: () => {
-            if (resources.wasiRef === undefined) {
-              throw new Error("runtime farm is unavailable");
-            }
-            return resources.wasiRef;
-          },
-          workerUrl: options.childProcessWorkerUrl,
-          filesystemRoot: workspace.rootDirectory,
-          uploadTimeoutMs: 30_000,
-          executionTimeoutMs: 120_000,
-          signal,
-        });
+            getWasiRef: () => {
+              if (resources.wasiRef === undefined) {
+                throw new Error("runtime farm is unavailable");
+              }
+              return resources.wasiRef;
+            },
+            workerUrl: options.childProcessWorkerUrl,
+            filesystemRoot: workspace.rootDirectory,
+            uploadTimeoutMs: 30_000,
+            executionTimeoutMs: 120_000,
+            signal,
+          });
         partialOwners.push(child);
       } catch (error) {
         const cleanupErrors: unknown[] = [];
@@ -268,9 +287,9 @@ export function createProductionRuntimeDependencies(options: {
             fileName = "";
             fileChunks = [];
           } else if (unknown.name === "terminalWrite") {
-            routeWasiTerminalWrite(
+            return routeWasiTerminalWrite(
               unknown.args as { session_id: number; data: unknown },
-              (lspMessage) => void lsp(lspMessage).catch(console.error),
+              (lspMessage) => lsp(lspMessage),
               (sessionId, data) => terminal.write(sessionId, bytes(data)),
             );
           } else {
@@ -314,9 +333,12 @@ export function createProductionRuntimeDependencies(options: {
         {
           allocator_size: 100 * 1024 * 1024,
           base_call_allocator_size: 64 * 1024 * 1024,
-           unknown_fn: (message: unknown) => {
+          unknown_fn: (message: unknown) => {
             if (resources.detached) {
-              throw new DOMException("runtime data plane detached", "AbortError");
+              throw new DOMException(
+                "runtime data plane detached",
+                "AbortError",
+              );
             }
             if (
               typeof message === "object" && message !== null &&

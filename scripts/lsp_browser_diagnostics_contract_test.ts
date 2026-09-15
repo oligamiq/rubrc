@@ -672,7 +672,8 @@ Deno.test("test builds trace active sysroot and cargo base-call boundaries", asy
     );
   }
   assert(
-    adapter.includes('import.meta.env.VITE_RUBRC_LSP_TEST === "1"') &&
+    (adapter.includes('import.meta.env.VITE_RUBRC_LSP_TEST === "1"') ||
+      adapter.includes('import.meta.env?.VITE_RUBRC_LSP_TEST === "1"')) &&
       adapter.includes("tracedHostCallNames.has(name)") &&
       adapter.includes("traceVfsHostCall("),
     "active VFS callbacks do not share the test-build host-call tracer",

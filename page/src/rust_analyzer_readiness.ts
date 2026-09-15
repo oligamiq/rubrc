@@ -1,5 +1,14 @@
+import {
+  type CancellationToken,
+  CancellationTokenSource,
+} from "vscode-jsonrpc";
+
 export type AnalyzerRequestClient = {
-  sendRequest<R>(method: string, params: unknown): Promise<R>;
+  sendRequest<R>(
+    method: string,
+    params: unknown,
+    token?: CancellationToken,
+  ): Promise<R>;
 };
 
 export type MonacoRangeLike = {
@@ -30,6 +39,7 @@ type ReadinessTiming = {
   now?: () => number;
   sleep?: () => Promise<void>;
   timeoutMs?: number;
+  crateGraphRequestTimeoutMs?: number;
 };
 
 type ReadinessModel = {
@@ -39,8 +49,10 @@ type ReadinessModel = {
 
 const POLL_INTERVAL_MS = 250;
 const CRATE_GRAPH_POLL_INTERVAL_MS = 5_000;
+const CRATE_GRAPH_REQUEST_TIMEOUT_MS = 10_000;
 const PHASE_TIMEOUT_MS = 300_000;
 const CONTENT_MODIFIED = -32801;
+const CRATE_GRAPH_REQUEST_TIMED_OUT = Symbol("crate-graph-request-timed-out");
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -150,14 +162,16 @@ const nodeLabels = (dot: string) => {
     const label = quotedDotAttribute(groups, "label");
     if (!label) continue;
     labels.add(
-      label.replace(/\\(["\\nrt])/g, (_match, escaped: string) =>
-        escaped === "n"
-          ? "\n"
-          : escaped === "r"
+      label.replace(
+        /\\(["\\nrt])/g,
+        (_match, escaped: string) =>
+          escaped === "n"
+            ? "\n"
+            : escaped === "r"
             ? "\r"
             : escaped === "t"
-              ? "\t"
-              : escaped,
+            ? "\t"
+            : escaped,
       ),
     );
   }
@@ -177,6 +191,7 @@ export class RustAnalyzerReadiness {
   private readonly sleep: () => Promise<void>;
   private readonly graphSleep: () => Promise<void>;
   private readonly timeoutMs: number;
+  private readonly crateGraphRequestTimeoutMs: number;
   private crateGraphReady = false;
   private diagnosticsVersion: number | undefined;
   private semanticDeadline = 0;
@@ -190,21 +205,23 @@ export class RustAnalyzerReadiness {
     timing: ReadinessTiming = {},
   ) {
     this.now = timing.now ?? performance.now.bind(performance);
-    this.sleep =
-      timing.sleep ??
+    this.sleep = timing.sleep ??
       (() =>
         new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS)));
-    this.graphSleep =
-      timing.sleep ??
+    this.graphSleep = timing.sleep ??
       (() =>
         new Promise<void>((resolve) =>
-          setTimeout(resolve, CRATE_GRAPH_POLL_INTERVAL_MS),
+          setTimeout(resolve, CRATE_GRAPH_POLL_INTERVAL_MS)
         ));
     this.timeoutMs = timing.timeoutMs ?? PHASE_TIMEOUT_MS;
+    this.crateGraphRequestTimeoutMs = Math.max(
+      1,
+      timing.crateGraphRequestTimeoutMs ?? CRATE_GRAPH_REQUEST_TIMEOUT_MS,
+    );
   }
 
   observeMessage(message: unknown): void {
-    if (!this.crateGraphReady || !isObject(message)) return;
+    if (!isObject(message)) return;
     if (message.method !== "textDocument/publishDiagnostics") return;
     const params = message.params;
     if (!isObject(params) || params.uri !== this.uri) return;
@@ -217,8 +234,10 @@ export class RustAnalyzerReadiness {
     }
   }
 
-  noteDocumentChanged(_version: number): void {
-    this.diagnosticsVersion = undefined;
+  noteDocumentChanged(version: number): void {
+    if (this.diagnosticsVersion !== version) {
+      this.diagnosticsVersion = undefined;
+    }
     this.generation++;
     this.semanticDeadline = this.now() + this.timeoutMs;
   }
@@ -240,16 +259,12 @@ export class RustAnalyzerReadiness {
       attempt++;
       let dot: unknown;
       try {
-        dot = await this.awaitPhaseOperation(
-          this.client.sendRequest<unknown>("rust-analyzer/viewCrateGraph", {
-            full: true,
-          }),
-          signal,
-          () => deadline,
-          "rust-analyzer crate graph",
-        );
+        dot = await this.requestCrateGraph(signal, deadline);
       } catch (error) {
         if (!isContentModified(error)) throw error;
+        dot = CRATE_GRAPH_REQUEST_TIMED_OUT;
+      }
+      if (dot === CRATE_GRAPH_REQUEST_TIMED_OUT) {
         this.checkActive(signal);
         this.emitCrateGraphProgress(
           observeProgress,
@@ -280,7 +295,6 @@ export class RustAnalyzerReadiness {
       );
       if (ready) {
         this.crateGraphReady = true;
-        this.diagnosticsVersion = undefined;
         return;
       }
       await this.awaitPhaseOperation(
@@ -318,7 +332,6 @@ export class RustAnalyzerReadiness {
       if (generationBeforeSleep !== this.generation) continue;
 
       const version = model.getVersionId();
-      if (this.diagnosticsVersion !== version) continue;
       const generation = this.generation;
       const range = model.getFullModelRange();
 
@@ -348,8 +361,7 @@ export class RustAnalyzerReadiness {
 
       if (
         generation === this.generation &&
-        version === model.getVersionId() &&
-        this.diagnosticsVersion === version
+        version === model.getVersionId()
       ) {
         return;
       }
@@ -390,6 +402,77 @@ export class RustAnalyzerReadiness {
       observer?.(progress);
     } catch {
       // Progress observers are telemetry only.
+    }
+  }
+
+  private async requestCrateGraph(
+    signal: AbortSignal,
+    deadline: number,
+  ): Promise<unknown | typeof CRATE_GRAPH_REQUEST_TIMED_OUT> {
+    this.checkActive(signal);
+    const remainingPhaseMs = deadline - this.now();
+    if (remainingPhaseMs <= 0) {
+      throw new Error(
+        `rust-analyzer crate graph timed out after ${this.timeoutMs}ms`,
+      );
+    }
+
+    const requestTimeoutMs = Math.min(
+      this.crateGraphRequestTimeoutMs,
+      remainingPhaseMs,
+    );
+    const reachesPhaseDeadline = requestTimeoutMs >= remainingPhaseMs;
+    const requestCancellation = new CancellationTokenSource();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort!: () => void;
+    let onDispose!: () => void;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(signal.reason);
+      onDispose = () => reject(this.disposeController.signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+      this.disposeController.signal.addEventListener("abort", onDispose, {
+        once: true,
+      });
+    });
+    const timedOut = new Promise<typeof CRATE_GRAPH_REQUEST_TIMED_OUT>(
+      (resolve, reject) => {
+        timer = setTimeout(() => {
+          if (reachesPhaseDeadline) {
+            reject(
+              new Error(
+                `rust-analyzer crate graph timed out after ${this.timeoutMs}ms`,
+              ),
+            );
+          } else {
+            resolve(CRATE_GRAPH_REQUEST_TIMED_OUT);
+          }
+        }, requestTimeoutMs);
+      },
+    );
+
+    try {
+      const value = await Promise.race([
+        this.client.sendRequest<unknown>(
+          "rust-analyzer/viewCrateGraph",
+          { full: true },
+          requestCancellation.token,
+        ),
+        cancelled,
+        timedOut,
+      ]);
+      this.checkActive(signal);
+      if (this.now() >= deadline) {
+        throw new Error(
+          `rust-analyzer crate graph timed out after ${this.timeoutMs}ms`,
+        );
+      }
+      return value;
+    } finally {
+      requestCancellation.cancel();
+      requestCancellation.dispose();
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      this.disposeController.signal.removeEventListener("abort", onDispose);
     }
   }
 

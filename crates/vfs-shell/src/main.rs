@@ -451,6 +451,9 @@ unsafe extern "C" {
     #[link_name = "sysroot_rust_src_mount_abort"]
     pub fn sysroot_rust_src_mount_abort();
 
+    #[link_name = "sysroot_rust_src_is_ready"]
+    pub fn sysroot_rust_src_is_ready() -> i32;
+
     #[link_name = "sysroot_rust_src_mount_finish"]
     pub fn sysroot_rust_src_mount_finish(file_count_ptr: i32, total_bytes_ptr: i32) -> i32;
 
@@ -861,9 +864,25 @@ const STARTUP_TARGET_LIB: &str = "/sysroot/lib/rustlib/wasm32-wasip1/lib";
 static STARTUP_SYSROOTS: StartupSysrootBootstraps = StartupSysrootBootstraps::new();
 
 fn rust_src_core_exists_at(path: &Path) -> bool {
-    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(metadata) = file.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.len() == 0 {
+        return false;
+    }
+    let mut first_byte = [0_u8; 1];
+    file.read_exact(&mut first_byte).is_ok()
 }
 
+#[cfg(target_os = "wasi")]
+fn rust_src_core_exists() -> bool {
+    unsafe { sysroot_rust_src_is_ready() != 0 }
+}
+
+#[cfg(not(target_os = "wasi"))]
 fn rust_src_core_exists() -> bool {
     rust_src_core_exists_at(Path::new(RUST_SRC_CORE))
 }
@@ -1590,6 +1609,15 @@ mod tests {
 
         std::fs::write(&path, b"pub mod core;\n").unwrap();
         assert!(rust_src_core_exists_at(&path));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+            assert!(!rust_src_core_exists_at(&path));
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+
         let _ = std::fs::remove_file(path);
     }
 

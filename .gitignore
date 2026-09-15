@@ -8,3 +8,6 @@ page/src/worker_process/vfs_bindings/vfs.core.wasm
 /.worktrees/
 dist-bak
 dist-bak2
+
+/rubrc_git_log.txt
+/crates/vfs/llvm_opt.adjusted.opt.wasm

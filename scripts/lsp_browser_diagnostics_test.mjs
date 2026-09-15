@@ -90,8 +90,8 @@ function assertStartupTimings(label, timings) {
   const expectedPhases = [
     "editor-visible",
     "vfs-starting",
-    "analyzer-initializing",
     "sysroots-loading",
+    "analyzer-initializing",
     "project-activating",
     "semantic-warming",
     "ready",
@@ -185,6 +185,11 @@ async function measureColdStartup(browser) {
           const api = window.__rubrcLspTest;
           if (api?.runtime?.reloadRequired) {
             throw new Error("Runtime reload required");
+          }
+          if (api?.startup?.phase === "failed") {
+            throw new Error(
+              `Startup failed${api.startup.error ? `: ${api.startup.error}` : ""}`,
+            );
           }
           return api?.ready === true && api?.startup?.phase === "ready";
         },
@@ -470,13 +475,25 @@ try {
   });
   await waitForServer();
 
+  const coldBrowser = await puppeteer.launch({
+    headless: true,
+    dumpio: true,
+    protocolTimeout: STARTUP_TIMEOUT_MS + 60_000,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  let coldStartup;
+  try {
+    coldStartup = await measureColdStartup(coldBrowser);
+  } finally {
+    await closeBrowserWithinDeadline(coldBrowser);
+  }
+
   browser = await puppeteer.launch({
     headless: true,
     dumpio: true,
     protocolTimeout: STARTUP_TIMEOUT_MS + 60_000,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
-  const coldStartup = await measureColdStartup(browser);
   const page = await browser.newPage();
   await page.setCacheEnabled(false);
   const browserErrors = [];
@@ -791,8 +808,8 @@ try {
     const expectedHistory = [
       "editor-visible",
       "vfs-starting",
-      "analyzer-initializing",
       "sysroots-loading",
+      "analyzer-initializing",
       "project-activating",
       "semantic-warming",
       "ready",

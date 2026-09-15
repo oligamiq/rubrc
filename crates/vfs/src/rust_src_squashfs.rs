@@ -236,6 +236,15 @@ fn validate_sentinels(fs: &Filesystem) -> Result<(), String> {
                 "rust-src SquashFS sentinel '{path}' is empty or not a file"
             ));
         }
+        let mut first_byte = [0_u8; 1];
+        let read = fs
+            .read_file(&inode, 0, &mut first_byte)
+            .map_err(|e| format!("rust-src SquashFS sentinel '{path}' is unreadable: {e}"))?;
+        if read != first_byte.len() {
+            return Err(format!(
+                "rust-src SquashFS sentinel '{path}' produced a short read"
+            ));
+        }
     }
     Ok(())
 }

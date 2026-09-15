@@ -11,6 +11,7 @@ import type { RuntimeLspDependencies } from "./app_runtime.ts";
 import { createLspConnection } from "./lsp_bridge";
 import { RustAnalyzerReadiness } from "./rust_analyzer_readiness";
 import { RustDocumentSync } from "./rust_document_sync";
+import { SemanticProviderGate } from "./semantic_provider_gate";
 import { mergeVersionedPublishDiagnostics } from "./rust_lsp_client_capabilities";
 import { RustLspResourceOwner } from "./rust_lsp_client_dispose";
 import { createRustAnalyzerConfigurationState } from "./rust_lsp_config";
@@ -26,6 +27,7 @@ import {
   recordGenerationLspProgress,
   recordVfsWrite,
 } from "./lsp_test_api";
+import { getRustAnalyzerParallelism } from "./runtime_parallelism";
 
 class RustMonacoLanguageClient extends MonacoLanguageClient {
   protected override fillInitializeParams(params: InitializeParams): void {
@@ -65,6 +67,7 @@ export async function startRustLspClient(
 ): Promise<StagedAnalyzerSession> {
   const { ctx, signal } = runtime;
   const owner = new RustLspResourceOwner(runtime.adopter);
+  const semanticProviderGate = new SemanticProviderGate();
   const mainUri = "file:///src/main.rs";
   const testGeneration = captureCurrentLspTestGeneration();
 
@@ -74,10 +77,9 @@ export async function startRustLspClient(
     ) as SharedObjectRef;
     owner.setVfsSharedRef(vfsSharedRef);
 
-    const input =
-      vfsSharedRef.proxy<
-        (args: { sessionId: number; data: string }) => Promise<void>
-      >();
+    const input = vfsSharedRef.proxy<
+      (args: { sessionId: number; data: string }) => Promise<void>
+    >();
 
     const writeWorkspace = createWorkspaceVfsWriter(input);
     const writeAndRecordWorkspace = async (path: string, content: string) => {
@@ -88,7 +90,9 @@ export async function startRustLspClient(
       onDidOpenComplete: (uri) => recordDidOpenComplete(uri, testGeneration),
     });
     owner.setSync(sync);
-    const analyzerConfiguration = createRustAnalyzerConfigurationState();
+    const analyzerConfiguration = createRustAnalyzerConfigurationState(
+      getRustAnalyzerParallelism().mainLoopThreads,
+    );
 
     let readiness: RustAnalyzerReadiness | undefined;
     const connection = createLspConnection(
@@ -124,13 +128,20 @@ export async function startRustLspClient(
             kind: vsdiag.DocumentDiagnosticReportKind.full,
             items: [],
           }),
+          provideCodeActions: async (document, range, context, token, next) => {
+            if (!(await semanticProviderGate.wait(token))) return [];
+            return await next(document, range, context, token);
+          },
+          provideInlayHints: async (document, range, token, next) => {
+            if (!(await semanticProviderGate.wait(token))) return [];
+            return await next(document, range, token);
+          },
         },
         initializationOptions: analyzerConfiguration.initializationOptions(),
       },
       messageTransports: connection,
     } satisfies ConstructorParameters<typeof RustMonacoLanguageClient>[0];
-    const client =
-      platform?.createClient(clientOptions) ??
+    const client = platform?.createClient(clientOptions) ??
       new RustMonacoLanguageClient(clientOptions);
     owner.setClient(client);
     readiness = new RustAnalyzerReadiness(client, mainUri);
@@ -192,7 +203,10 @@ export async function startRustLspClient(
               currentModel as Monaco.editor.ITextModel,
               language,
             ),
-          semanticWarming,
+          semanticWarming: () => {
+            semanticProviderGate.open();
+            semanticWarming();
+          },
           reportProjectProgress,
         });
         signal.throwIfAborted();
@@ -203,9 +217,13 @@ export async function startRustLspClient(
         );
       },
       flush: () => sync.flush(),
-      dispose: () => owner.dispose(),
+      dispose: () => {
+        semanticProviderGate.dispose();
+        return owner.dispose();
+      },
     };
   } catch (error) {
+    semanticProviderGate.dispose();
     try {
       await owner.dispose();
     } catch (cleanupError) {

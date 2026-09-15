@@ -4122,166 +4122,6 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       _trampoline11.fnName = 'vfs:host/bridge#ChildProcess.requestStart';
 
       const _trampoline12 = function(arg0, arg1, arg2) {
-        _debugLog('[iface="vfs:host/bridge", function="[static]child-process.request-run"] [Instruction::CallInterface] (sync, @ enter)');
-        const hostProvided = true;
-
-        let parentTask;
-        let task;
-        let subtask;
-
-        const createTask = () => {
-          const results = createNewCurrentTask({
-            componentIdx: -1,
-            isAsync: false,
-            entryFnName: 'ChildProcess.requestRun',
-            getCallbackFn: () => null,
-            callbackFnName: null,
-            errHandling: 'none',
-            callingWasmExport: false,
-          });
-          task = results[0];
-        };
-
-        taskCreation: {
-          parentTask = getCurrentTask(
-          0,
-          _getGlobalCurrentTaskMeta(0)?.taskID,
-          )?.task;
-
-          if (!parentTask) {
-            createTask();
-            break taskCreation;
-          }
-
-          createTask();
-
-          if (hostProvided) {
-            subtask = parentTask.getLatestSubtask();
-            if (!subtask) {
-              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
-            }
-            task.setParentSubtask(subtask);
-          }
-        }
-
-        const started = task.enterSync();
-
-        let ret;
-
-        try {
-          ret = _withGlobalCurrentTaskMeta({
-            componentIdx: task.componentIdx(),
-            taskID: task.id(),
-            fn: () => ChildProcess.requestRun(arg0 >>> 0, arg1, arg2),
-          })
-          ;
-        } catch (err) {
-
-          _debugLog('[Instruction::CallInterface] error during sync call', {
-            taskID: task.id(),
-            subtaskID: task.getParentSubtask()?.id(),
-            err,
-          });
-          task.setErrored(err);
-          task.reject(err);
-          task.exit();
-          throw err;
-
-        }
-
-        _debugLog('[iface="vfs:host/bridge", function="[static]child-process.request-run"][Instruction::Return]', {
-          funcName: '[static]child-process.request-run',
-          paramCount: 1,
-          async: false,
-          postReturn: false
-        });
-        task.resolve([toInt32(ret)]);
-        task.exit();
-        return toInt32(ret);
-      }
-      _trampoline12.fnName = 'vfs:host/bridge#ChildProcess.requestRun';
-
-      const _trampoline13 = function(arg0, arg1, arg2) {
-        _debugLog('[iface="vfs:host/bridge", function="[static]child-process.request-read-error"] [Instruction::CallInterface] (sync, @ enter)');
-        const hostProvided = true;
-
-        let parentTask;
-        let task;
-        let subtask;
-
-        const createTask = () => {
-          const results = createNewCurrentTask({
-            componentIdx: -1,
-            isAsync: false,
-            entryFnName: 'ChildProcess.requestReadError',
-            getCallbackFn: () => null,
-            callbackFnName: null,
-            errHandling: 'none',
-            callingWasmExport: false,
-          });
-          task = results[0];
-        };
-
-        taskCreation: {
-          parentTask = getCurrentTask(
-          0,
-          _getGlobalCurrentTaskMeta(0)?.taskID,
-          )?.task;
-
-          if (!parentTask) {
-            createTask();
-            break taskCreation;
-          }
-
-          createTask();
-
-          if (hostProvided) {
-            subtask = parentTask.getLatestSubtask();
-            if (!subtask) {
-              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
-            }
-            task.setParentSubtask(subtask);
-          }
-        }
-
-        const started = task.enterSync();
-
-        let ret;
-
-        try {
-          ret = _withGlobalCurrentTaskMeta({
-            componentIdx: task.componentIdx(),
-            taskID: task.id(),
-            fn: () => ChildProcess.requestReadError(arg0 >>> 0, arg1, arg2),
-          })
-          ;
-        } catch (err) {
-
-          _debugLog('[Instruction::CallInterface] error during sync call', {
-            taskID: task.id(),
-            subtaskID: task.getParentSubtask()?.id(),
-            err,
-          });
-          task.setErrored(err);
-          task.reject(err);
-          task.exit();
-          throw err;
-
-        }
-
-        _debugLog('[iface="vfs:host/bridge", function="[static]child-process.request-read-error"][Instruction::Return]', {
-          funcName: '[static]child-process.request-read-error',
-          paramCount: 1,
-          async: false,
-          postReturn: false
-        });
-        task.resolve([toInt32(ret)]);
-        task.exit();
-        return toInt32(ret);
-      }
-      _trampoline13.fnName = 'vfs:host/bridge#ChildProcess.requestReadError';
-
-      const _trampoline14 = function(arg0, arg1, arg2) {
         _debugLog('[iface="vfs:host/bridge", function="[static]child-process.request-write"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
 
@@ -4359,7 +4199,167 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline14.fnName = 'vfs:host/bridge#ChildProcess.requestWrite';
+      _trampoline12.fnName = 'vfs:host/bridge#ChildProcess.requestWrite';
+
+      const _trampoline13 = function(arg0, arg1, arg2) {
+        _debugLog('[iface="vfs:host/bridge", function="[static]child-process.request-run"] [Instruction::CallInterface] (sync, @ enter)');
+        const hostProvided = true;
+
+        let parentTask;
+        let task;
+        let subtask;
+
+        const createTask = () => {
+          const results = createNewCurrentTask({
+            componentIdx: -1,
+            isAsync: false,
+            entryFnName: 'ChildProcess.requestRun',
+            getCallbackFn: () => null,
+            callbackFnName: null,
+            errHandling: 'none',
+            callingWasmExport: false,
+          });
+          task = results[0];
+        };
+
+        taskCreation: {
+          parentTask = getCurrentTask(
+          0,
+          _getGlobalCurrentTaskMeta(0)?.taskID,
+          )?.task;
+
+          if (!parentTask) {
+            createTask();
+            break taskCreation;
+          }
+
+          createTask();
+
+          if (hostProvided) {
+            subtask = parentTask.getLatestSubtask();
+            if (!subtask) {
+              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
+            }
+            task.setParentSubtask(subtask);
+          }
+        }
+
+        const started = task.enterSync();
+
+        let ret;
+
+        try {
+          ret = _withGlobalCurrentTaskMeta({
+            componentIdx: task.componentIdx(),
+            taskID: task.id(),
+            fn: () => ChildProcess.requestRun(arg0 >>> 0, arg1, arg2),
+          })
+          ;
+        } catch (err) {
+
+          _debugLog('[Instruction::CallInterface] error during sync call', {
+            taskID: task.id(),
+            subtaskID: task.getParentSubtask()?.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+
+        }
+
+        _debugLog('[iface="vfs:host/bridge", function="[static]child-process.request-run"][Instruction::Return]', {
+          funcName: '[static]child-process.request-run',
+          paramCount: 1,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([toInt32(ret)]);
+        task.exit();
+        return toInt32(ret);
+      }
+      _trampoline13.fnName = 'vfs:host/bridge#ChildProcess.requestRun';
+
+      const _trampoline14 = function(arg0, arg1, arg2) {
+        _debugLog('[iface="vfs:host/bridge", function="[static]child-process.request-read-error"] [Instruction::CallInterface] (sync, @ enter)');
+        const hostProvided = true;
+
+        let parentTask;
+        let task;
+        let subtask;
+
+        const createTask = () => {
+          const results = createNewCurrentTask({
+            componentIdx: -1,
+            isAsync: false,
+            entryFnName: 'ChildProcess.requestReadError',
+            getCallbackFn: () => null,
+            callbackFnName: null,
+            errHandling: 'none',
+            callingWasmExport: false,
+          });
+          task = results[0];
+        };
+
+        taskCreation: {
+          parentTask = getCurrentTask(
+          0,
+          _getGlobalCurrentTaskMeta(0)?.taskID,
+          )?.task;
+
+          if (!parentTask) {
+            createTask();
+            break taskCreation;
+          }
+
+          createTask();
+
+          if (hostProvided) {
+            subtask = parentTask.getLatestSubtask();
+            if (!subtask) {
+              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
+            }
+            task.setParentSubtask(subtask);
+          }
+        }
+
+        const started = task.enterSync();
+
+        let ret;
+
+        try {
+          ret = _withGlobalCurrentTaskMeta({
+            componentIdx: task.componentIdx(),
+            taskID: task.id(),
+            fn: () => ChildProcess.requestReadError(arg0 >>> 0, arg1, arg2),
+          })
+          ;
+        } catch (err) {
+
+          _debugLog('[Instruction::CallInterface] error during sync call', {
+            taskID: task.id(),
+            subtaskID: task.getParentSubtask()?.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+
+        }
+
+        _debugLog('[iface="vfs:host/bridge", function="[static]child-process.request-read-error"][Instruction::Return]', {
+          funcName: '[static]child-process.request-read-error',
+          paramCount: 1,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([toInt32(ret)]);
+        task.exit();
+        return toInt32(ret);
+      }
+      _trampoline14.fnName = 'vfs:host/bridge#ChildProcess.requestReadError';
 
       const _trampoline15 = function(arg0, arg1) {
         _debugLog('[iface="vfs:host/bridge", function="[static]downloader.download-file-start"] [Instruction::CallInterface] (sync, @ enter)');
@@ -4599,86 +4599,6 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       _trampoline17.fnName = 'vfs:host/bridge#Downloader.downloadFileEnd';
 
       const _trampoline18 = function(arg0, arg1, arg2, arg3) {
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"] [Instruction::CallInterface] (sync, @ enter)');
-        const hostProvided = true;
-
-        let parentTask;
-        let task;
-        let subtask;
-
-        const createTask = () => {
-          const results = createNewCurrentTask({
-            componentIdx: -1,
-            isAsync: false,
-            entryFnName: 'Wasip1.fdReadImport',
-            getCallbackFn: () => null,
-            callbackFnName: null,
-            errHandling: 'none',
-            callingWasmExport: false,
-          });
-          task = results[0];
-        };
-
-        taskCreation: {
-          parentTask = getCurrentTask(
-          0,
-          _getGlobalCurrentTaskMeta(0)?.taskID,
-          )?.task;
-
-          if (!parentTask) {
-            createTask();
-            break taskCreation;
-          }
-
-          createTask();
-
-          if (hostProvided) {
-            subtask = parentTask.getLatestSubtask();
-            if (!subtask) {
-              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
-            }
-            task.setParentSubtask(subtask);
-          }
-        }
-
-        const started = task.enterSync();
-
-        let ret;
-
-        try {
-          ret = _withGlobalCurrentTaskMeta({
-            componentIdx: task.componentIdx(),
-            taskID: task.id(),
-            fn: () => Wasip1.fdReadImport(arg0, arg1, arg2, arg3),
-          })
-          ;
-        } catch (err) {
-
-          _debugLog('[Instruction::CallInterface] error during sync call', {
-            taskID: task.id(),
-            subtaskID: task.getParentSubtask()?.id(),
-            err,
-          });
-          task.setErrored(err);
-          task.reject(err);
-          task.exit();
-          throw err;
-
-        }
-
-        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"][Instruction::Return]', {
-          funcName: '[static]wasip1.fd-read-import',
-          paramCount: 1,
-          async: false,
-          postReturn: false
-        });
-        task.resolve([toInt32(ret)]);
-        task.exit();
-        return toInt32(ret);
-      }
-      _trampoline18.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdReadImport';
-
-      const _trampoline19 = function(arg0, arg1, arg2, arg3) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-write-import"] [Instruction::CallInterface] (sync, @ enter)');
         const hostProvided = true;
 
@@ -4756,7 +4676,87 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
         task.exit();
         return toInt32(ret);
       }
-      _trampoline19.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdWriteImport';
+      _trampoline18.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdWriteImport';
+
+      const _trampoline19 = function(arg0, arg1, arg2, arg3) {
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"] [Instruction::CallInterface] (sync, @ enter)');
+        const hostProvided = true;
+
+        let parentTask;
+        let task;
+        let subtask;
+
+        const createTask = () => {
+          const results = createNewCurrentTask({
+            componentIdx: -1,
+            isAsync: false,
+            entryFnName: 'Wasip1.fdReadImport',
+            getCallbackFn: () => null,
+            callbackFnName: null,
+            errHandling: 'none',
+            callingWasmExport: false,
+          });
+          task = results[0];
+        };
+
+        taskCreation: {
+          parentTask = getCurrentTask(
+          0,
+          _getGlobalCurrentTaskMeta(0)?.taskID,
+          )?.task;
+
+          if (!parentTask) {
+            createTask();
+            break taskCreation;
+          }
+
+          createTask();
+
+          if (hostProvided) {
+            subtask = parentTask.getLatestSubtask();
+            if (!subtask) {
+              throw new Error(`Missing subtask (in parent task [${parentTask.id()}]) for host import, has the import been lowered? (ensure asyncImports are set properly)`);
+            }
+            task.setParentSubtask(subtask);
+          }
+        }
+
+        const started = task.enterSync();
+
+        let ret;
+
+        try {
+          ret = _withGlobalCurrentTaskMeta({
+            componentIdx: task.componentIdx(),
+            taskID: task.id(),
+            fn: () => Wasip1.fdReadImport(arg0, arg1, arg2, arg3),
+          })
+          ;
+        } catch (err) {
+
+          _debugLog('[Instruction::CallInterface] error during sync call', {
+            taskID: task.id(),
+            subtaskID: task.getParentSubtask()?.id(),
+            err,
+          });
+          task.setErrored(err);
+          task.reject(err);
+          task.exit();
+          throw err;
+
+        }
+
+        _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-core", function="[static]wasip1.fd-read-import"][Instruction::Return]', {
+          funcName: '[static]wasip1.fd-read-import',
+          paramCount: 1,
+          async: false,
+          postReturn: false
+        });
+        task.resolve([toInt32(ret)]);
+        task.exit();
+        return toInt32(ret);
+      }
+      _trampoline19.fnName = 'wasip1-vfs:host/virtual-file-system-wasip1-core#Wasip1.fdReadImport';
 
       const _trampoline20 = function(arg0) {
         _debugLog('[iface="wasip1-vfs:host/virtual-file-system-wasip1-threads-import", function="[static]wasip1-threads.thread-spawn-import"] [Instruction::CallInterface] (sync, @ enter)');
@@ -9271,11 +9271,11 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
       ({ exports: exports0 } = yield instantiateCore(yield module0, {
         'vfs:host/bridge': {
           '[static]child-process.request-end': trampoline0,
-          '[static]child-process.request-read-error': trampoline13,
+          '[static]child-process.request-read-error': trampoline14,
           '[static]child-process.request-recover': trampoline2,
-          '[static]child-process.request-run': trampoline12,
+          '[static]child-process.request-run': trampoline13,
           '[static]child-process.request-start': trampoline11,
-          '[static]child-process.request-write': trampoline14,
+          '[static]child-process.request-write': trampoline12,
           '[static]downloader.download-file-chunk': trampoline16,
           '[static]downloader.download-file-end': trampoline17,
           '[static]downloader.download-file-start': trampoline15,
@@ -9299,11 +9299,11 @@ export function instantiate(getCoreModule, imports, instantiateCore = WebAssembl
           '[static]wasip1.fd-filestat-get-import': trampoline29,
           '[static]wasip1.fd-prestat-dir-name-import': trampoline31,
           '[static]wasip1.fd-prestat-get-import': trampoline30,
-          '[static]wasip1.fd-read-import': trampoline18,
+          '[static]wasip1.fd-read-import': trampoline19,
           '[static]wasip1.fd-readdir-import': trampoline32,
           '[static]wasip1.fd-seek-import': trampoline33,
           '[static]wasip1.fd-sync-import': trampoline34,
-          '[static]wasip1.fd-write-import': trampoline19,
+          '[static]wasip1.fd-write-import': trampoline18,
           '[static]wasip1.path-create-directory-import': trampoline35,
           '[static]wasip1.path-filestat-get-import': trampoline36,
           '[static]wasip1.path-open-import': trampoline37,

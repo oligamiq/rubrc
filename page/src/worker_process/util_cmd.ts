@@ -467,9 +467,6 @@ async function startUtilityGuest(
   const terminal = new SharedObjectRef(ctx.terminal_id).proxy<
     (args: { sessionId: number; data: Uint8Array }) => Promise<void>
   >();
-  const lsp = new SharedObjectRef(ctx.ls_id).proxy<
-    (args: { data: Uint8Array }) => Promise<void>
-  >();
   const waiter = new SharedObjectRef(ctx.waiter_id).proxy<{
     set_end_of_exec: (_end_of_exec: boolean) => Promise<void>;
   }>();
@@ -490,9 +487,7 @@ async function startUtilityGuest(
         return routeTerminalWrite(
           unknown.args.session_id,
           unknown.args.data,
-          (data) => {
-            observeAsyncFailure(lsp({ data: data as any }), console.error);
-          },
+          () => animal.call_unknown_fn(idx, unknown),
           (sessionId, data) => {
             observeAsyncFailure(
               terminal({ sessionId, data: data as any }),
