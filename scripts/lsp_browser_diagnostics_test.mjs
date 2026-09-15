@@ -90,8 +90,8 @@ function assertStartupTimings(label, timings) {
   const expectedPhases = [
     "editor-visible",
     "vfs-starting",
-    "sysroots-loading",
     "analyzer-initializing",
+    "sysroots-loading",
     "project-activating",
     "semantic-warming",
     "ready",
@@ -808,8 +808,8 @@ try {
     const expectedHistory = [
       "editor-visible",
       "vfs-starting",
-      "sysroots-loading",
       "analyzer-initializing",
+      "sysroots-loading",
       "project-activating",
       "semantic-warming",
       "ready",

@@ -15,7 +15,6 @@ type DidOpenWaiter = {
   resolve(): void;
   reject(error: unknown): void;
 };
-type VersionWaiter = DidOpenWaiter & { version: number };
 
 const defaultScheduler: TimerScheduler = {
   set: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
@@ -36,8 +35,6 @@ export class RustDocumentSync {
   private readonly didCloseWaiters = new Map<string, DidOpenWaiter>();
   private readonly didOpenInFlight = new Map<string, Promise<void>>();
   private readonly strictDidOpen = new Set<string>();
-  private readonly forwardedVersions = new Map<string, number>();
-  private readonly versionWaiters = new Map<string, VersionWaiter[]>();
   private disposed = false;
 
   constructor(
@@ -66,7 +63,6 @@ export class RustDocumentSync {
           try {
             if (snapshot) await this.queueWrite(snapshot, strictVfs);
             await next(document);
-            this.recordForwardedVersion(uri, document.version);
             this.onDidOpenComplete?.(uri);
           } catch (error) {
             this.rejectDidOpen(uri, error);
@@ -89,9 +85,6 @@ export class RustDocumentSync {
           await this.didOpenInFlight.get(snapshot.uri);
         }
         await next(event);
-        if (snapshot) {
-          this.recordForwardedVersion(snapshot.uri, event.document.version);
-        }
       },
       didClose: async (document, next) => {
         const uri = document.uri.toString();
@@ -126,24 +119,6 @@ export class RustDocumentSync {
   waitForStrictDidOpen(uri: string): Promise<void> {
     this.strictDidOpen.add(uri);
     return this.waitForDidOpen(uri);
-  }
-
-  waitForVersionForwarded(uri: string, version: number): Promise<void> {
-    if ((this.forwardedVersions.get(uri) ?? -1) >= version) {
-      return Promise.resolve();
-    }
-
-    let resolve!: () => void;
-    let reject!: (error: unknown) => void;
-    const promise = new Promise<void>((resolvePromise, rejectPromise) => {
-      resolve = resolvePromise;
-      reject = rejectPromise;
-    });
-    void promise.catch(() => {});
-    const waiters = this.versionWaiters.get(uri) ?? [];
-    waiters.push({ version, promise, resolve, reject });
-    this.versionWaiters.set(uri, waiters);
-    return promise;
   }
 
   waitForDidClose(uri: string): Promise<void> {
@@ -195,7 +170,6 @@ export class RustDocumentSync {
     const disposalError = new Error("Rust document sync is disposed");
     this.rejectWaiters(disposalError);
     this.strictDidOpen.clear();
-    this.rejectVersionWaiters(disposalError);
     await this.flush().catch(() => {});
     await Promise.allSettled([...this.didOpenInFlight.values()]);
   }
@@ -213,7 +187,6 @@ export class RustDocumentSync {
     }
     this.pending.clear();
     this.rejectWaiters(reason);
-    this.rejectVersionWaiters(reason);
     this.strictDidOpen.clear();
     this.didOpenInFlight.clear();
   }
@@ -227,28 +200,6 @@ export class RustDocumentSync {
       this.didCloseWaiters.delete(uri);
       waiter.reject(error);
     }
-  }
-
-  private recordForwardedVersion(uri: string, version: number): void {
-    const previous = this.forwardedVersions.get(uri) ?? -1;
-    if (version > previous) this.forwardedVersions.set(uri, version);
-    const current = this.forwardedVersions.get(uri) ?? -1;
-    const waiters = this.versionWaiters.get(uri);
-    if (!waiters) return;
-    const pending: VersionWaiter[] = [];
-    for (const waiter of waiters) {
-      if (waiter.version <= current) waiter.resolve();
-      else pending.push(waiter);
-    }
-    if (pending.length === 0) this.versionWaiters.delete(uri);
-    else this.versionWaiters.set(uri, pending);
-  }
-
-  private rejectVersionWaiters(error: unknown): void {
-    for (const waiters of this.versionWaiters.values()) {
-      for (const waiter of waiters) waiter.reject(error);
-    }
-    this.versionWaiters.clear();
   }
 
   private resolveDidOpen(uri: string): void {

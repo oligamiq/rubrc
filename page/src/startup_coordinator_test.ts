@@ -79,7 +79,7 @@ const immediateDependencies = (
   async installSysroots() {},
 });
 
-Deno.test("coordinator defers analyzer startup until sysroots are installed", async () => {
+Deno.test("coordinator overlaps prefetch with lightweight analyzer startup", async () => {
   const order: string[] = [];
   const phases: string[] = [];
   const vfs = deferred<void>();
@@ -129,32 +129,23 @@ Deno.test("coordinator defers analyzer startup until sysroots are installed", as
 
   vfs.resolve();
   await tick();
-  assert(!order.includes("analyzer:start"), "analyzer started before sysroots");
+  assert(order.includes("analyzer:start"), "analyzer did not start after VFS");
   assert(!order.includes("install:start"), "sysroots installed before inputs");
 
   archives.resolve();
+  analyzer.resolve(fakeSession(order));
   await tick();
   assert(
     order.includes("install:start"),
     "sysroots did not install after inputs",
   );
-  assert(
-    !order.includes("analyzer:start"),
-    "analyzer started while sysroots were installing",
-  );
 
   installed.resolve();
-  await tick();
-  assert(
-    order.includes("analyzer:start"),
-    "analyzer did not start after sysroots",
-  );
-  analyzer.resolve(fakeSession(order));
   await started;
   assertEquals(coordinator.snapshot().phase, "ready", "startup did not finish");
   assertEquals(
     phases.join(","),
-    "editor-visible,vfs-starting,sysroots-loading,analyzer-initializing,project-activating,semantic-warming,ready",
+    "editor-visible,vfs-starting,analyzer-initializing,sysroots-loading,project-activating,semantic-warming,ready",
     "wrong phase sequence",
   );
 });
@@ -422,15 +413,12 @@ Deno.test("coordinator ignores project progress after abort and generation dispo
   }
 });
 
-Deno.test("coordinator preserves sysroot failures without creating an analyzer session", async () => {
+Deno.test("coordinator preserves startup failures and disposes the session", async () => {
   const original = new Error("sysroot installation failed");
   const order: string[] = [];
+  const session = fakeSession(order);
   const coordinator = new StartupCoordinator({
-    ...immediateDependencies(fakeSession(order)),
-    async initializeAnalyzer() {
-      order.push("analyzer");
-      return fakeSession(order);
-    },
+    ...immediateDependencies(session),
     async installSysroots() {
       order.push("install");
       throw original;
@@ -453,26 +441,26 @@ Deno.test("coordinator preserves sysroot failures without creating an analyzer s
   );
   assertEquals(
     order.join(","),
-    "install",
-    "analyzer was created before sysroot installation succeeded",
+    "install,dispose",
+    "session was not cleaned up",
   );
 });
 
 Deno.test("unformattable failures cannot bypass analyzer disposal", async () => {
   const original = Object.create(null);
   let disposed = false;
-  const coordinator = new StartupCoordinator(
-    immediateDependencies(
+  const coordinator = new StartupCoordinator({
+    ...immediateDependencies(
       fakeSession([], {
-        async activateProject() {
-          throw original;
-        },
         async dispose() {
           disposed = true;
         },
       }),
     ),
-  );
+    async installSysroots() {
+      throw original;
+    },
+  });
 
   let caught: unknown;
   await coordinator.start({ getValue: () => "edited" }).catch((error) => {
@@ -536,15 +524,15 @@ Deno.test("publication does not revisit listeners subscribed during delivery", a
 });
 
 Deno.test("subscriber failures cannot replace errors or skip cleanup", async () => {
-  const original = new Error("project activation failed");
+  const original = new Error("sysroot installation failed");
   const listenerError = new Error("render failed");
   const order: string[] = [];
-  const session = fakeSession(order, {
-    async activateProject() {
+  const coordinator = new StartupCoordinator({
+    ...immediateDependencies(fakeSession(order)),
+    async installSysroots() {
       throw original;
     },
   });
-  const coordinator = new StartupCoordinator(immediateDependencies(session));
   coordinator.subscribe((snapshot) => {
     if (snapshot.phase === "failed") throw listenerError;
   });
@@ -562,7 +550,7 @@ Deno.test("subscriber failures cannot replace errors or skip cleanup", async () 
   );
 });
 
-Deno.test("prefetch rejection is observed before analyzer creation", async () => {
+Deno.test("prefetch rejection is observed immediately and retained", async () => {
   const original = new Error("archive download failed");
   const vfs = deferred<void>();
   const order: string[] = [];
@@ -587,7 +575,7 @@ Deno.test("prefetch rejection is observed before analyzer creation", async () =>
   const caught = await started;
 
   assert(caught === original, "prefetch rejection identity was replaced");
-  assertEquals(order.join(","), "", "startup continued after prefetch failure");
+  assertEquals(order.join(","), "analyzer,dispose", "wrong failure cleanup");
 });
 
 Deno.test("late callbacks cannot overwrite a failed snapshot", async () => {
@@ -633,9 +621,9 @@ Deno.test("late callbacks cannot overwrite a failed snapshot", async () => {
 Deno.test("coordinator checks cancellation after each phase await", async () => {
   for (const checkpoint of [
     "vfs",
+    "analyzer",
     "prefetch",
     "install",
-    "analyzer",
     "activate",
   ] as const) {
     const order: string[] = [];
@@ -682,39 +670,55 @@ Deno.test("coordinator checks cancellation after each phase await", async () => 
       .catch(() => {});
     if (checkpoint === "vfs") {
       await vfsEntered.promise;
-    } else if (checkpoint === "prefetch") {
-      vfs.resolve();
-      await tick();
     } else {
       vfs.resolve();
-      prefetch.resolve();
-      await installEntered.promise;
-      if (checkpoint !== "install") {
-        install.resolve();
-        await analyzerEntered.promise;
-        if (checkpoint !== "analyzer") {
-          analyzer.resolve(session);
-          await activateEntered.promise;
+      await analyzerEntered.promise;
+      if (checkpoint === "analyzer") {
+        // Abort while analyzer initialization is still pending.
+      } else {
+        analyzer.resolve(session);
+        if (checkpoint === "prefetch") {
+          await tick();
+        } else {
+          prefetch.resolve();
+          await installEntered.promise;
+          if (checkpoint === "install") {
+            // Abort while sysroot installation is still pending.
+          } else {
+            install.resolve();
+            await activateEntered.promise;
+          }
         }
       }
     }
 
     const disposal = coordinator.dispose();
-    if (checkpoint === "vfs") vfs.resolve();
-    if (checkpoint === "prefetch") prefetch.resolve();
-    if (checkpoint === "install") install.resolve();
+    ({
+      vfs,
+      prefetch,
+      install,
+      activate,
+    })[
+      checkpoint === "analyzer"
+        ? "vfs"
+        : checkpoint === "prefetch"
+          ? "prefetch"
+          : checkpoint === "activate"
+            ? "activate"
+            : checkpoint
+    ].resolve();
     if (checkpoint === "analyzer") analyzer.resolve(session);
-    if (checkpoint === "activate") activate.resolve();
     await startup;
     await disposal;
 
-    const forbidden = checkpoint === "vfs" || checkpoint === "prefetch"
-      ? "install"
-      : checkpoint === "install"
-      ? "analyzer"
-      : checkpoint === "analyzer"
-      ? "activate"
-      : undefined;
+    const forbidden =
+      checkpoint === "vfs"
+        ? "analyzer"
+        : checkpoint === "analyzer" || checkpoint === "prefetch"
+          ? "install"
+          : checkpoint === "install"
+            ? "activate"
+            : undefined;
     assert(
       forbidden === undefined || !order.includes(forbidden),
       `${checkpoint} cancellation continued into ${forbidden}: ${order}`,
@@ -785,7 +789,9 @@ Deno.test("dispose reports late session cleanup failure", async () => {
       analyzerEntered.resolve();
       return await analyzer.promise;
     },
-    async installSysroots() {},
+    async installSysroots() {
+      throw new Error("installation must not start after disposal");
+    },
   });
   const startup = coordinator
     .start({ getValue: () => "edited" })

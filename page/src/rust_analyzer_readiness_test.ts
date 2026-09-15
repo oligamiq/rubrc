@@ -147,9 +147,8 @@ Deno.test("crate graph progress numbers attempts and filters required labels in 
     },
   );
 
-  await readiness.waitForCrateGraph(
-    new AbortController().signal,
-    (event) => progress.push(event),
+  await readiness.waitForCrateGraph(new AbortController().signal, (event) =>
+    progress.push(event),
   );
 
   assert(progress.length === 2, `emitted ${progress.length} progress events`);
@@ -203,9 +202,8 @@ Deno.test("ContentModified emits incomplete crate graph progress before retry", 
     },
   );
 
-  await readiness.waitForCrateGraph(
-    new AbortController().signal,
-    (event) => progress.push(event),
+  await readiness.waitForCrateGraph(new AbortController().signal, (event) =>
+    progress.push(event),
   );
 
   assert(requests === 2, `issued ${requests} graph requests`);
@@ -316,7 +314,7 @@ Deno.test("ordinary crate graph failures do not emit progress", async () => {
   assert(events === 0, `ordinary error emitted ${events} progress events`);
 });
 
-Deno.test("semantic readiness reuses matching pre-graph diagnostics and converts the full range", async () => {
+Deno.test("semantic readiness rejects pre-graph diagnostics and converts the full range", async () => {
   const requests: Array<{ method: string; params: unknown }> = [];
   let sleeps = 0;
   const readiness = new RustAnalyzerReadiness(
@@ -333,6 +331,13 @@ Deno.test("semantic readiness reuses matching pre-graph diagnostics and converts
     {
       sleep: async () => {
         sleeps++;
+        if (sleeps === 2) {
+          readiness.observeMessage({
+            jsonrpc: "2.0",
+            method: "textDocument/publishDiagnostics",
+            params: { uri, version: 7, diagnostics: [] },
+          });
+        }
       },
     },
   );
@@ -359,10 +364,7 @@ Deno.test("semantic readiness reuses matching pre-graph diagnostics and converts
   const hints = requests.filter(
     (request) => request.method === "textDocument/inlayHint",
   );
-  assert(
-    sleeps === 1,
-    `matching pre-graph diagnostics were discarded after ${sleeps} sleeps`,
-  );
+  assert(sleeps === 2, `pre-graph diagnostics counted after ${sleeps} sleeps`);
   assert(hints.length === 1, `issued ${hints.length} hint requests`);
   assert(
     JSON.stringify(hints[0].params) ===
@@ -375,109 +377,6 @@ Deno.test("semantic readiness reuses matching pre-graph diagnostics and converts
       }),
     `wrong hint range: ${JSON.stringify(hints[0].params)}`,
   );
-});
-
-Deno.test("semantic readiness does not require diagnostics to be republished for an unchanged-valid edit", async () => {
-  let hints = 0;
-  const readiness = new RustAnalyzerReadiness(
-    {
-      async sendRequest<R>(method: string): Promise<R> {
-        if (method === "rust-analyzer/viewCrateGraph") {
-          return graph(readyNodes) as R;
-        }
-        hints++;
-        return [] as R;
-      },
-    },
-    uri,
-    { sleep: async () => {} },
-  );
-  await readiness.waitForCrateGraph(new AbortController().signal);
-  readiness.noteDocumentChanged(8);
-  await readiness.waitForSemanticReadiness(
-    {
-      getVersionId: () => 8,
-      getFullModelRange: () => ({
-        startLineNumber: 1,
-        startColumn: 1,
-        endLineNumber: 1,
-        endColumn: 1,
-      }),
-    },
-    new AbortController().signal,
-  );
-  assert(
-    hints === 1,
-    `semantic probe did not complete without diagnostics: ${hints}`,
-  );
-});
-
-Deno.test("same-version document notification preserves diagnostics while a new version invalidates them", async () => {
-  let version = 4;
-  let sleeps = 0;
-  let hints = 0;
-  const readiness = new RustAnalyzerReadiness(
-    {
-      async sendRequest<R>(method: string): Promise<R> {
-        if (method === "rust-analyzer/viewCrateGraph") {
-          return graph(readyNodes) as R;
-        }
-        hints++;
-        return [] as R;
-      },
-    },
-    uri,
-    {
-      sleep: async () => {
-        sleeps++;
-        if (sleeps === 2) {
-          readiness.observeMessage({
-            method: "textDocument/publishDiagnostics",
-            params: { uri, version, diagnostics: [] },
-          });
-        }
-      },
-    },
-  );
-  readiness.observeMessage({
-    method: "textDocument/publishDiagnostics",
-    params: { uri, version, diagnostics: [] },
-  });
-  await readiness.waitForCrateGraph(new AbortController().signal);
-  readiness.noteDocumentChanged(version);
-  await readiness.waitForSemanticReadiness(
-    {
-      getVersionId: () => version,
-      getFullModelRange: () => ({
-        startLineNumber: 1,
-        startColumn: 1,
-        endLineNumber: 1,
-        endColumn: 1,
-      }),
-    },
-    new AbortController().signal,
-  );
-  assert(
-    hints === 1,
-    `same-version diagnostics did not satisfy readiness: ${hints}`,
-  );
-
-  version = 5;
-  readiness.noteDocumentChanged(version);
-  await readiness.waitForSemanticReadiness(
-    {
-      getVersionId: () => version,
-      getFullModelRange: () => ({
-        startLineNumber: 1,
-        startColumn: 1,
-        endLineNumber: 1,
-        endColumn: 1,
-      }),
-    },
-    new AbortController().signal,
-  );
-  assert(sleeps >= 2, `new-version diagnostics were not required: ${sleeps}`);
-  assert(hints === 2, `new-version readiness issued ${hints} hint probes`);
 });
 
 Deno.test("document changes clear diagnostics and invalidate an in-flight hint", async () => {

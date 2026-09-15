@@ -221,7 +221,7 @@ export class RustAnalyzerReadiness {
   }
 
   observeMessage(message: unknown): void {
-    if (!isObject(message)) return;
+    if (!this.crateGraphReady || !isObject(message)) return;
     if (message.method !== "textDocument/publishDiagnostics") return;
     const params = message.params;
     if (!isObject(params) || params.uri !== this.uri) return;
@@ -234,10 +234,8 @@ export class RustAnalyzerReadiness {
     }
   }
 
-  noteDocumentChanged(version: number): void {
-    if (this.diagnosticsVersion !== version) {
-      this.diagnosticsVersion = undefined;
-    }
+  noteDocumentChanged(_version: number): void {
+    this.diagnosticsVersion = undefined;
     this.generation++;
     this.semanticDeadline = this.now() + this.timeoutMs;
   }
@@ -295,6 +293,7 @@ export class RustAnalyzerReadiness {
       );
       if (ready) {
         this.crateGraphReady = true;
+        this.diagnosticsVersion = undefined;
         return;
       }
       await this.awaitPhaseOperation(
@@ -332,6 +331,7 @@ export class RustAnalyzerReadiness {
       if (generationBeforeSleep !== this.generation) continue;
 
       const version = model.getVersionId();
+      if (this.diagnosticsVersion !== version) continue;
       const generation = this.generation;
       const range = model.getFullModelRange();
 
@@ -361,7 +361,8 @@ export class RustAnalyzerReadiness {
 
       if (
         generation === this.generation &&
-        version === model.getVersionId()
+        version === model.getVersionId() &&
+        this.diagnosticsVersion === version
       ) {
         return;
       }

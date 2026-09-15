@@ -287,9 +287,9 @@ export function createProductionRuntimeDependencies(options: {
             fileName = "";
             fileChunks = [];
           } else if (unknown.name === "terminalWrite") {
-            return routeWasiTerminalWrite(
+            routeWasiTerminalWrite(
               unknown.args as { session_id: number; data: unknown },
-              (lspMessage) => lsp(lspMessage),
+              (lspMessage) => void lsp(lspMessage).catch(console.error),
               (sessionId, data) => terminal.write(sessionId, bytes(data)),
             );
           } else {

@@ -16,22 +16,22 @@ type Root = {
   freeBuf(ptr: number, length: number): void;
 };
 
-export function routeTerminalWrite<TLsp, TTerminal>(
+export function routeTerminalWrite(
   sessionId: number,
   data: unknown,
-  lsp: (data: unknown) => TLsp,
-  terminal: (sessionId: number, data: unknown) => TTerminal,
-): TLsp | TTerminal {
-  if (isLspSession(sessionId)) return lsp(data);
-  return terminal(sessionId, data);
+  lsp: (data: unknown) => void,
+  terminal: (sessionId: number, data: unknown) => void,
+): void {
+  if (isLspSession(sessionId)) lsp(data);
+  else terminal(sessionId, data);
 }
 
-export function routeWasiTerminalWrite<TLsp, TTerminal>(
+export function routeWasiTerminalWrite(
   args: { session_id: number; data: unknown },
-  lsp: (message: { data: unknown }) => TLsp,
-  terminal: (sessionId: number, data: unknown) => TTerminal,
-): TLsp | TTerminal {
-  return routeTerminalWrite(
+  lsp: (message: { data: unknown }) => void,
+  terminal: (sessionId: number, data: unknown) => void,
+): void {
+  routeTerminalWrite(
     args.session_id,
     args.data,
     (data) => lsp({ data }),

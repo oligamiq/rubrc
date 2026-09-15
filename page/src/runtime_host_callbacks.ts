@@ -67,8 +67,7 @@ export function createRuntimeHostCallbackOwner(
     if (isChildProcessMessage(message)) {
       return track(options.child.handle(message));
     }
-    const app = options.handleSynchronousMessage(message);
-    return app instanceof Promise ? track(app) : app;
+    return options.handleSynchronousMessage(message);
   };
 
   const dispose = () => {

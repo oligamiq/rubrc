@@ -28,7 +28,6 @@ export type RustProjectActivation<TModel> = {
   sync: {
     waitForDidClose(uri: string): Promise<void>;
     waitForStrictDidOpen(uri: string): Promise<void>;
-    waitForVersionForwarded?(uri: string, version: number): Promise<void>;
   };
   setModelLanguage(model: TModel, language: string): void;
   semanticWarming(): void;
@@ -122,13 +121,6 @@ export async function activateRustProject<TModel>(
   signal.throwIfAborted();
   semanticWarming();
   signal.throwIfAborted();
-  if (sync.waitForVersionForwarded) {
-    await awaitWithAbort(
-      sync.waitForVersionForwarded(uri, model.getVersionId()),
-      signal,
-    );
-    signal.throwIfAborted();
-  }
   await awaitWithAbort(
     readiness.waitForSemanticReadiness(model, signal),
     signal,
@@ -177,8 +169,8 @@ export async function runRustLspStartup(
     void startupPromise.catch(() => undefined);
     await Promise.race([startupPromise, startupTimeout, aborted]);
   } catch (error) {
-    const activelyCancelled = error === timeoutError ||
-      (signal.aborted && error === signal.reason);
+    const activelyCancelled =
+      error === timeoutError || (signal.aborted && error === signal.reason);
     if (activelyCancelled && startupPromise) {
       if (startPromise) {
         try {
