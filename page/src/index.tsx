@@ -3,6 +3,7 @@ import "./index.css";
 import { render } from "solid-js/web";
 import { MonacoVscodeApiWrapper } from "monaco-languageclient/vscodeApiWrapper";
 import "@codingame/monaco-vscode-theme-defaults-default-extension";
+import "@codingame/monaco-vscode-rust-default-extension";
 import { registerWorkspaceFileProvider } from "./workspace_file_provider";
 import { workspaceFileSystem } from "./workspace_fs.ts";
 import { RuntimeSupervisor } from "./app_runtime.ts";
@@ -33,7 +34,14 @@ if (!window.__MONACO_VSCODE_INITIALIZED__) {
   const apiWrapper = new MonacoVscodeApiWrapper({
     $type: "extended",
     viewsConfig: { $type: "EditorService" },
-    userConfiguration: { json: '{"editor.fontSize": 14}' },
+    userConfiguration: {
+      json: JSON.stringify({
+        "editor.fontSize": 14,
+        "[rust]": {
+          "editor.semanticHighlighting.enabled": false,
+        },
+      }),
+    },
     workspaceConfig: {
       workspaceProvider: {
         trusted: true,
