@@ -215,7 +215,7 @@ Deno.test("development rust-src lifecycle stays ignored and outside production",
 
   assert(
     rootPackage.scripts["rust-src:prepare-dev-asset"] ===
-      "deno run --no-lock --allow-read --allow-write --allow-net --allow-run=mksquashfs,unsquashfs scripts/prepare_rust_src_dev_asset.ts",
+      "deno run --no-lock --allow-read --allow-write --allow-net --allow-run=mksquashfs,unsquashfs,gensquashfs,rdsquashfs scripts/prepare_rust_src_dev_asset.ts",
     "root development preparation command changed",
   );
   assert(

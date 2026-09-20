@@ -144,6 +144,26 @@ export function deterministicRustSrcSquashfsArgs(
   ];
 }
 
+export function deterministicRustSrcSquashfsNgArgs(
+  libraryPath: string,
+  outputPath: string,
+  packFilePath: string,
+): string[] {
+  return [
+    "--pack-file", packFilePath,
+    "--pack-dir", libraryPath,
+    "--compressor", "zstd",
+    "--comp-extra", "level=22",
+    "--block-size", "262144",
+    "--defaults", "uid=0,gid=0,mode=0755,mtime=0",
+    "--all-root",
+    "--num-jobs", "1",
+    "--quiet",
+    "--force",
+    outputPath,
+  ];
+}
+
 type RustSrcArchiveEntryLister = (
   archive: Uint8Array,
 ) => Promise<readonly string[]>;
