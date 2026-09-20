@@ -8,6 +8,7 @@ crate-type = ["cdylib"]
 
 [features]
 debugging = ["wasi_virt_layer/trace"]
+stdio-profiling = []
 default = []
 
 [dependencies]

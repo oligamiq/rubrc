@@ -5,10 +5,12 @@ use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
+#[cfg(feature = "stdio-profiling")]
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use wasi_virt_layer::__private::wasip1::{self, Ciovec, Dircookie, Fd, Size};
 use wasi_virt_layer::memory::{
-    WasmAccessName, WasmPathAccess, WasmPathComponent, WasmPathComponentCommon,
+    WasmAccess, WasmAccessName, WasmPathAccess, WasmPathComponent, WasmPathComponentCommon,
 };
 use wasi_virt_layer::wasi::file::Wasip1LFSBase;
 use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
@@ -57,9 +59,6 @@ fn startup_sysroot_shell_event(event_type: u32) -> Option<u32> {
         _ => None,
     }
 }
-
-pub static THREAD_SESSIONS: std::sync::LazyLock<dashmap::DashMap<std::thread::ThreadId, u32>> =
-    std::sync::LazyLock::new(|| dashmap::DashMap::new());
 
 static LSP_STDIN: std::sync::LazyLock<(parking_lot::Mutex<Vec<u8>>, parking_lot::Condvar)> =
     std::sync::LazyLock::new(|| {
@@ -610,6 +609,10 @@ fn set_debug_terminal_capture(enabled: bool, trace_value: Option<&str>) {
     DEBUG_TERMINAL_CAPTURE.store(false, Ordering::SeqCst);
     *DEBUG_TERMINAL_OUTPUT.lock() = DebugState::new(64 * 1024);
     DEBUG_RA_BOUNDARY_DROPPED.store(0, Ordering::Relaxed);
+    #[cfg(feature = "stdio-profiling")]
+    if enabled {
+        reset_stdio_profile();
+    }
     if enabled {
         DEBUG_TERMINAL_CAPTURE.store(true, Ordering::SeqCst);
     }
@@ -973,6 +976,9 @@ impl Guest for Wit {
             return;
         }
 
+        #[cfg(feature = "stdio-profiling")]
+        append_stdio_profile_snapshot();
+
         #[cfg(feature = "debugging")]
         {
             if !THREAD_POOL.is_initialized() {
@@ -1032,167 +1038,333 @@ pub static VIRTUAL_SHELL_ENV: std::sync::LazyLock<parking_lot::Mutex<VirtualEnvS
         })
     });
 
+#[cfg(feature = "stdio-profiling")]
+#[derive(Debug)]
+enum StdioProfileOperation {
+    Read,
+    Write,
+    Ewrite,
+}
+
+#[cfg(feature = "stdio-profiling")]
+#[derive(Debug)]
+struct StdioProfileCounters {
+    read_calls: AtomicU64,
+    read_bytes: AtomicU64,
+    read_ns: AtomicU64,
+    write_calls: AtomicU64,
+    write_bytes: AtomicU64,
+    write_ns: AtomicU64,
+    ewrite_calls: AtomicU64,
+    ewrite_bytes: AtomicU64,
+    ewrite_ns: AtomicU64,
+}
+
+#[cfg(feature = "stdio-profiling")]
+impl StdioProfileCounters {
+    const fn new() -> Self {
+        Self {
+            read_calls: AtomicU64::new(0),
+            read_bytes: AtomicU64::new(0),
+            read_ns: AtomicU64::new(0),
+            write_calls: AtomicU64::new(0),
+            write_bytes: AtomicU64::new(0),
+            write_ns: AtomicU64::new(0),
+            ewrite_calls: AtomicU64::new(0),
+            ewrite_bytes: AtomicU64::new(0),
+            ewrite_ns: AtomicU64::new(0),
+        }
+    }
+
+    fn record(&self, operation: StdioProfileOperation, bytes: usize, elapsed_ns: u64) {
+        let bytes = bytes as u64;
+        match operation {
+            StdioProfileOperation::Read => {
+                self.read_calls.fetch_add(1, Ordering::Relaxed);
+                self.read_bytes.fetch_add(bytes, Ordering::Relaxed);
+                self.read_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
+            }
+            StdioProfileOperation::Write => {
+                self.write_calls.fetch_add(1, Ordering::Relaxed);
+                self.write_bytes.fetch_add(bytes, Ordering::Relaxed);
+                self.write_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
+            }
+            StdioProfileOperation::Ewrite => {
+                self.ewrite_calls.fetch_add(1, Ordering::Relaxed);
+                self.ewrite_bytes.fetch_add(bytes, Ordering::Relaxed);
+                self.ewrite_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
+            }
+        }
+    }
+
+    fn reset(&self) {
+        self.read_calls.store(0, Ordering::Relaxed);
+        self.read_bytes.store(0, Ordering::Relaxed);
+        self.read_ns.store(0, Ordering::Relaxed);
+        self.write_calls.store(0, Ordering::Relaxed);
+        self.write_bytes.store(0, Ordering::Relaxed);
+        self.write_ns.store(0, Ordering::Relaxed);
+        self.ewrite_calls.store(0, Ordering::Relaxed);
+        self.ewrite_bytes.store(0, Ordering::Relaxed);
+        self.ewrite_ns.store(0, Ordering::Relaxed);
+    }
+
+    fn snapshot_line(&self, target: &str) -> String {
+        format!(
+            "[stdio-profile] target={target} read_calls={} read_bytes={} read_ns={} write_calls={} write_bytes={} write_ns={} ewrite_calls={} ewrite_bytes={} ewrite_ns={}",
+            self.read_calls.load(Ordering::Relaxed),
+            self.read_bytes.load(Ordering::Relaxed),
+            self.read_ns.load(Ordering::Relaxed),
+            self.write_calls.load(Ordering::Relaxed),
+            self.write_bytes.load(Ordering::Relaxed),
+            self.write_ns.load(Ordering::Relaxed),
+            self.ewrite_calls.load(Ordering::Relaxed),
+            self.ewrite_bytes.load(Ordering::Relaxed),
+            self.ewrite_ns.load(Ordering::Relaxed),
+        )
+    }
+}
+
+#[cfg(feature = "stdio-profiling")]
+static STDIO_PROFILE_LSP: StdioProfileCounters = StdioProfileCounters::new();
+#[cfg(feature = "stdio-profiling")]
+static STDIO_PROFILE_CARGO: StdioProfileCounters = StdioProfileCounters::new();
+#[cfg(feature = "stdio-profiling")]
+static STDIO_PROFILE_RUSTC: StdioProfileCounters = StdioProfileCounters::new();
+#[cfg(feature = "stdio-profiling")]
+static STDIO_PROFILE_LLVM: StdioProfileCounters = StdioProfileCounters::new();
+#[cfg(feature = "stdio-profiling")]
+static STDIO_PROFILE_VFS_SHELL: StdioProfileCounters = StdioProfileCounters::new();
+#[cfg(feature = "stdio-profiling")]
+static STDIO_PROFILE_OTHER: StdioProfileCounters = StdioProfileCounters::new();
+
+#[cfg(feature = "stdio-profiling")]
+fn stdio_profile_for<Wasm: 'static>() -> &'static StdioProfileCounters {
+    let id = TypeId::of::<Wasm>();
+    if id == TypeId::of::<lsp_opt>() {
+        &STDIO_PROFILE_LSP
+    } else if id == TypeId::of::<cargo_opt>() {
+        &STDIO_PROFILE_CARGO
+    } else if id == TypeId::of::<rustc_opt>() {
+        &STDIO_PROFILE_RUSTC
+    } else if id == TypeId::of::<llvm_opt>() {
+        &STDIO_PROFILE_LLVM
+    } else if id == TypeId::of::<vfs_shell>() {
+        &STDIO_PROFILE_VFS_SHELL
+    } else {
+        &STDIO_PROFILE_OTHER
+    }
+}
+
+#[cfg(feature = "stdio-profiling")]
+fn reset_stdio_profile() {
+    for counters in [
+        &STDIO_PROFILE_LSP,
+        &STDIO_PROFILE_CARGO,
+        &STDIO_PROFILE_RUSTC,
+        &STDIO_PROFILE_LLVM,
+        &STDIO_PROFILE_VFS_SHELL,
+        &STDIO_PROFILE_OTHER,
+    ] {
+        counters.reset();
+    }
+}
+
+#[cfg(feature = "stdio-profiling")]
+fn append_stdio_profile_snapshot() {
+    let snapshots = [
+        STDIO_PROFILE_LSP.snapshot_line("lsp_opt"),
+        STDIO_PROFILE_CARGO.snapshot_line("cargo_opt"),
+        STDIO_PROFILE_RUSTC.snapshot_line("rustc_opt"),
+        STDIO_PROFILE_LLVM.snapshot_line("llvm_opt"),
+        STDIO_PROFILE_VFS_SHELL.snapshot_line("vfs_shell"),
+        STDIO_PROFILE_OTHER.snapshot_line("other"),
+    ];
+    with_debug_state(|state| {
+        for snapshot in &snapshots {
+            state.push_event(snapshot);
+        }
+    });
+}
+
+#[cfg(feature = "stdio-profiling")]
+fn record_stdio_profile<Wasm: 'static>(
+    operation: StdioProfileOperation,
+    bytes: usize,
+    started: std::time::Instant,
+) {
+    stdio_profile_for::<Wasm>().record(
+        operation,
+        bytes,
+        started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+    );
+}
+
+#[derive(Clone, Copy, Debug)]
+enum StdioStream {
+    Stdout,
+    Stderr,
+}
+
+fn is_lsp_wasm<Wasm: 'static>() -> bool {
+    TypeId::of::<Wasm>() == TypeId::of::<lsp_opt>()
+}
+
+fn route_stdio_output<Wasm: WasmAccess + WasmAccessName + 'static>(
+    stream: StdioStream,
+    buf: &[u8],
+) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+    {
+        let mut process = CHILD_PROCESS_STDIO.lock();
+        if let Some(process) = process.as_mut() {
+            if process.is_owner() {
+                let (written, pipe_kind, buffered_len) = match stream {
+                    StdioStream::Stdout => {
+                        let written = process.stdout.write(buf);
+                        (written, PipeKind::Stdout, process.stdout.buffered_len())
+                    }
+                    StdioStream::Stderr => {
+                        let written = process.stderr.write(buf);
+                        (written, PipeKind::Stderr, process.stderr.buffered_len())
+                    }
+                };
+                if let Some(invocation_id) = process.debug_invocation_id {
+                    with_debug_state(|state| {
+                        state.set_pipe_state(invocation_id, pipe_kind, buffered_len, false);
+                    });
+                }
+                return Ok(written);
+            }
+        }
+    }
+
+    let stderr = matches!(stream, StdioStream::Stderr);
+    let wasm_id = TypeId::of::<Wasm>();
+    if wasm_id == TypeId::of::<cargo_opt>() && capture_host_cargo_output(stderr, buf) {
+        return Ok(buf.len());
+    }
+    if wasm_id == TypeId::of::<rustc_opt>() && capture_cargo_output(stderr, buf) {
+        return Ok(buf.len());
+    }
+
+    let id = crate::shell::CURRENT_CONTEXT_ID
+        .with(|id| id.get())
+        .unwrap_or(0);
+    if id != 0 {
+        let len = buf.len() as u32;
+        let shell_ptr = unsafe { crate::shell::vfs_shell_alloc_buf(len) };
+        vfs_shell::memcpy(shell_ptr as *mut u8, buf);
+        let written = match stream {
+            StdioStream::Stdout => unsafe {
+                crate::shell::vfs_shell_write_stdout(id, shell_ptr, len)
+            },
+            StdioStream::Stderr => unsafe {
+                crate::shell::vfs_shell_write_stderr(id, shell_ptr, len)
+            },
+        };
+        unsafe { crate::shell::vfs_shell_free_buf(shell_ptr, len) };
+        return Ok(written as usize);
+    }
+
+    let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
+    if session_id != 0 {
+        crate::vfs::host::bridge::Terminal::terminal_write(
+            session_id,
+            buf.as_ptr() as i32,
+            buf.len() as i32,
+        );
+        return Ok(buf.len());
+    }
+
+    if is_lsp_wasm::<Wasm>() {
+        crate::vfs::host::bridge::Terminal::terminal_write(
+            LSP_SESSION_ID,
+            buf.as_ptr() as i32,
+            buf.len() as i32,
+        );
+        return Ok(buf.len());
+    }
+
+    match stream {
+        StdioStream::Stdout => <wasi_virt_layer::wasi::file::stdio::DefaultStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::write::<Wasm>(buf),
+        StdioStream::Stderr => <wasi_virt_layer::wasi::file::stdio::DefaultStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::ewrite::<Wasm>(buf),
+    }
+}
+
+fn route_stdio_read<Wasm: WasmAccess + WasmAccessName + 'static>(
+    buf: &mut [u8],
+) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+    {
+        let mut process = CHILD_PROCESS_STDIO.lock();
+        if let Some(process) = process.as_mut() {
+            if process.is_owner() {
+                return Ok(process.stdin.read(buf));
+            }
+        }
+    }
+
+    if is_lsp_wasm::<Wasm>() {
+        let (lock, cvar) = &*LSP_STDIN;
+        let mut stdin = lock.lock();
+        while stdin.is_empty() {
+            cvar.wait(&mut stdin);
+        }
+        let len = std::cmp::min(buf.len(), stdin.len());
+        buf[..len].copy_from_slice(&stdin[..len]);
+        stdin.drain(..len);
+        Ok(len)
+    } else {
+        <wasi_virt_layer::wasi::file::stdio::DefaultStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::read::<Wasm>(buf)
+    }
+}
+
 #[derive(Debug)]
 pub struct ShellVirtualStdIO;
 
 impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
-    fn write(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
-        {
-            let mut process = CHILD_PROCESS_STDIO.lock();
-            if let Some(process) = process.as_mut() {
-                if process.is_owner() {
-                    let written = process.stdout.write(buf);
-                    if let Some(invocation_id) = process.debug_invocation_id {
-                        // Keep writes ordered before EOF updates in the guard's drop path.
-                        with_debug_state(|state| {
-                            state.set_pipe_state(
-                                invocation_id,
-                                PipeKind::Stdout,
-                                process.stdout.buffered_len(),
-                                false,
-                            );
-                        });
-                    }
-                    return Ok(written);
-                }
-            }
-        }
-
-        if capture_host_cargo_output(false, buf) {
-            return Ok(buf.len());
-        }
-
-        if capture_cargo_output(false, buf) {
-            return Ok(buf.len());
-        }
-
-        let id = crate::shell::CURRENT_CONTEXT_ID
-            .with(|id| id.get())
-            .unwrap_or(0);
-        if id != 0 {
-            let len = buf.len() as u32;
-            // 1. Allocate buffer in vfs-shell's memory
-            let shell_ptr = unsafe { crate::shell::vfs_shell_alloc_buf(len) };
-            // 2. Copy our data into vfs-shell's memory via cross-Wasm memcpy
-            vfs_shell::memcpy(shell_ptr as *mut u8, buf);
-            // 3. Tell vfs-shell to write from its own memory (scalar-only call)
-            let written = unsafe { crate::shell::vfs_shell_write_stdout(id, shell_ptr, len) };
-            // 4. Free the buffer in vfs-shell's memory
-            unsafe { crate::shell::vfs_shell_free_buf(shell_ptr, len) };
-            Ok(written as usize)
-        } else {
-            let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
-            if session_id == LSP_SESSION_ID || session_id != 0 {
-                crate::vfs::host::bridge::Terminal::terminal_write(
-                    session_id,
-                    buf.as_ptr() as i32,
-                    buf.len() as i32,
-                );
-                Ok(buf.len())
-            } else {
-                let mut is_lsp = false;
-                let current_thread = std::thread::current().id();
-
-                if buf.starts_with(b"Content-Length: ") || buf.starts_with(b"{\"jsonrpc\"") {
-                    crate::THREAD_SESSIONS.insert(current_thread, LSP_SESSION_ID);
-                }
-
-                if let Some(sid) = crate::THREAD_SESSIONS.get(&current_thread) {
-                    if *sid == LSP_SESSION_ID {
-                        is_lsp = true;
-                    }
-                }
-
-                if is_lsp {
-                    crate::vfs::host::bridge::Terminal::terminal_write(
-                        LSP_SESSION_ID,
-                        buf.as_ptr() as i32,
-                        buf.len() as i32,
-                    );
-                    Ok(buf.len())
-                } else {
-                    wasi_virt_layer::wasi::file::stdio::DefaultStdIO::write(buf)
-                }
-            }
-        }
+    fn write<Wasm: WasmAccess + WasmAccessName + 'static>(
+        buf: &[u8],
+    ) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        #[cfg(feature = "stdio-profiling")]
+        let started = std::time::Instant::now();
+        let result = route_stdio_output::<Wasm>(StdioStream::Stdout, buf);
+        #[cfg(feature = "stdio-profiling")]
+        record_stdio_profile::<Wasm>(
+            StdioProfileOperation::Write,
+            result.as_ref().copied().unwrap_or(0),
+            started,
+        );
+        result
     }
-    fn ewrite(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
-        {
-            let mut process = CHILD_PROCESS_STDIO.lock();
-            if let Some(process) = process.as_mut() {
-                if process.is_owner() {
-                    let written = process.stderr.write(buf);
-                    if let Some(invocation_id) = process.debug_invocation_id {
-                        with_debug_state(|state| {
-                            state.set_pipe_state(
-                                invocation_id,
-                                PipeKind::Stderr,
-                                process.stderr.buffered_len(),
-                                false,
-                            );
-                        });
-                    }
-                    return Ok(written);
-                }
-            }
-        }
 
-        if capture_host_cargo_output(true, buf) {
-            return Ok(buf.len());
-        }
-
-        if capture_cargo_output(true, buf) {
-            return Ok(buf.len());
-        }
-
-        let id = crate::shell::CURRENT_CONTEXT_ID
-            .with(|id| id.get())
-            .unwrap_or(0);
-        if id != 0 {
-            let len = buf.len() as u32;
-            let shell_ptr = unsafe { crate::shell::vfs_shell_alloc_buf(len) };
-            vfs_shell::memcpy(shell_ptr as *mut u8, buf);
-            let written = unsafe { crate::shell::vfs_shell_write_stderr(id, shell_ptr, len) };
-            unsafe { crate::shell::vfs_shell_free_buf(shell_ptr, len) };
-            Ok(written as usize)
-        } else {
-            let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
-            if session_id == LSP_SESSION_ID || session_id != 0 {
-                crate::vfs::host::bridge::Terminal::terminal_write(
-                    session_id,
-                    buf.as_ptr() as i32,
-                    buf.len() as i32,
-                );
-                Ok(buf.len())
-            } else {
-                wasi_virt_layer::wasi::file::stdio::DefaultStdIO::ewrite(buf)
-            }
-        }
+    fn ewrite<Wasm: WasmAccess + WasmAccessName + 'static>(
+        buf: &[u8],
+    ) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        #[cfg(feature = "stdio-profiling")]
+        let started = std::time::Instant::now();
+        let result = route_stdio_output::<Wasm>(StdioStream::Stderr, buf);
+        #[cfg(feature = "stdio-profiling")]
+        record_stdio_profile::<Wasm>(
+            StdioProfileOperation::Ewrite,
+            result.as_ref().copied().unwrap_or(0),
+            started,
+        );
+        result
     }
-    fn read(buf: &mut [u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
-        {
-            let mut process = CHILD_PROCESS_STDIO.lock();
-            if let Some(process) = process.as_mut() {
-                if process.is_owner() {
-                    return Ok(process.stdin.read(buf));
-                }
-            }
-        }
 
-        let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
-        if session_id == LSP_SESSION_ID || (session_id == 0 && LSP_START_ONCE.is_started()) {
-            let (lock, cvar) = &*LSP_STDIN;
-            let mut stdin = lock.lock();
-            while stdin.is_empty() {
-                cvar.wait(&mut stdin);
-            }
-            let len = std::cmp::min(buf.len(), stdin.len());
-            buf[..len].copy_from_slice(&stdin[..len]);
-            stdin.drain(..len);
-            Ok(len)
-        } else {
-            wasi_virt_layer::wasi::file::stdio::DefaultStdIO::read(buf)
-        }
+    fn read<Wasm: WasmAccess + WasmAccessName + 'static>(
+        buf: &mut [u8],
+    ) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        #[cfg(feature = "stdio-profiling")]
+        let started = std::time::Instant::now();
+        let result = route_stdio_read::<Wasm>(buf);
+        #[cfg(feature = "stdio-profiling")]
+        record_stdio_profile::<Wasm>(
+            StdioProfileOperation::Read,
+            result.as_ref().copied().unwrap_or(0),
+            started,
+        );
+        result
     }
 }
 
@@ -5434,7 +5606,7 @@ mod invocation_state_tests {
         let _run_guard = CARGO_RUN_LOCK.lock();
         *HOST_CARGO_OUTPUT.lock() = Some(CargoOutput::default());
         let written = std::thread::spawn(|| {
-            <ShellVirtualStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::write(
+            <ShellVirtualStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::write::<cargo_opt>(
                 b"metadata-json",
             )
             .unwrap()
@@ -5458,7 +5630,7 @@ mod invocation_state_tests {
         )));
 
         let written = std::thread::spawn(|| {
-            <ShellVirtualStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::write(
+            <ShellVirtualStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::write::<cargo_opt>(
                 b"metadata-during-rustc",
             )
             .unwrap()

@@ -1,7 +1,9 @@
 use const_struct::*;
+use std::any::TypeId;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use wasi_virt_layer::memory::{WasmAccess, WasmAccessName};
 use wasi_virt_layer::{file::*, poll::*, prelude::*, thread::VirtualThreadPool};
 
 pub mod memory_manager;
@@ -15,9 +17,6 @@ const LSP_SESSION_ID: u32 = 0xFFFFFFFF;
 const EVENT_TYPE_LSP: u32 = 6;
 const EVENT_TYPE_WRITE_FILE: u32 = 7;
 const EVENT_TYPE_DEBUG_FIXED_RUSTC: u32 = 1007;
-pub static THREAD_SESSIONS: std::sync::LazyLock<dashmap::DashMap<std::thread::ThreadId, u32>> =
-    std::sync::LazyLock::new(|| dashmap::DashMap::new());
-
 static LSP_STDIN: std::sync::LazyLock<(parking_lot::Mutex<Vec<u8>>, parking_lot::Condvar)> =
     std::sync::LazyLock::new(|| {
         (
@@ -428,109 +427,107 @@ pub static VIRTUAL_SHELL_ENV: std::sync::LazyLock<parking_lot::Mutex<VirtualEnvS
         })
     });
 
+#[derive(Clone, Copy, Debug)]
+enum StdioStream {
+    Stdout,
+    Stderr,
+}
+
+fn is_lsp_wasm<Wasm: 'static>() -> bool {
+    TypeId::of::<Wasm>() == TypeId::of::<lsp_opt>()
+}
+
+fn route_stdio_output<Wasm: WasmAccess + WasmAccessName + 'static>(
+    stream: StdioStream,
+    buf: &[u8],
+) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+    let stderr = matches!(stream, StdioStream::Stderr);
+    if capture_cargo_output(stderr, buf) {
+        return Ok(buf.len());
+    }
+
+    let id = crate::shell::CURRENT_CONTEXT_ID
+        .with(|id| id.get())
+        .unwrap_or(0);
+    if id != 0 {
+        let len = buf.len() as u32;
+        let shell_ptr = unsafe { crate::shell::vfs_shell_alloc_buf(len) };
+        vfs_shell::memcpy(shell_ptr as *mut u8, buf);
+        let written = match stream {
+            StdioStream::Stdout => unsafe {
+                crate::shell::vfs_shell_write_stdout(id, shell_ptr, len)
+            },
+            StdioStream::Stderr => unsafe {
+                crate::shell::vfs_shell_write_stderr(id, shell_ptr, len)
+            },
+        };
+        unsafe { crate::shell::vfs_shell_free_buf(shell_ptr, len) };
+        return Ok(written as usize);
+    }
+
+    let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
+    if session_id != 0 {
+        crate::vfs::host::bridge::Terminal::terminal_write(
+            session_id,
+            buf.as_ptr() as i32,
+            buf.len() as i32,
+        );
+        return Ok(buf.len());
+    }
+
+    if is_lsp_wasm::<Wasm>() {
+        crate::vfs::host::bridge::Terminal::terminal_write(
+            LSP_SESSION_ID,
+            buf.as_ptr() as i32,
+            buf.len() as i32,
+        );
+        return Ok(buf.len());
+    }
+
+    match stream {
+        StdioStream::Stdout => <wasi_virt_layer::wasi::file::stdio::DefaultStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::write::<Wasm>(buf),
+        StdioStream::Stderr => <wasi_virt_layer::wasi::file::stdio::DefaultStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::ewrite::<Wasm>(buf),
+    }
+}
+
+fn route_stdio_read<Wasm: WasmAccess + WasmAccessName + 'static>(
+    buf: &mut [u8],
+) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+    if is_lsp_wasm::<Wasm>() {
+        let (lock, cvar) = &*LSP_STDIN;
+        let mut stdin = lock.lock();
+        while stdin.is_empty() {
+            cvar.wait(&mut stdin);
+        }
+        let len = std::cmp::min(buf.len(), stdin.len());
+        buf[..len].copy_from_slice(&stdin[..len]);
+        stdin.drain(..len);
+        Ok(len)
+    } else {
+        <wasi_virt_layer::wasi::file::stdio::DefaultStdIO as wasi_virt_layer::wasi::file::stdio::StdIO>::read::<Wasm>(buf)
+    }
+}
+
 #[derive(Debug)]
 pub struct ShellVirtualStdIO;
 
 impl wasi_virt_layer::wasi::file::stdio::StdIO for ShellVirtualStdIO {
-    fn write(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
-        if capture_cargo_output(false, buf) {
-            return Ok(buf.len());
-        }
-
-        let id = crate::shell::CURRENT_CONTEXT_ID
-            .with(|id| id.get())
-            .unwrap_or(0);
-        if id != 0 {
-            let len = buf.len() as u32;
-            // 1. Allocate buffer in vfs-shell's memory
-            let shell_ptr = unsafe { crate::shell::vfs_shell_alloc_buf(len) };
-            // 2. Copy our data into vfs-shell's memory via cross-Wasm memcpy
-            vfs_shell::memcpy(shell_ptr as *mut u8, buf);
-            // 3. Tell vfs-shell to write from its own memory (scalar-only call)
-            let written = unsafe { crate::shell::vfs_shell_write_stdout(id, shell_ptr, len) };
-            // 4. Free the buffer in vfs-shell's memory
-            unsafe { crate::shell::vfs_shell_free_buf(shell_ptr, len) };
-            Ok(written as usize)
-        } else {
-            let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
-            if session_id == LSP_SESSION_ID || session_id != 0 {
-                crate::vfs::host::bridge::Terminal::terminal_write(
-                    session_id,
-                    buf.as_ptr() as i32,
-                    buf.len() as i32,
-                );
-                Ok(buf.len())
-            } else {
-                let mut is_lsp = false;
-                let current_thread = std::thread::current().id();
-
-                if buf.starts_with(b"Content-Length: ") || buf.starts_with(b"{\"jsonrpc\"") {
-                    crate::THREAD_SESSIONS.insert(current_thread, LSP_SESSION_ID);
-                }
-
-                if let Some(sid) = crate::THREAD_SESSIONS.get(&current_thread) {
-                    if *sid == LSP_SESSION_ID {
-                        is_lsp = true;
-                    }
-                }
-
-                if is_lsp {
-                    crate::vfs::host::bridge::Terminal::terminal_write(
-                        LSP_SESSION_ID,
-                        buf.as_ptr() as i32,
-                        buf.len() as i32,
-                    );
-                    Ok(buf.len())
-                } else {
-                    wasi_virt_layer::wasi::file::stdio::DefaultStdIO::write(buf)
-                }
-            }
-        }
+    fn write<Wasm: WasmAccess + WasmAccessName + 'static>(
+        buf: &[u8],
+    ) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        route_stdio_output::<Wasm>(StdioStream::Stdout, buf)
     }
-    fn ewrite(buf: &[u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
-        if capture_cargo_output(true, buf) {
-            return Ok(buf.len());
-        }
 
-        let id = crate::shell::CURRENT_CONTEXT_ID
-            .with(|id| id.get())
-            .unwrap_or(0);
-        if id != 0 {
-            let len = buf.len() as u32;
-            let shell_ptr = unsafe { crate::shell::vfs_shell_alloc_buf(len) };
-            vfs_shell::memcpy(shell_ptr as *mut u8, buf);
-            let written = unsafe { crate::shell::vfs_shell_write_stderr(id, shell_ptr, len) };
-            unsafe { crate::shell::vfs_shell_free_buf(shell_ptr, len) };
-            Ok(written as usize)
-        } else {
-            let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
-            if session_id == LSP_SESSION_ID || session_id != 0 {
-                crate::vfs::host::bridge::Terminal::terminal_write(
-                    session_id,
-                    buf.as_ptr() as i32,
-                    buf.len() as i32,
-                );
-                Ok(buf.len())
-            } else {
-                wasi_virt_layer::wasi::file::stdio::DefaultStdIO::ewrite(buf)
-            }
-        }
+    fn ewrite<Wasm: WasmAccess + WasmAccessName + 'static>(
+        buf: &[u8],
+    ) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        route_stdio_output::<Wasm>(StdioStream::Stderr, buf)
     }
-    fn read(buf: &mut [u8]) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
-        let session_id = crate::shell::CURRENT_SESSION_ID.with(|id| id.get());
-        if session_id == LSP_SESSION_ID || (session_id == 0 && LSP_START_ONCE.is_started()) {
-            let (lock, cvar) = &*LSP_STDIN;
-            let mut stdin = lock.lock();
-            while stdin.is_empty() {
-                cvar.wait(&mut stdin);
-            }
-            let len = std::cmp::min(buf.len(), stdin.len());
-            buf[..len].copy_from_slice(&stdin[..len]);
-            stdin.drain(..len);
-            Ok(len)
-        } else {
-            wasi_virt_layer::wasi::file::stdio::DefaultStdIO::read(buf)
-        }
+
+    fn read<Wasm: WasmAccess + WasmAccessName + 'static>(
+        buf: &mut [u8],
+    ) -> Result<usize, wasi_virt_layer::__private::wasip1::Errno> {
+        route_stdio_read::<Wasm>(buf)
     }
 }
 
