@@ -4,10 +4,63 @@ const viteConfigSource = await Deno.readTextFile(
 const source = await Deno.readTextFile(
   new URL("./monaco_worker.ts", import.meta.url),
 );
+const indexSource = await Deno.readTextFile(
+  new URL("./index.tsx", import.meta.url),
+);
+const pagePackage = JSON.parse(
+  await Deno.readTextFile(new URL("../package.json", import.meta.url)),
+) as { dependencies?: Record<string, string> };
 const editorWorkerSource = await Deno.readTextFile(
   new URL("./workers/editor.worker.ts", import.meta.url),
 );
 
+Deno.test("Rust highlighting uses the VS Code TextMate grammar without semantic recoloring", () => {
+  if (
+    pagePackage.dependencies?.[
+      "@codingame/monaco-vscode-rust-default-extension"
+    ] !== "25.1.2"
+  ) {
+    throw new Error("the pinned VS Code Rust default extension is missing");
+  }
+  if (
+    pagePackage.dependencies?.[
+      "@codingame/monaco-vscode-textmate-service-override"
+    ] !== "25.1.2"
+  ) {
+    throw new Error("the pinned TextMate service override is missing");
+  }
+  const rustExtensionImport =
+    'import "@codingame/monaco-vscode-rust-default-extension";';
+  const extensionOffset = indexSource.indexOf(rustExtensionImport);
+  const wrapperStartOffset = indexSource.indexOf("await apiWrapper.start()");
+  if (
+    extensionOffset < 0 ||
+    wrapperStartOffset < 0 ||
+    extensionOffset > wrapperStartOffset
+  ) {
+    throw new Error(
+      "the Rust TextMate grammar is not registered before Monaco starts",
+    );
+  }
+  if (!indexSource.includes('$type: "extended"')) {
+    throw new Error(
+      "the extended Monaco wrapper is required for TextMate highlighting",
+    );
+  }
+  if (
+    !indexSource.includes('"[rust]": {') ||
+    !indexSource.includes('"editor.semanticHighlighting.enabled": false')
+  ) {
+    throw new Error(
+      "rust-analyzer semantic token recoloring is not disabled for Rust only",
+    );
+  }
+  if (source.includes('monaco.languages.register({ id: "rust"')) {
+    throw new Error(
+      "manual Rust language registration shadows the VS Code Rust extension",
+    );
+  }
+});
 Deno.test("Monaco worker setup avoids empty aliased language workers", () => {
   if (source.includes("monaco-editor/esm/vs/language/")) {
     throw new Error(
@@ -18,9 +71,37 @@ Deno.test("Monaco worker setup avoids empty aliased language workers", () => {
     throw new Error("the local Monaco editor worker import is missing");
   }
   if (
+    !source.includes(
+      "@codingame/monaco-vscode-textmate-service-override/worker?worker",
+    ) ||
+    !source.includes('label === "TextMateWorker"') ||
+    !source.includes("new textMateWorker()")
+  ) {
+    throw new Error("the TextMate background tokenizer worker is not routed");
+  }
+  if (
     !editorWorkerSource.includes("monaco-editor/esm/vs/editor/editor.worker.js")
   ) {
     throw new Error("the base Monaco editor worker import is missing");
+  }
+});
+
+Deno.test("Rust syntax highlighting comes from the VS Code Rust extension", () => {
+  const rustExtension = "@codingame/monaco-vscode-rust-default-extension";
+  if (!indexSource.includes(`import "${rustExtension}";`)) {
+    throw new Error("the VS Code Rust default extension is not registered");
+  }
+  if (pagePackage.dependencies?.[rustExtension] !== "25.1.2") {
+    throw new Error("the Rust default extension is not pinned to Monaco VS Code 25.1.2");
+  }
+  if (/monaco\.languages\.register\(\{\s*id:\s*["']rust["']/.test(source)) {
+    throw new Error("Rust is still manually registered instead of using the extension contribution");
+  }
+  if (
+    !indexSource.includes('"[rust]"') ||
+    !indexSource.includes('"editor.semanticHighlighting.enabled": false')
+  ) {
+    throw new Error("Rust semantic highlighting is not disabled in user configuration");
   }
 });
 
@@ -69,8 +150,8 @@ Deno.test("Vite dev disables browser cache for patched WASI thread shim modules"
     !/const isDevelopmentServer\s*=\s*command === "serve"\s*&&\s*isPreview !== true/.test(
       viteConfigSource,
     ) ||
-    !viteConfigSource.includes(
-      "...(isDevelopmentServer ? [wasiThreadShimCacheGuardPlugin()] : [])",
+    !/\.\.\.\(\s*isDevelopmentServer\s*\?\s*\[[^\]]*\bwasiThreadShimCacheGuardPlugin\(\)[^\]]*\]\s*:\s*\[\s*\]\s*\)/.test(
+      viteConfigSource,
     )
   ) {
     throw new Error("cache guard is not excluded from Vite preview");

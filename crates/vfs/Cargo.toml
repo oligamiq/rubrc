@@ -8,12 +8,13 @@ crate-type = ["cdylib"]
 
 [features]
 debugging = ["wasi_virt_layer/trace"]
+stdio-profiling = []
 default = []
 
 [dependencies]
 am-fs-core = "=0.2.3"
 am-fs-squashfs = "=0.1.3"
-wasi_virt_layer = { version = "0.8.0", default-features = false, features = [
+wasi_virt_layer = { version = "0.10.0", default-features = false, features = [
   "dynamic-fs",
   # "embedded-fs",
   "threads",

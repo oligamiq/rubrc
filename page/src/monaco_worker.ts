@@ -1,12 +1,11 @@
-import * as monaco from "monaco-editor";
+import textMateWorker from "@codingame/monaco-vscode-textmate-service-override/worker?worker";
 import editorWorker from "./workers/editor.worker.ts?worker";
-
-monaco.languages.register({ id: "rust", extensions: [".rs"] });
 
 // @ts-ignore
 self.MonacoEnvironment = {
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-  getWorker(_: any, _label: string) {
+  getWorker(_: any, label: string) {
+    if (label === "TextMateWorker") return new textMateWorker();
     return new editorWorker();
   },
 };

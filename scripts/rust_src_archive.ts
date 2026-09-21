@@ -13,11 +13,15 @@ import {
 import {
   createRustSrcCacheMetadata,
   deterministicRustSrcSquashfsArgs,
+  deterministicRustSrcSquashfsNgArgs,
   rustSrcCacheMatchesMetadata,
   rustSrcToolchainIdentity,
 } from "./sysroot_cache.ts";
 
-export { deterministicRustSrcSquashfsArgs } from "./sysroot_cache.ts";
+export {
+  deterministicRustSrcSquashfsArgs,
+  deterministicRustSrcSquashfsNgArgs,
+} from "./sysroot_cache.ts";
 
 type CommandOutput = {
   success: boolean;
@@ -48,6 +52,37 @@ type RustSrcArchiveOptions = {
 
 const DEFAULT_CACHE_ARCHIVE = ".rubrc-cache/sysroot/rust-src.sqfs";
 const decoder = new TextDecoder();
+const RUST_SRC_SQUASHFS_NG_PACK_FILE = [
+  "glob / 0755 0 0 -type d .",
+  "glob / 0644 0 0 -type f .",
+  "",
+].join("\n");
+
+async function runOptionalCommand(
+  command: string,
+  args: string[],
+): Promise<CommandOutput | null> {
+  try {
+    return await new Deno.Command(command, { args }).output();
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return null;
+    throw error;
+  }
+}
+
+function validRustSrcSquashfsSuperblock(archive: Uint8Array): boolean {
+  if (archive.byteLength < 100) return false;
+  const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+  const flags = view.getUint16(24, true);
+  return view.getUint32(0, true) === 0x73717368 &&
+    view.getUint32(12, true) === 262144 &&
+    view.getUint16(20, true) === 6 &&
+    view.getUint16(28, true) === 4 &&
+    view.getUint16(30, true) === 0 &&
+    (flags & 0x0400) !== 0 &&
+    (view.getUint16(96, true) & 0x7fff) === 4 &&
+    view.getUint32(98, true) === 22;
+}
 const REQUIRED_SQUASHFS_SENTINELS = [
   "Cargo.toml",
   "core/src/lib.rs",
@@ -320,13 +355,28 @@ const denoRustSrcArchiveDeps: RustSrcArchiveDeps = {
     const directory = await Deno.makeTempDir({ prefix: "rubrc-rust-src-" });
     const outputPath = `${directory}/rust-src.sqfs`;
     try {
-      const output = await new Deno.Command("mksquashfs", {
-        args: deterministicRustSrcSquashfsArgs(libraryPath, outputPath),
-      }).output();
-      if (!output.success) {
-        throw new Error(decoder.decode(output.stderr).trim() || "mksquashfs failed");
+      const classic = await runOptionalCommand(
+        "mksquashfs",
+        deterministicRustSrcSquashfsArgs(libraryPath, outputPath),
+      );
+      if (classic?.success) return await Deno.readFile(outputPath);
+
+      const packFilePath = `${directory}/rust-src.pack`;
+      await Deno.writeTextFile(packFilePath, RUST_SRC_SQUASHFS_NG_PACK_FILE);
+      const ng = await runOptionalCommand(
+        "gensquashfs",
+        deterministicRustSrcSquashfsNgArgs(libraryPath, outputPath, packFilePath),
+      );
+      if (ng?.success) return await Deno.readFile(outputPath);
+
+      const failures = [
+        classic && (decoder.decode(classic.stderr).trim() || "mksquashfs failed"),
+        ng && (decoder.decode(ng.stderr).trim() || "gensquashfs failed"),
+      ].filter((value): value is string => typeof value === "string");
+      if (classic === null && ng === null) {
+        throw new Error("neither mksquashfs nor gensquashfs is available");
       }
-      return await Deno.readFile(outputPath);
+      throw new Error(failures.join("\n") || "failed to build rust-src SquashFS");
     } finally {
       await Deno.remove(directory, { recursive: true }).catch((error) => {
         if (!(error instanceof Deno.errors.NotFound)) throw error;
@@ -341,24 +391,12 @@ async function validateInstalledRustSrcSquashfs(archive: Uint8Array): Promise<bo
   const archivePath = `${directory}/rust-src.sqfs`;
   try {
     await Deno.writeFile(archivePath, archive);
-    const stat = await new Deno.Command("unsquashfs", {
-      args: ["-stat", archivePath],
-    }).output();
-    if (!stat.success) return false;
-    const description = decoder.decode(stat.stdout);
-    if (
-      !description.includes("valid SQUASHFS 4:0 superblock") ||
-      !description.includes("Compression zstd") ||
-      !description.includes("compression-level 22") ||
-      !description.includes("Block size 262144")
-    ) {
-      return false;
-    }
+    if (!validRustSrcSquashfsSuperblock(archive)) return false;
     for (const path of REQUIRED_SQUASHFS_SENTINELS) {
-      const file = await new Deno.Command("unsquashfs", {
-        args: ["-cat", archivePath, path],
-      }).output();
-      if (!file.success || file.stdout.byteLength === 0) return false;
+      const classic = await runOptionalCommand("unsquashfs", ["-cat", archivePath, path]);
+      if (classic?.success && classic.stdout.byteLength !== 0) continue;
+      const ng = await runOptionalCommand("rdsquashfs", ["-c", path, archivePath]);
+      if (!ng?.success || ng.stdout.byteLength === 0) return false;
     }
     return true;
   } catch {

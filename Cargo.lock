@@ -1218,7 +1218,9 @@ dependencies = [
 
 [[package]]
 name = "wasi_virt_layer"
-version = "0.8.0"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2cdf2f8d3af646b939384969e29609f35b566da64465e5c5d50389a3d43557a"
 dependencies = [
  "const_for",
  "const_struct",

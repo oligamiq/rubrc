@@ -64,7 +64,13 @@ Deno.test("released SquashFS converts real tar, reuses validated cache and repai
     if (changed.source !== "generated" || changed.archive.join(",") === first.archive.join(",")) {
       throw new Error("conversion cache ignored released tar identity");
     }
-    const file = await new Deno.Command("unsquashfs", { args: ["-cat", changed.cacheArchive, "extra.rs"] }).output();
+    let file;
+    try {
+      file = await new Deno.Command("unsquashfs", { args: ["-cat", changed.cacheArchive, "extra.rs"] }).output();
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+      file = await new Deno.Command("rdsquashfs", { args: ["-c", "extra.rs", changed.cacheArchive] }).output();
+    }
     if (!file.success || new TextDecoder().decode(file.stdout) !== "changed release input\n") {
       throw new Error("released library contents were not preserved");
     }
@@ -106,7 +112,7 @@ Deno.test("asset entrypoints and diagnostic callers use released SquashFS, not t
   }
   const pkg = JSON.parse(await Deno.readTextFile("package.json"));
   for (const name of ["rust-src:prepare-asset", "rust-src:prepare-dev-asset"]) {
-    if (!pkg.scripts[name].includes("--allow-net") || !pkg.scripts[name].includes("--allow-run=mksquashfs,unsquashfs")) {
+    if (!pkg.scripts[name].includes("--allow-net") || !pkg.scripts[name].includes("--allow-run=mksquashfs,unsquashfs,gensquashfs,rdsquashfs")) {
       throw new Error(`${name} lacks release conversion permissions`);
     }
   }
@@ -173,6 +179,7 @@ type RustSrcArchiveDeps = {
 
 type RustSrcArchiveModule = {
   deterministicRustSrcSquashfsArgs(source: string, output: string): string[];
+  deterministicRustSrcSquashfsNgArgs(source: string, output: string, packFile: string): string[];
   prepareInstalledRustSrcArchive(options: {
     cacheArchive: string;
     deps: RustSrcArchiveDeps;
@@ -227,6 +234,30 @@ Deno.test("rust-src SquashFS arguments fix format compression and metadata", asy
   }
 });
 
+Deno.test("squashfs-tools-ng arguments preserve the deterministic recipe", async () => {
+  const { deterministicRustSrcSquashfsNgArgs } = await loadModule();
+  const args = deterministicRustSrcSquashfsNgArgs(
+    "/toolchain/library",
+    "/tmp/rust-src.sqfs",
+    "/tmp/rust-src.pack",
+  );
+  const expected = [
+    "--pack-file", "/tmp/rust-src.pack",
+    "--pack-dir", "/toolchain/library",
+    "--compressor", "zstd",
+    "--comp-extra", "level=22",
+    "--block-size", "262144",
+    "--defaults", "uid=0,gid=0,mode=0755,mtime=0",
+    "--all-root",
+    "--num-jobs", "1",
+    "--quiet",
+    "--force",
+    "/tmp/rust-src.sqfs",
+  ];
+  if (args.join("\n") !== expected.join("\n")) {
+    throw new Error(`unexpected squashfs-tools-ng arguments:\n${args.join("\n")}`);
+  }
+});
 Deno.test("installed rust-src preparation uses deterministic toolchain archive", async () => {
   const { prepareInstalledRustSrcArchive } = await loadModule();
   const commands: string[] = [];
