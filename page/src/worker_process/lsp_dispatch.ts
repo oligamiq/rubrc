@@ -1,8 +1,9 @@
 import {
-  LSP_SESSION_ID,
-  VFS_SYNC_SESSION_ID,
   isLspSession,
+  LSP_SESSION_ID,
+  STDLIB_CACHE_SESSION_ID,
   toLspBytes,
+  VFS_SYNC_SESSION_ID,
 } from "../lsp_protocol.ts";
 
 type Root = {
@@ -45,16 +46,33 @@ export function dispatchSpecialInput(
   input: { sessionId: number; data: string | number[] | Uint8Array },
 ): boolean {
   const sessionId = input.sessionId >>> 0;
+  if (sessionId === STDLIB_CACHE_SESSION_ID) {
+    if (!(input.data instanceof Uint8Array)) {
+      throw new Error("cache payload must be binary");
+    }
+    const length = input.data.length + 4;
+    const ptr = root.allocBuf(length);
+    try {
+      new DataView(memory.buffer).setUint32(ptr, 1, true);
+      new Uint8Array(memory.buffer).set(input.data, ptr + 4);
+      root.dispatch(sessionId, 11, ptr, length);
+      if (new DataView(memory.buffer).getUint32(ptr, true) !== 0) {
+        throw new Error("binary cache installation failed");
+      }
+    } finally {
+      root.freeBuf(ptr, length);
+    }
+    return true;
+  }
   const eventType = isLspSession(sessionId)
     ? 6
     : sessionId === VFS_SYNC_SESSION_ID
-      ? 7
-      : undefined;
+    ? 7
+    : undefined;
   if (eventType === undefined) return false;
-  const bytes =
-    typeof input.data === "string"
-      ? new TextEncoder().encode(input.data)
-      : toLspBytes(input.data);
+  const bytes = typeof input.data === "string"
+    ? new TextEncoder().encode(input.data)
+    : toLspBytes(input.data);
   const ptr = root.allocBuf(bytes.length);
   try {
     new Uint8Array(memory.buffer).set(bytes, ptr);

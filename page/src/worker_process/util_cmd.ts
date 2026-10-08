@@ -7,6 +7,7 @@ import { write_data } from "../write_data";
 import { custom_instantiate } from "./vfs_bindings/inst";
 import { set_fake_worker } from "./vfs_bindings/common";
 import { prebindWasiMemory } from "./prebind_wasi_memory.ts";
+import { VFS_INITIAL_MEMORY_PAGES } from "./vfs_bindings/memory_limits.ts";
 import { get_brotli_decompress_stream } from "../../../lib/src/brotli_stream";
 import { createParallelPartStream } from "./parallel_part_download.ts";
 import {
@@ -447,7 +448,7 @@ function createUtilityAnimal(
       ).href,
       share_memory: {
         memory: new WebAssembly.Memory({
-          initial: 1032,
+          initial: VFS_INITIAL_MEMORY_PAGES,
           maximum: 32775,
           shared: true,
         }),

@@ -1,10 +1,69 @@
 import { dispatchSpecialInput, routeTerminalWrite } from "./lsp_dispatch.ts";
 import * as lspDispatch from "./lsp_dispatch.ts";
-import { LSP_SESSION_ID, VFS_SYNC_SESSION_ID } from "../lsp_protocol.ts";
+import {
+  LSP_SESSION_ID,
+  STDLIB_CACHE_SESSION_ID,
+  VFS_SYNC_SESSION_ID,
+} from "../lsp_protocol.ts";
 
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
 };
+
+Deno.test("stdlib cache is installed as raw bytes in VFS-owned memory with acknowledgement", () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const payload = new Uint8Array([0, 128, 255, 7]);
+  let freed = false;
+  const root = {
+    allocBuf: () => 16,
+    dispatch(_session: number, event: number, ptr: number, length: number) {
+      assert(event === 11, "wrong binary cache event");
+      assert(length === payload.length + 4, "wrong payload length");
+      assert(
+        new Uint8Array(memory.buffer, ptr + 4, payload.length).join() ===
+          payload.join(),
+        "cache bytes changed",
+      );
+      new DataView(memory.buffer).setUint32(ptr, 0, true);
+    },
+    freeBuf() {
+      freed = true;
+    },
+  };
+  assert(
+    dispatchSpecialInput(root, memory, {
+      sessionId: STDLIB_CACHE_SESSION_ID,
+      data: payload,
+    }),
+    "cache input not handled",
+  );
+  assert(freed, "VFS buffer leaked");
+});
+
+Deno.test("unacknowledged cache installs fail and still free the VFS buffer", () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let freed = false;
+  let threw = false;
+  try {
+    dispatchSpecialInput(
+      {
+        allocBuf: () => 16,
+        dispatch() {},
+        freeBuf() {
+          freed = true;
+        },
+      },
+      memory,
+      { sessionId: STDLIB_CACHE_SESSION_ID, data: new Uint8Array([1]) },
+    );
+  } catch {
+    threw = true;
+  }
+  assert(
+    threw && freed,
+    "unacknowledged install was accepted or buffer leaked",
+  );
+});
 
 Deno.test("signed LSP output routes away from terminal", () => {
   const calls: string[] = [];
@@ -151,9 +210,10 @@ Deno.test("worker terminal forwarding observes rejected channel calls", async ()
     "LSP forwarding rejection is not observed",
   );
   assert(
-    /observeAsyncFailure\(\s*terminal\(\{\s*sessionId,\s*data: data as any\s*\}\),\s*console\.error,?\s*\)/.test(
-      source,
-    ),
+    /observeAsyncFailure\(\s*terminal\(\{\s*sessionId,\s*data: data as any\s*\}\),\s*console\.error,?\s*\)/
+      .test(
+        source,
+      ),
     "terminal forwarding rejection is not observed",
   );
 });

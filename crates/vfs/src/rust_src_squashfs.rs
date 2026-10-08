@@ -7,6 +7,7 @@ use std::sync::Arc;
 use wasi_virt_layer::file::{InodeId, StandardDynamicLFS};
 
 pub(crate) const RUST_SRC_MOUNT_PATH: &str = "/sysroot/lib/rustlib/src/rust/library";
+const IMAGE_ID_FILE: &str = ".rubrc-source-id";
 const REQUIRED_BLOCK_SIZE: u32 = 256 * 1024;
 const REQUIRED_SENTINELS: &[&str] = &[
     "Cargo.toml",
@@ -61,6 +62,8 @@ pub(crate) struct RustSrcMount {
     file_count: usize,
     directory_count: usize,
     total_bytes: u64,
+    identity_inode: InodeId,
+    identity: Vec<u8>,
 }
 
 impl fmt::Debug for RustSrcMount {
@@ -76,6 +79,7 @@ impl fmt::Debug for RustSrcMount {
 
 impl RustSrcMount {
     pub(crate) fn mount(lfs: &LFS, root_inode: InodeId, bytes: Vec<u8>) -> Result<Self, String> {
+        let digest = blake3::hash(&bytes).to_hex().to_string();
         let device: Arc<dyn BlockRead> = Arc::new(OwnedBytesBlockRead {
             bytes: Arc::from(bytes),
         });
@@ -88,12 +92,21 @@ impl RustSrcMount {
         if !image_root.is_dir() {
             return Err("rust-src SquashFS root is not a directory".to_string());
         }
+        if fs
+            .read_dir(&image_root)
+            .map_err(|e| e.to_string())?
+            .iter()
+            .any(|entry| entry.name == IMAGE_ID_FILE.as_bytes())
+        {
+            return Err("rust-src image contains reserved identity file".into());
+        }
 
         let mount_root_inode = ensure_mount_path(lfs, root_inode)?;
         let mut files = HashMap::new();
         let mut mounted_inodes = HashSet::from([mount_root_inode]);
         let mut file_count = 0usize;
         let mut directory_count = 1usize;
+        let mut has_symlinks = false;
         mount_directory(
             &fs,
             lfs,
@@ -103,6 +116,7 @@ impl RustSrcMount {
             &mut mounted_inodes,
             &mut file_count,
             &mut directory_count,
+            &mut has_symlinks,
         )?;
         let total_bytes = files.values().try_fold(0u64, |total, inode| {
             total
@@ -110,6 +124,13 @@ impl RustSrcMount {
                 .ok_or_else(|| "rust-src SquashFS total size overflow".to_string())
         })?;
 
+        let identity_inode = ensure_placeholder_file(lfs, mount_root_inode, IMAGE_ID_FILE)?;
+        mounted_inodes.insert(identity_inode);
+        let identity = if has_symlinks {
+            b"rubrc-no-image-cache:symlinks".to_vec()
+        } else {
+            format!("rubrc-ro-v1:{digest}").into_bytes()
+        };
         Ok(Self {
             fs,
             files,
@@ -118,6 +139,8 @@ impl RustSrcMount {
             file_count,
             directory_count,
             total_bytes,
+            identity_inode,
+            identity,
         })
     }
 
@@ -126,14 +149,20 @@ impl RustSrcMount {
     }
 
     pub(crate) fn is_file_inode(&self, inode: InodeId) -> bool {
-        self.files.contains_key(&inode)
+        inode == self.identity_inode || self.files.contains_key(&inode)
     }
 
     pub(crate) fn file_size(&self, inode: InodeId) -> Option<u64> {
+        if inode == self.identity_inode {
+            return Some(self.identity.len() as u64);
+        }
         self.files.get(&inode).map(|inode| inode.file_size)
     }
 
     pub(crate) fn file_mtime_secs(&self, inode: InodeId) -> Option<u32> {
+        if inode == self.identity_inode {
+            return Some(0);
+        }
         self.files.get(&inode).map(|inode| inode.mtime)
     }
 
@@ -143,6 +172,12 @@ impl RustSrcMount {
         offset: u64,
         buf: &mut [u8],
     ) -> Result<usize, String> {
+        if inode == self.identity_inode {
+            let offset = offset.min(self.identity.len() as u64) as usize;
+            let size = buf.len().min(self.identity.len() - offset);
+            buf[..size].copy_from_slice(&self.identity[offset..offset + size]);
+            return Ok(size);
+        }
         let inode = self
             .files
             .get(&inode)
@@ -153,6 +188,13 @@ impl RustSrcMount {
     }
 
     pub(crate) fn stat_path(&self, relative_path: &str) -> Result<RustSrcStat, String> {
+        if relative_path.trim_start_matches('/') == IMAGE_ID_FILE {
+            return Ok(RustSrcStat {
+                kind: RustSrcNodeKind::File,
+                size: self.identity.len() as u64,
+                mtime_secs: 0,
+            });
+        }
         let inode = self.lookup_relative(relative_path)?;
         Ok(stat_from_inode(&inode))
     }
@@ -163,6 +205,9 @@ impl RustSrcMount {
         offset: u64,
         buf: &mut [u8],
     ) -> Result<usize, String> {
+        if relative_path.trim_start_matches('/') == IMAGE_ID_FILE {
+            return self.read_file(self.identity_inode, offset, buf);
+        }
         let inode = self.lookup_relative(relative_path)?;
         self.fs
             .read_file(&inode, offset, buf)
@@ -300,6 +345,7 @@ fn mount_directory(
     mounted_inodes: &mut HashSet<InodeId>,
     file_count: &mut usize,
     directory_count: &mut usize,
+    has_symlinks: &mut bool,
 ) -> Result<(), String> {
     let entries = fs
         .read_dir(image_dir)
@@ -324,6 +370,7 @@ fn mount_directory(
                     mounted_inodes,
                     file_count,
                     directory_count,
+                    has_symlinks,
                 )?;
             }
             FileType::RegFile => {
@@ -333,6 +380,7 @@ fn mount_directory(
                 *file_count += 1;
             }
             FileType::Symlink => {
+                *has_symlinks = true;
                 if find_child(lfs, vfs_dir, &name)?.is_some() {
                     return Err(format!(
                         "existing VFS symlink path '{name}' cannot be replaced safely"
@@ -417,6 +465,27 @@ mod tests {
         assert_eq!(mount.read_file(core, 4, &mut first).unwrap(), first.len());
         assert_eq!(&first, b"const COR");
         assert!(lfs.read_file(core).unwrap().is_empty());
+    }
+
+    #[test]
+    fn mounted_image_identity_cannot_be_overwritten_through_placeholder_storage() {
+        let lfs = TestLfs::new();
+        let root = lfs.add_preopen(".");
+        let mount = RustSrcMount::mount(&lfs, root, FIXTURE.to_vec()).unwrap();
+        let inode = path_inode(
+            &lfs,
+            root,
+            &format!("{RUST_SRC_MOUNT_PATH}/{IMAGE_ID_FILE}"),
+        );
+        assert!(mount.is_mounted_inode(inode));
+        assert!(mount.is_file_inode(inode));
+        let mut before = [0; 128];
+        let size = mount.read_file(inode, 0, &mut before).unwrap();
+        lfs.write_file(inode, b"forged identity".to_vec()).unwrap();
+        let mut after = [0; 128];
+        assert_eq!(mount.read_file(inode, 0, &mut after).unwrap(), size);
+        assert_eq!(&before[..size], &after[..size]);
+        assert!(before[..size].starts_with(b"rubrc-ro-v1:"));
     }
 
     #[test]

@@ -11,7 +11,7 @@
     "start": "vite",
     "predev": "bun run --cwd .. rust-src:prepare-dev-asset",
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node ../scripts/finalize_vfs_asset.mjs",
     "serve": "vite preview",
     "fmt": "biome format --write ."
   },

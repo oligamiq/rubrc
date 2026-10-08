@@ -1,5 +1,6 @@
 export const LSP_SESSION_ID = 0xffff_ffff;
 export const VFS_SYNC_SESSION_ID = 0xeeee_eeee;
+export const STDLIB_CACHE_SESSION_ID = 0xeeee_eeed;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

@@ -1,0 +1,75 @@
+name: Stdlib cache validation
+
+on:
+  push:
+    branches: [ci/stdlib-cache-validation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stdlib-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RA_TOOLCHAIN: nightly-2026-09-13
+  RUSTUP_TOOLCHAIN: nightly-2026-09-13
+  CARGO_BUILD_JOBS: "2"
+  CARGO_INCREMENTAL: "0"
+  BINARYEN_CORES: "2"
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+
+defaults:
+  run:
+    shell: bash
+    working-directory: rubrc
+
+jobs:
+  checks:
+    if: github.repository == 'oligamiq/rubrc'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: rubrc
+          persist-credentials: false
+      - uses: ./rubrc/.github/actions/stdlib-cache-setup
+      - name: Targeted regressions
+        run: |
+          mkdir -p ci-logs
+          bash scripts/ci/stdlib_cache.sh checks 2>&1 | tee ci-logs/checks.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stdlib-cache-checks-${{ github.run_attempt }}
+          path: rubrc/ci-logs
+          retention-days: 1
+          if-no-files-found: ignore
+
+  wasm-browser:
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: rubrc
+          persist-credentials: false
+      - uses: ./rubrc/.github/actions/stdlib-cache-setup
+      - name: Install WASM tools
+        run: |
+          mkdir -p ci-logs
+          bash scripts/ci/stdlib_cache.sh tools 2>&1 | tee ci-logs/tools.log
+      - name: Build same-WASM cache and browser assets
+        run: bash scripts/ci/stdlib_cache.sh build 2>&1 | tee ci-logs/build.log
+      - name: Matched browser trials
+        run: bash scripts/ci/stdlib_cache.sh browser 2>&1 | tee ci-logs/browser.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stdlib-cache-wasm-browser-${{ github.run_attempt }}
+          path: rubrc/ci-logs
+          retention-days: 1
+          if-no-files-found: ignore

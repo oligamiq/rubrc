@@ -7,6 +7,7 @@ import { custom_instantiate } from "../page/src/worker_process/vfs_bindings/inst
 import { isHttpBridgeMessage } from "../lib/src/http_bridge.ts";
 import { isChildProcessMessage } from "../lib/src/child_process_bridge.ts";
 import { waitForStartupSysroots } from "../page/src/vfs_readiness.ts";
+import { VFS_INITIAL_MEMORY_PAGES } from "../page/src/worker_process/vfs_bindings/memory_limits.ts";
 
 await set_fake_worker();
 
@@ -86,7 +87,7 @@ workerScope.onmessage = async (event) => {
         ).href,
         share_memory: {
           memory: new WebAssembly.Memory({
-            initial: 1032,
+            initial: VFS_INITIAL_MEMORY_PAGES,
             maximum: 32775,
             shared: true,
           }),
@@ -105,7 +106,11 @@ workerScope.onmessage = async (event) => {
           ? rawMessage as { name?: string }
           : {};
         if (
-          isHttpBridgeMessage(rawMessage) || isChildProcessMessage(rawMessage)
+          isHttpBridgeMessage(rawMessage) ||
+          isChildProcessMessage(rawMessage) ||
+          message.name === "downloadFileStart" ||
+          message.name === "downloadFileChunk" ||
+          message.name === "downloadFileEnd"
         ) {
           return animal.call_unknown_fn(_index, rawMessage);
         } else if (message.name === "terminalWrite") {

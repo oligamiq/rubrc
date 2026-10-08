@@ -1,0 +1,42 @@
+name: Set up stdlib cache validation
+description: Pinned runtimes and a sibling analyzer source checkout
+runs:
+  using: composite
+  steps:
+    - name: Read analyzer revision
+      id: analyzer
+      shell: bash
+      run: |
+        revision=$(<rubrc/.github/stdlib-cache-analyzer-revision)
+        [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+        echo "revision=$revision" >> "$GITHUB_OUTPUT"
+    - uses: actions/checkout@v4
+      with:
+        repository: oligamiq/rust-analyzer
+        ref: ${{ steps.analyzer.outputs.revision }}
+        path: rust-analyzer
+        persist-credentials: false
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22.22.1
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.4.2
+    - uses: denoland/setup-deno@v2
+      with:
+        deno-version: 2.9.7
+    - name: Install pinned Rust and dependencies
+      shell: bash
+      working-directory: rubrc
+      run: |
+        rustup toolchain install "$RA_TOOLCHAIN" --profile minimal --component rust-src --target wasm32-wasip1-threads
+        # Internal WVL cargo +nightly invocations must use the same snapshot.
+        real_cargo=$(command -v cargo)
+        shim="$RUNNER_TEMP/stdlib-cache-bin"
+        mkdir -p "$shim"
+        printf '%s\n' '#!/usr/bin/env bash' \
+          'if [[ "${1:-}" == "+nightly" ]]; then shift; set -- "+${RA_TOOLCHAIN}" "$@"; fi' \
+          "exec \"$real_cargo\" \"\$@\"" > "$shim/cargo"
+        chmod +x "$shim/cargo"
+        echo "$shim" >> "$GITHUB_PATH"
+        bun install --frozen-lockfile

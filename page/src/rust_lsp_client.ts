@@ -152,11 +152,26 @@ export async function startRustLspClient(
       }),
     );
 
-    const progressDisposable = client.onProgress(
+    const fetchingProgressDisposable = client.onProgress(
       new ProgressType<{ kind: string }>(),
       "rustAnalyzer/Fetching",
       (value) => recordGenerationLspProgress(testGeneration, value),
     );
+    const cacheLogDisposable = client.onNotification?.(
+      "rust-analyzer/stdlibCacheStatus",
+      (params: { message: string }) => {
+        console.info(params.message);
+      },
+    );
+    const progressDisposable = {
+      dispose() {
+        try {
+          fetchingProgressDisposable.dispose();
+        } finally {
+          cacheLogDisposable?.dispose();
+        }
+      },
+    };
     owner.setProgressDisposable(progressDisposable);
 
     await runRustLspStartup(

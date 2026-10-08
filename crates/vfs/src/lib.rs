@@ -19,6 +19,7 @@ mod debug_state;
 mod filesystem_sync;
 pub mod memory_manager;
 mod rust_src_squashfs;
+mod stdlib_cache_file;
 #[cfg(feature = "debugging")]
 use debug_state::ThreadPoolState;
 use debug_state::{DebugState, PipeKind, is_lifecycle_event};
@@ -34,6 +35,7 @@ const EVENT_TYPE_WRITE_FILE: u32 = 7;
 const EVENT_TYPE_BOOTSTRAP_RUST_SRC: u32 = 8;
 const EVENT_TYPE_BOOTSTRAP_TARGET: u32 = 9;
 const EVENT_TYPE_RUST_SRC_FS_RPC: u32 = 10;
+const EVENT_TYPE_INSTALL_STD_CACHE: u32 = 11;
 const RUST_SRC_FS_RPC_HEADER_LEN: usize = 48;
 const RUST_SRC_FS_RPC_STAT: u32 = 1;
 const RUST_SRC_FS_RPC_READ: u32 = 2;
@@ -787,67 +789,103 @@ impl Guest for Wit {
             stdin.extend_from_slice(data);
             cvar.notify_all();
             return;
+        } else if event_type == EVENT_TYPE_INSTALL_STD_CACHE {
+            if arg2 < 4 {
+                return;
+            }
+            let buffer = unsafe { std::slice::from_raw_parts_mut(arg1 as *mut u8, arg2 as usize) };
+            let installed = stdlib_cache_file::install(
+                &VIRTUAL_FILE_SYSTEM.lfs,
+                LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed),
+                &buffer[4..],
+            );
+            buffer[..4].copy_from_slice(&u32::from(installed.is_err()).to_le_bytes());
+            if let Err(error) = installed {
+                eprintln!("std cache installation failed: {error}");
+            }
+            return;
         } else if event_type == EVENT_TYPE_WRITE_FILE {
             let ptr = arg1 as *const u8;
             let len = arg2 as usize;
             let data = unsafe { std::slice::from_raw_parts(ptr, len) };
             if let Ok(json) = serde_json::from_slice::<serde_json::Value>(data) {
-                if let (Some(path), Some(content)) =
-                    (json["path"].as_str(), json["content"].as_str())
-                {
-                    let path = Path::new(path);
-                    let mut current_vfs_parent =
-                        LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
-
-                    if let Some(parent) = path.parent() {
-                        for component in parent.components() {
-                            if let std::path::Component::Normal(c) = component {
-                                let name = c.to_string_lossy();
-                                let mut existing_id = None;
-                                if let Ok(entries) =
-                                    VIRTUAL_FILE_SYSTEM.lfs.read_dir(current_vfs_parent)
-                                {
-                                    for (entry_name, id) in entries {
-                                        if entry_name == name {
-                                            existing_id = Some(id);
-                                            break;
-                                        }
-                                    }
-                                }
-                                if let Some(id) = existing_id {
-                                    current_vfs_parent = id;
-                                } else {
-                                    current_vfs_parent = VIRTUAL_FILE_SYSTEM
-                                        .lfs
-                                        .add_dir(current_vfs_parent, &name)
-                                        .unwrap_or(current_vfs_parent);
-                                }
-                            }
-                        }
+                if let Some(path_str) = json["path"].as_str() {
+                    let mut file_content = None;
+                    if let Some(content) = json["content"].as_str() {
+                        file_content = Some(content.as_bytes().to_vec());
+                    } else if let Some(b64) = json["base64"].as_str() {
+                        use base64::Engine as _;
+                        file_content = base64::engine::general_purpose::STANDARD.decode(b64).ok();
                     }
 
-                    if let Some(name) = path.file_name() {
-                        let name_str = name.to_string_lossy();
-                        let mut file_inode = None;
-                        if let Ok(entries) = VIRTUAL_FILE_SYSTEM.lfs.read_dir(current_vfs_parent) {
-                            for (entry_name, id) in entries {
-                                if entry_name == name_str {
-                                    file_inode = Some(id);
-                                    break;
+                    if let Some(content_bytes) = file_content {
+                        let path = Path::new(path_str);
+                        let mut current_vfs_parent =
+                            LFS_ROOT.load(std::sync::atomic::Ordering::Relaxed);
+
+                        if let Some(parent) = path.parent() {
+                            for component in parent.components() {
+                                if let std::path::Component::Normal(c) = component {
+                                    if VIRTUAL_FILE_SYSTEM.rust_src.read().as_ref().is_some_and(
+                                        |mount| mount.is_mounted_inode(current_vfs_parent),
+                                    ) {
+                                        return;
+                                    }
+                                    let name = c.to_string_lossy();
+                                    let mut existing_id = None;
+                                    if let Ok(entries) =
+                                        VIRTUAL_FILE_SYSTEM.lfs.read_dir(current_vfs_parent)
+                                    {
+                                        for (entry_name, id) in entries {
+                                            if entry_name == name {
+                                                existing_id = Some(id);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if let Some(id) = existing_id {
+                                        current_vfs_parent = id;
+                                    } else {
+                                        current_vfs_parent = VIRTUAL_FILE_SYSTEM
+                                            .lfs
+                                            .add_dir(current_vfs_parent, &name)
+                                            .unwrap_or(current_vfs_parent);
+                                    }
                                 }
                             }
                         }
 
-                        if let Some(id) = file_inode {
-                            let _ = VIRTUAL_FILE_SYSTEM
-                                .lfs
-                                .write_file(id, content.as_bytes().to_vec());
-                        } else {
-                            let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(
-                                current_vfs_parent,
-                                &name_str,
-                                content.as_bytes().to_vec(),
-                            );
+                        if VIRTUAL_FILE_SYSTEM
+                            .rust_src
+                            .read()
+                            .as_ref()
+                            .is_some_and(|mount| mount.is_mounted_inode(current_vfs_parent))
+                        {
+                            return;
+                        }
+                        if let Some(name) = path.file_name() {
+                            let name_str = name.to_string_lossy();
+                            let mut file_inode = None;
+                            if let Ok(entries) =
+                                VIRTUAL_FILE_SYSTEM.lfs.read_dir(current_vfs_parent)
+                            {
+                                for (entry_name, id) in entries {
+                                    if entry_name == name_str {
+                                        file_inode = Some(id);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if let Some(id) = file_inode {
+                                let _ = VIRTUAL_FILE_SYSTEM.lfs.write_file(id, content_bytes);
+                            } else {
+                                let _ = VIRTUAL_FILE_SYSTEM.lfs.add_file(
+                                    current_vfs_parent,
+                                    &name_str,
+                                    content_bytes,
+                                );
+                            }
                         }
                     }
                 }
@@ -855,9 +893,8 @@ impl Guest for Wit {
             return;
         } else if event_type == EVENT_TYPE_RUST_SRC_FS_RPC {
             if arg1 != 0 && arg2 as usize >= RUST_SRC_FS_RPC_HEADER_LEN {
-                let buffer = unsafe {
-                    std::slice::from_raw_parts_mut(arg1 as *mut u8, arg2 as usize)
-                };
+                let buffer =
+                    unsafe { std::slice::from_raw_parts_mut(arg1 as *mut u8, arg2 as usize) };
                 VIRTUAL_FILE_SYSTEM.handle_rust_src_fs_rpc(buffer);
             }
             return;
@@ -1604,7 +1641,8 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
                 mount.total_bytes(),
             ));
         }
-        let mount = rust_src_squashfs::RustSrcMount::mount(&self.inner.lfs, self.root_inode, bytes)?;
+        let mount =
+            rust_src_squashfs::RustSrcMount::mount(&self.inner.lfs, self.root_inode, bytes)?;
         let summary = (
             mount.file_count(),
             mount.directory_count(),
@@ -1786,9 +1824,7 @@ impl CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
                         rust_src_squashfs::RustSrcNodeKind::Directory => {
                             RUST_SRC_FS_RPC_KIND_DIRECTORY
                         }
-                        rust_src_squashfs::RustSrcNodeKind::Symlink => {
-                            RUST_SRC_FS_RPC_KIND_SYMLINK
-                        }
+                        rust_src_squashfs::RustSrcNodeKind::Symlink => RUST_SRC_FS_RPC_KIND_SYMLINK,
                     };
                     write_u32(buffer, 20, RUST_SRC_FS_RPC_OK);
                     write_u32(buffer, 24, kind);
@@ -2197,7 +2233,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         nread: *mut Size,
     ) -> wasip1::Errno {
         if fd <= 2 || !self.rust_src_fd_is_mounted(fd) {
-            return self.inner.fd_read_raw::<Wasm>(fd, iovs_ptr, iovs_len, nread);
+            return self
+                .inner
+                .fd_read_raw::<Wasm>(fd, iovs_ptr, iovs_len, nread);
         }
         let Some(inode) = self.inode_for_fd(fd) else {
             return wasip1::ERRNO_BADF;
@@ -2208,7 +2246,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
             .as_ref()
             .is_some_and(|mount| mount.is_file_inode(inode));
         if !is_rust_src_file {
-            return self.inner.fd_read_raw::<Wasm>(fd, iovs_ptr, iovs_len, nread);
+            return self
+                .inner
+                .fd_read_raw::<Wasm>(fd, iovs_ptr, iovs_len, nread);
         }
         let Some(mut entry) = self.inner.fd_map.get_mut(&fd) else {
             return wasip1::ERRNO_BADF;
@@ -2249,7 +2289,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         nread: *mut Size,
     ) -> wasip1::Errno {
         if fd <= 2 || !self.rust_src_fd_is_mounted(fd) {
-            return self.inner.fd_pread_raw::<Wasm>(fd, iovs_ptr, iovs_len, offset, nread);
+            return self
+                .inner
+                .fd_pread_raw::<Wasm>(fd, iovs_ptr, iovs_len, offset, nread);
         }
         let Some(inode) = self.inode_for_fd(fd) else {
             return wasip1::ERRNO_BADF;
@@ -2259,7 +2301,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
             return wasip1::ERRNO_BADF;
         };
         if !mount.is_file_inode(inode) {
-            return self.inner.fd_pread_raw::<Wasm>(fd, iovs_ptr, iovs_len, offset, nread);
+            return self
+                .inner
+                .fd_pread_raw::<Wasm>(fd, iovs_ptr, iovs_len, offset, nread);
         }
         let mut total_read = 0usize;
         let mut current_offset = offset;
@@ -2290,7 +2334,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
         new_offset_ptr: *mut i64,
     ) -> wasip1::Errno {
         if !self.rust_src_fd_is_mounted(fd) {
-            return self.inner.fd_seek_raw::<Wasm>(fd, offset, whence, new_offset_ptr);
+            return self
+                .inner
+                .fd_seek_raw::<Wasm>(fd, offset, whence, new_offset_ptr);
         }
         let Some(inode) = self.inode_for_fd(fd) else {
             return wasip1::ERRNO_BADF;
@@ -2301,7 +2347,9 @@ impl Wasip1FileSystem for CwdAwareFileSystem<StandardDynamicFileSystem<LFS>> {
             .as_ref()
             .and_then(|mount| mount.file_size(inode));
         let Some(size) = size else {
-            return self.inner.fd_seek_raw::<Wasm>(fd, offset, whence, new_offset_ptr);
+            return self
+                .inner
+                .fd_seek_raw::<Wasm>(fd, offset, whence, new_offset_ptr);
         };
         let Some(mut entry) = self.inner.fd_map.get_mut(&fd) else {
             return wasip1::ERRNO_BADF;
@@ -3618,9 +3666,7 @@ mod rust_src_archive_download_tests {
         let _guard = test_guard();
         assert!(rust_src_archive_download_begin(0).is_err());
         assert!(rust_src_archive_download_begin(-1).is_err());
-        assert!(
-            rust_src_archive_download_begin((MAX_RUST_SRC_ARCHIVE_BYTES + 1) as i32).is_err()
-        );
+        assert!(rust_src_archive_download_begin((MAX_RUST_SRC_ARCHIVE_BYTES + 1) as i32).is_err());
 
         rust_src_archive_download_begin(2).unwrap();
         rust_src_archive_download_append(b"ab");
@@ -4313,8 +4359,7 @@ mod cwd_aware_fs_tests {
     type TestFs = CwdAwareFileSystem<StandardDynamicFileSystem<TestLfs>>;
     const RUST_SRC_FIXTURE: &[u8] = include_bytes!("../testdata/rust-src-zstd256k.sqfs");
     const CORE_SOURCE: &[u8] = b"pub const CORE_SENTINEL: &str = \"core-from-squashfs\";\n";
-    const CORE_SOURCE_PATH: &[u8] =
-        b"/sysroot/lib/rustlib/src/rust/library/core/src/lib.rs";
+    const CORE_SOURCE_PATH: &[u8] = b"/sysroot/lib/rustlib/src/rust/library/core/src/lib.rs";
 
     struct Fixture {
         fs: TestFs,
@@ -4440,7 +4485,8 @@ mod cwd_aware_fs_tests {
         assert_eq!(rpc_u32(&readdir, 20), RUST_SRC_FS_RPC_OK);
         assert_eq!(rpc_u32(&readdir, 28) as usize, required);
         let output = RUST_SRC_FS_RPC_HEADER_LEN;
-        let entries: Vec<String> = serde_json::from_slice(&readdir[output..output + required]).unwrap();
+        let entries: Vec<String> =
+            serde_json::from_slice(&readdir[output..output + required]).unwrap();
         assert!(entries.iter().any(|entry| entry == "core"));
         assert!(entries.iter().any(|entry| entry == "portable-simd"));
     }
@@ -4453,7 +4499,13 @@ mod cwd_aware_fs_tests {
             .rust_src
             .read()
             .as_ref()
-            .map(|mount| (mount.file_count(), mount.directory_count(), mount.total_bytes()))
+            .map(|mount| {
+                (
+                    mount.file_count(),
+                    mount.directory_count(),
+                    mount.total_bytes(),
+                )
+            })
             .unwrap();
         assert_eq!(
             fixture
@@ -4492,9 +4544,7 @@ mod cwd_aware_fs_tests {
 
         let mut stat: wasip1::Filestat = unsafe { std::mem::zeroed() };
         assert_eq!(
-            fixture
-                .fs
-                .fd_filestat_get_raw::<MappedWasm>(fd, &mut stat),
+            fixture.fs.fd_filestat_get_raw::<MappedWasm>(fd, &mut stat),
             wasip1::ERRNO_SUCCESS,
         );
         assert_eq!(stat.size, CORE_SOURCE.len() as u64);
@@ -4517,22 +4567,16 @@ mod cwd_aware_fs_tests {
 
         let mut offset = 0;
         assert_eq!(
-            fixture.fs.fd_seek_raw::<MappedWasm>(
-                fd,
-                0,
-                wasip1::WHENCE_END,
-                &mut offset,
-            ),
+            fixture
+                .fs
+                .fd_seek_raw::<MappedWasm>(fd, 0, wasip1::WHENCE_END, &mut offset,),
             wasip1::ERRNO_SUCCESS,
         );
         assert_eq!(offset, CORE_SOURCE.len() as i64);
         assert_eq!(
-            fixture.fs.fd_seek_raw::<MappedWasm>(
-                fd,
-                0,
-                wasip1::WHENCE_SET,
-                &mut offset,
-            ),
+            fixture
+                .fs
+                .fd_seek_raw::<MappedWasm>(fd, 0, wasip1::WHENCE_SET, &mut offset,),
             wasip1::ERRNO_SUCCESS,
         );
 
@@ -5767,10 +5811,7 @@ mod invocation_state_tests {
         ]
         .map(str::to_string);
 
-        let hints = cargo_root_path_hints(
-            &argv,
-            "/sysroot/lib/rustlib/src/rust/library",
-        );
+        let hints = cargo_root_path_hints(&argv, "/sysroot/lib/rustlib/src/rust/library");
         assert!(hints.contains(&vec!["cargo".to_string()]));
         assert!(hints.contains(&vec![
             "sysroot".to_string(),

@@ -105,7 +105,9 @@ pub fn handle_command(args: Vec<String>) {
                         filename.as_bytes().as_ptr() as usize as i32,
                         filename.len() as u32 as i32,
                     );
-                    for chunk in data.chunks(50 * 1024 * 1024) {
+                    // The host callback represents bytes as JSON numbers. Keep
+                    // each message bounded even for large analyzer snapshots.
+                    for chunk in data.chunks(64 * 1024) {
                         Downloader::download_file_chunk(
                             chunk.as_ptr() as usize as i32,
                             chunk.len() as u32 as i32,

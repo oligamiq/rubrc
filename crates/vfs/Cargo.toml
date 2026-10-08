@@ -22,6 +22,8 @@ wasi_virt_layer = { version = "0.10.0", default-features = false, features = [
 ] }
 const_struct = "0.6.6"
 serde_json = "1.0.140"
+base64 = "0.22.1"
+blake3 = { version = "1.8.7", default-features = false, features = ["std", "pure"] }
 parking_lot = { version = "0.12.5", features = ["nightly"] }
 # version = "0.2.6",
 wit-bindgen = { version = "0.57.1", default-features = false, features = [

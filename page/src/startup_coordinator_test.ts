@@ -619,13 +619,15 @@ Deno.test("late callbacks cannot overwrite a failed snapshot", async () => {
 });
 
 Deno.test("coordinator checks cancellation after each phase await", async () => {
-  for (const checkpoint of [
-    "vfs",
-    "analyzer",
-    "prefetch",
-    "install",
-    "activate",
-  ] as const) {
+  for (
+    const checkpoint of [
+      "vfs",
+      "analyzer",
+      "prefetch",
+      "install",
+      "activate",
+    ] as const
+  ) {
     const order: string[] = [];
     const vfs = deferred<void>();
     const prefetch = deferred<void>();
@@ -702,23 +704,22 @@ Deno.test("coordinator checks cancellation after each phase await", async () => 
       checkpoint === "analyzer"
         ? "vfs"
         : checkpoint === "prefetch"
-          ? "prefetch"
-          : checkpoint === "activate"
-            ? "activate"
-            : checkpoint
+        ? "prefetch"
+        : checkpoint === "activate"
+        ? "activate"
+        : checkpoint
     ].resolve();
     if (checkpoint === "analyzer") analyzer.resolve(session);
     await startup;
     await disposal;
 
-    const forbidden =
-      checkpoint === "vfs"
-        ? "analyzer"
-        : checkpoint === "analyzer" || checkpoint === "prefetch"
-          ? "install"
-          : checkpoint === "install"
-            ? "activate"
-            : undefined;
+    const forbidden = checkpoint === "vfs"
+      ? "analyzer"
+      : checkpoint === "analyzer" || checkpoint === "prefetch"
+      ? "install"
+      : checkpoint === "install"
+      ? "activate"
+      : undefined;
     assert(
       forbidden === undefined || !order.includes(forbidden),
       `${checkpoint} cancellation continued into ${forbidden}: ${order}`,
@@ -814,5 +815,65 @@ Deno.test("dispose reports late session cleanup failure", async () => {
   assert(
     (await disposal) === cleanupError,
     "dispose swallowed the late cleanup failure",
+  );
+});
+
+Deno.test("coordinator supports cache-enabled startup ordering", async () => {
+  const order: string[] = [];
+  const coordinator = new StartupCoordinator({
+    waitForVfsRuntime: async () => {
+      order.push("vfs");
+    },
+    prefetchSysroots: async () => {
+      order.push("prefetch");
+    },
+    initializeAnalyzer: async () => {
+      order.push("analyzer");
+      return fakeSession(order);
+    },
+    installSysroots: async () => {
+      order.push("install");
+    },
+    prepareStdlibCache: async () => {
+      order.push("cache");
+      return true;
+    },
+  });
+
+  await coordinator.start({ getValue: () => "edited" });
+  assertEquals(
+    order.join(","),
+    "vfs,prefetch,cache,install,analyzer,activate:start,activate:ready",
+    "cache-enabled startup ordering is incorrect",
+  );
+});
+
+Deno.test("coordinator falls back to original order when cache is unavailable", async () => {
+  const order: string[] = [];
+  const coordinator = new StartupCoordinator({
+    waitForVfsRuntime: async () => {
+      order.push("vfs");
+    },
+    prefetchSysroots: async () => {
+      order.push("prefetch");
+    },
+    initializeAnalyzer: async () => {
+      order.push("analyzer");
+      return fakeSession(order);
+    },
+    installSysroots: async () => {
+      order.push("install");
+    },
+    prepareStdlibCache: async () => {
+      order.push("cache-miss");
+      return false;
+    },
+  });
+
+  await coordinator.start({ getValue: () => "edited" });
+  assertEquals(
+    order.join(","),
+    "vfs,prefetch,cache-miss,analyzer,install,activate:start,activate:ready",
+    "cache fallback startup ordering is incorrect",
   );
 });

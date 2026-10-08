@@ -54,6 +54,7 @@ export type StartupDependencies = {
     signal: AbortSignal,
   ): Promise<StagedAnalyzerSession>;
   installSysroots(signal: AbortSignal): Promise<void>;
+  prepareStdlibCache?: (signal: AbortSignal) => Promise<boolean>;
 };
 
 type StartupTask = StartupSnapshot["tasks"][number];
@@ -76,10 +77,8 @@ const freezeSnapshot = (
     Object.isFrozen(tasks) && tasks.every((task) => Object.isFrozen(task))
       ? tasks
       : Object.freeze(
-          tasks.map((task) =>
-            Object.isFrozen(task) ? task : Object.freeze(task),
-          ),
-        );
+        tasks.map((task) => Object.isFrozen(task) ? task : Object.freeze(task)),
+      );
   return Object.freeze({
     generation,
     phase,
@@ -98,30 +97,25 @@ const taskStateForPhase = (
       state = task.id === "editor" ? "complete" : "pending";
       break;
     case "vfs-starting":
-      state =
-        task.id === "editor"
-          ? "complete"
-          : task.id === "rust-src" || task.id === "target-sysroot"
-            ? "running"
-            : "pending";
+      state = task.id === "editor"
+        ? "complete"
+        : task.id === "rust-src" || task.id === "target-sysroot"
+        ? "running"
+        : "pending";
       break;
     case "analyzer-initializing":
-      state =
-        task.id === "editor"
-          ? "complete"
-          : task.id === "analyzer" ||
-              task.id === "rust-src" ||
-              task.id === "target-sysroot"
-            ? "running"
-            : "pending";
+      state = task.id === "editor" ? "complete" : task.id === "analyzer" ||
+          task.id === "rust-src" ||
+          task.id === "target-sysroot"
+        ? "running"
+        : "pending";
       break;
     case "sysroots-loading":
-      state =
-        task.id === "editor" || task.id === "analyzer"
-          ? "complete"
-          : task.id === "rust-src" || task.id === "target-sysroot"
-            ? "running"
-            : "pending";
+      state = task.id === "editor" || task.id === "analyzer"
+        ? "complete"
+        : task.id === "rust-src" || task.id === "target-sysroot"
+        ? "running"
+        : "pending";
       break;
     case "project-activating":
     case "semantic-warming":
@@ -131,15 +125,15 @@ const taskStateForPhase = (
       state = "complete";
       break;
   }
-  const clearProjectProgress =
-    task.id === "project" &&
+  const clearProjectProgress = task.id === "project" &&
     (phase === "semantic-warming" || phase === "ready");
 
   if (
     task.state === state &&
     (!clearProjectProgress || task.projectProgress === undefined)
-  )
+  ) {
     return task;
+  }
 
   return {
     ...task,
@@ -237,15 +231,35 @@ export class StartupCoordinator {
       void prefetch.catch(() => undefined);
       await vfsRuntime;
       signal.throwIfAborted();
-      this.#setPhase(generation, "analyzer-initializing");
-      analyzer = await this.#dependencies.initializeAnalyzer(model, signal);
-      this.#session = analyzer;
+      let cacheEnabled = false;
+      if (this.#dependencies.prepareStdlibCache) {
+        cacheEnabled = await this.#dependencies.prepareStdlibCache(signal);
+      }
       signal.throwIfAborted();
-      await prefetch;
-      signal.throwIfAborted();
-      this.#setPhase(generation, "sysroots-loading");
-      await this.#dependencies.installSysroots(signal);
-      signal.throwIfAborted();
+
+      if (cacheEnabled) {
+        await prefetch;
+        signal.throwIfAborted();
+        this.#setPhase(generation, "sysroots-loading");
+        await this.#dependencies.installSysroots(signal);
+        signal.throwIfAborted();
+
+        this.#setPhase(generation, "analyzer-initializing");
+        analyzer = await this.#dependencies.initializeAnalyzer(model, signal);
+        this.#session = analyzer;
+        signal.throwIfAborted();
+      } else {
+        this.#setPhase(generation, "analyzer-initializing");
+        analyzer = await this.#dependencies.initializeAnalyzer(model, signal);
+        this.#session = analyzer;
+        signal.throwIfAborted();
+        await prefetch;
+        signal.throwIfAborted();
+        this.#setPhase(generation, "sysroots-loading");
+        await this.#dependencies.installSysroots(signal);
+        signal.throwIfAborted();
+      }
+
       this.#setPhase(generation, "project-activating");
       await analyzer.activateProject(
         model,
@@ -273,14 +287,15 @@ export class StartupCoordinator {
       generation !== this.#generation ||
       this.#snapshot.phase === "ready" ||
       this.#snapshot.phase === "failed"
-    )
+    ) {
       return;
+    }
     const updatedTasks = this.#snapshot.tasks.map((task) =>
-      taskStateForPhase(task, phase),
+      taskStateForPhase(task, phase)
     );
     const tasks = updatedTasks.every(
-      (task, index) => task === this.#snapshot.tasks[index],
-    )
+        (task, index) => task === this.#snapshot.tasks[index],
+      )
       ? this.#snapshot.tasks
       : updatedTasks;
     this.#publish(freezeSnapshot(generation, phase, tasks));
@@ -288,7 +303,7 @@ export class StartupCoordinator {
 
   #setFailed(generation: number, error: unknown): void {
     const tasks = this.#snapshot.tasks.map((task) =>
-      task.state === "running" ? { ...task, state: "failed" as const } : task,
+      task.state === "running" ? { ...task, state: "failed" as const } : task
     );
     this.#publish(
       freezeSnapshot(generation, "failed", tasks, errorMessage(error)),
@@ -305,10 +320,11 @@ export class StartupCoordinator {
       this.#controller.signal.aborted ||
       this.#snapshot.phase === "ready" ||
       this.#snapshot.phase === "failed"
-    )
+    ) {
       return;
+    }
     const tasks = this.#snapshot.tasks.map((task) =>
-      task.id === id ? { ...task, state: "running" as const, progress } : task,
+      task.id === id ? { ...task, state: "running" as const, progress } : task
     );
     this.#publish(freezeSnapshot(generation, this.#snapshot.phase, tasks));
   }
@@ -321,13 +337,14 @@ export class StartupCoordinator {
       generation !== this.#generation ||
       this.#controller.signal.aborted ||
       this.#snapshot.phase !== "project-activating"
-    )
+    ) {
       return;
+    }
 
     const tasks = this.#snapshot.tasks.map((task) =>
       task.id === "project"
         ? { ...task, state: "running" as const, projectProgress }
-        : task,
+        : task
     );
     this.#publish(freezeSnapshot(generation, this.#snapshot.phase, tasks));
   }

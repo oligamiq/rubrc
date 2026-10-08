@@ -7,6 +7,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type Plugin } from "vite";
 import solidPlugin from "vite-plugin-solid";
 import { handleLocalCratesProxyRequest } from "../scripts/local_crates_proxy.mjs";
+import { digest } from "../scripts/finalize_vfs_asset.mjs";
 
 const crossOriginIsolationHeaders = {
   "Cross-Origin-Embedder-Policy": "require-corp",
@@ -189,6 +190,18 @@ export default defineConfig(async ({ command, isPreview }) => {
   const productionSourceRevision = process.env.SOURCE_SHA ?? "development";
   const sourceRevision = developmentRustSrcAsset?.sha256 ??
     productionSourceRevision;
+  const vfsHash = command === "build"
+    ? await digest(fileURLToPath(
+      new URL(
+        "./src/worker_process/vfs_bindings/vfs.core.wasm",
+        import.meta.url,
+      ),
+    ))
+    : "development";
+  const assetFileNames = (asset: { names: readonly string[] }) =>
+    asset.names.includes("vfs.core.wasm")
+      ? `assets/vfs.core-${vfsHash}.wasm`
+      : "assets/[name]-[hash].[ext]";
 
   return {
     define: {
@@ -237,10 +250,12 @@ export default defineConfig(async ({ command, isPreview }) => {
     preview: { headers: crossOriginIsolationHeaders },
     build: {
       target: "esnext",
+      rolldownOptions: { output: { assetFileNames } },
       minify: process.env.NODE_ENV === "production" ? true : false,
     },
     worker: {
       format: "es",
+      rolldownOptions: { output: { assetFileNames } },
     },
     base: "./",
   };

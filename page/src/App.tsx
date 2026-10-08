@@ -5,10 +5,10 @@ import { DownloadButton, RunButton } from "./btn";
 import { triples } from "./sysroot";
 import { workspaceFileSystem } from "./workspace_fs";
 import {
-  type StartupSysrootStatus,
-  type VfsReadyResult,
   awaitStartupSysrootsSettlement,
   nextVisibleTerminalSessionId,
+  type StartupSysrootStatus,
+  type VfsReadyResult,
 } from "./vfs_readiness";
 import {
   exposeEditor,
@@ -29,7 +29,7 @@ import type { AppRuntime } from "./app_runtime.ts";
 import { createTargetErrorState } from "./target_error_state.ts";
 
 const MonacoEditor = lazy(() =>
-  import("solid-monaco").then((module) => ({ default: module.MonacoEditor })),
+  import("solid-monaco").then((module) => ({ default: module.MonacoEditor }))
 );
 
 type Pane = {
@@ -94,19 +94,17 @@ const App = (props: {
   const archiveProgress = retainArchiveProgress(
     runtime.archiveStore,
     (progress) => {
-      const id =
-        progress.triple === "rust-src"
-          ? "rust-src"
-          : progress.triple === "wasm32-wasip1"
-            ? "target-sysroot"
-            : undefined;
+      const id = progress.triple === "rust-src"
+        ? "rust-src"
+        : progress.triple === "wasm32-wasip1"
+        ? "target-sysroot"
+        : undefined;
       if (id === undefined) return;
-      const percent =
-        progress.loaded === undefined ||
-        progress.total === undefined ||
-        progress.total === 0
-          ? undefined
-          : (progress.loaded / progress.total) * 100;
+      const percent = progress.loaded === undefined ||
+          progress.total === undefined ||
+          progress.total === 0
+        ? undefined
+        : (progress.loaded / progress.total) * 100;
       reportStartupProgress?.(id, percent);
     },
   );
@@ -161,6 +159,48 @@ const App = (props: {
       );
       if (result.ok === false) throw new Error(result.error);
     },
+    prepareStdlibCache: async (signal) => {
+      const { fetchStdlibCache, installStdlibCache } = await import(
+        "./stdlib_cache"
+      );
+      const { createWorkspaceVfsWriter } = await import(
+        "./workspace_sync"
+      );
+
+      const bytes = await fetchStdlibCache(import.meta.env.BASE_URL, signal);
+      // Benchmark both modes with identical sequential sysroot-first startup.
+      if (!bytes) return import.meta.env.VITE_RUBRC_STD_CACHE_COMPARE === "1";
+
+      const vfsSharedRef = runtime.lspDependencies.factories
+        .createSharedObjectRef(
+          runtime.lspDependencies.ctx.input_string_id,
+        );
+      try {
+        signal.throwIfAborted();
+        const input = vfsSharedRef.proxy<
+          (
+            args: { sessionId: number; data: string | Uint8Array },
+          ) => Promise<void>
+        >();
+        if (import.meta.env.VITE_RUBRC_STD_CACHE_AUDIT === "1") {
+          await createWorkspaceVfsWriter(input)(
+            "/rust-analyzer-std.audit",
+            "1",
+          );
+        }
+        await installStdlibCache(input, bytes);
+        signal.throwIfAborted();
+        return true;
+      } catch {
+        signal.throwIfAborted();
+        return false;
+      } finally {
+        const { closeUnderlyingChannel } = await import(
+          "./shared_object_channel"
+        );
+        closeUnderlyingChannel(vfsSharedRef);
+      }
+    },
   });
   runtime.adoptCoordinator(coordinator);
 
@@ -189,12 +229,10 @@ const App = (props: {
     const uri = mountedMonaco.Uri.parse("file:///src/main.rs");
     const temporaryModel = mountedEditor.getModel();
     const existingModel = mountedMonaco.editor.getModel(uri);
-    const initialText =
-      existingModel === null
-        ? new TextDecoder().decode(workspaceFileSystem.readFile("/src/main.rs"))
-        : "";
-    const model =
-      existingModel ??
+    const initialText = existingModel === null
+      ? new TextDecoder().decode(workspaceFileSystem.readFile("/src/main.rs"))
+      : "";
+    const model = existingModel ??
       mountedMonaco.editor.createModel(initialText, "rust", uri);
     mountedEditor.setModel(model);
     if (temporaryModel !== null && temporaryModel !== model) {
@@ -208,8 +246,9 @@ const App = (props: {
           workspaceModel.uri.scheme !== "file" ||
           workspaceModel.uri.authority !== "" ||
           !workspaceModel.uri.path.startsWith("/")
-        )
+        ) {
           continue;
+        }
         workspaceFileSystem.writeFile(
           workspaceModel.uri.path,
           new TextEncoder().encode(workspaceModel.getValue()),
@@ -228,11 +267,11 @@ const App = (props: {
     recordStartupTestState(testApiGeneration, coordinator.snapshot());
     const runtimeStartup = runtime.start();
     void runtimeStartup.catch((error) =>
-      console.error("Runtime startup failed:", error),
+      console.error("Runtime startup failed:", error)
     );
     const stagedStartup = coordinator.start(model);
     void stagedStartup.catch((error) =>
-      console.error("Staged startup failed:", error),
+      console.error("Staged startup failed:", error)
     );
   };
 
@@ -241,10 +280,12 @@ const App = (props: {
   ]);
   const [nextPaneId, setNextPaneId] = createSignal(2);
   const [nextSessionId, setNextSessionId] = createSignal(1);
-  const [draggedTab, setDraggedTab] = createSignal<{
-    paneId: number;
-    sessionId: number;
-  } | null>(null);
+  const [draggedTab, setDraggedTab] = createSignal<
+    {
+      paneId: number;
+      sessionId: number;
+    } | null
+  >(null);
   const [targetError, setTargetError] = createSignal<string | undefined>();
   const targetErrors = createTargetErrorState({
     signal: runtime.signal,
@@ -276,11 +317,11 @@ const App = (props: {
       panes().map((pane) =>
         pane.id === paneId
           ? {
-              ...pane,
-              tabs: [...pane.tabs, sessionId],
-              activeTab: sessionId,
-            }
-          : pane,
+            ...pane,
+            tabs: [...pane.tabs, sessionId],
+            activeTab: sessionId,
+          }
+          : pane
       ),
     );
   };
@@ -311,8 +352,9 @@ const App = (props: {
         .map((pane) => {
           if (pane.id !== paneId) return pane;
           const tabs = pane.tabs.filter((tab) => tab !== sessionId);
-          const activeTab =
-            pane.activeTab === sessionId ? (tabs.at(-1) ?? -1) : pane.activeTab;
+          const activeTab = pane.activeTab === sessionId
+            ? (tabs.at(-1) ?? -1)
+            : pane.activeTab;
           return { ...pane, tabs, activeTab };
         })
         .filter((pane) => pane.tabs.length > 0 || pane.id === panes()[0].id),
@@ -322,7 +364,7 @@ const App = (props: {
   const setActiveTab = (paneId: number, sessionId: number) => {
     setPanes(
       panes().map((pane) =>
-        pane.id === paneId ? { ...pane, activeTab: sessionId } : pane,
+        pane.id === paneId ? { ...pane, activeTab: sessionId } : pane
       ),
     );
   };
@@ -341,10 +383,9 @@ const App = (props: {
         .map((pane) => {
           if (pane.id === dragged.paneId) {
             const tabs = pane.tabs.filter((tab) => tab !== dragged.sessionId);
-            const activeTab =
-              pane.activeTab === dragged.sessionId
-                ? (tabs.at(-1) ?? -1)
-                : pane.activeTab;
+            const activeTab = pane.activeTab === dragged.sessionId
+              ? (tabs.at(-1) ?? -1)
+              : pane.activeTab;
             return { ...pane, tabs, activeTab };
           }
           if (pane.id === targetPaneId) {
@@ -394,8 +435,7 @@ const App = (props: {
               handleMount(
                 mountedMonaco as unknown as typeof import("monaco-editor"),
                 mountedEditor as unknown as monaco.editor.IStandaloneCodeEditor,
-              )
-            }
+              )}
           />
         </Suspense>
         {startup().phase !== "ready" && <StartupOverlay state={startup()} />}
@@ -417,8 +457,7 @@ const App = (props: {
                     <div
                       draggable={true}
                       onDragStart={(event) =>
-                        onDragStart(event, pane.id, sessionId)
-                      }
+                        onDragStart(event, pane.id, sessionId)}
                       class={`flex items-center transition-colors border-r border-gray-700 whitespace-nowrap cursor-pointer ${
                         pane.activeTab === sessionId
                           ? "bg-gray-900 border-b-2 border-b-green-500"
@@ -441,8 +480,7 @@ const App = (props: {
                           type="button"
                           class="pr-3 text-gray-500 hover:text-red-400 focus:outline-none"
                           onClick={(event) =>
-                            removeTerminal(event, pane.id, sessionId)
-                          }
+                            removeTerminal(event, pane.id, sessionId)}
                           title="Close Tab"
                         >
                           ✕
@@ -486,7 +524,8 @@ const App = (props: {
         <div
           class="flex-1 min-h-0 min-w-0 grid overflow-hidden"
           style={{
-            "grid-template-columns": `repeat(${panes().length}, minmax(0, 1fr))`,
+            "grid-template-columns":
+              `repeat(${panes().length}, minmax(0, 1fr))`,
           }}
         >
           <For each={allSessionIds()}>
@@ -535,8 +574,7 @@ const App = (props: {
             completedTargets={runtimeState().completedTargets}
             disabled={controlsDisabled() || runtimeState().operation === "run"}
             loadTarget={(triple) =>
-              targetErrors.load(triple, () => runtime.loadTarget(triple))
-            }
+              targetErrors.load(triple, () => runtime.loadTarget(triple))}
           />
           {targetError() && (
             <p class="mt-1 text-xs text-red-400" role="alert">
