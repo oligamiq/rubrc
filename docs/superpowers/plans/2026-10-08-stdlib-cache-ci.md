@@ -98,6 +98,10 @@ RUBRC_STDLIB_RUNS=3 RUBRC_STDLIB_TIMEOUT_MS=360000 node scripts/stdlib_cache_bro
   traversed it and failed. Fetch the public rubrc repository directly by the validated
   triggering SHA, without submodule traversal or stored credentials. Preserve the
   existing gitlink; this CI change does not modify that unrelated repository content.
+- Run `37728944988`: checks passed in about four minutes; analyzer and VFS builds
+  validated successfully. Cache generation then failed because Ubuntu 24.04's
+  classic mksquashfs lacks the required flags. Install `squashfs-tools-ng` for the
+  existing fallback, and preflight source archive creation before the heavy build.
 
 ## Self-review
 

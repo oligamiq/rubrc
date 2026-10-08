@@ -42,7 +42,11 @@ case "${1:-}" in
     "$tools/wasm-tools/wasm-tools" --version
     "$tools/binaryen/bin/wasm-opt" --version
     sudo apt-get update -qq
-    sudo apt-get install -y --no-install-recommends squashfs-tools
+    sudo apt-get install -y --no-install-recommends squashfs-tools squashfs-tools-ng
+    # Ubuntu 24.04's classic mksquashfs predates the reproducibility/mode flags
+    # used by the archive builder. Its existing gensquashfs fallback is supported.
+    # Exercise archive generation before spending time on analyzer/VFS builds.
+    bun run rust-src:prepare-asset "$RUNNER_TEMP/stdlib-cache-rust-src-check.sqfs"
     ;;
   build)
     export RUSTC
