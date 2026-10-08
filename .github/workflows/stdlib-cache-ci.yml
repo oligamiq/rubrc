@@ -31,10 +31,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-        with:
-          path: rubrc
-          persist-credentials: false
+      - name: Checkout validation source
+        working-directory: ${{ github.workspace }}
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git init rubrc
+          git -C rubrc fetch --no-tags --depth=1 https://github.com/oligamiq/rubrc.git "$SOURCE_SHA"
+          git -C rubrc checkout --detach FETCH_HEAD
       - uses: ./rubrc/.github/actions/stdlib-cache-setup
       - name: Targeted regressions
         run: |
@@ -53,10 +58,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-        with:
-          path: rubrc
-          persist-credentials: false
+      - name: Checkout validation source
+        working-directory: ${{ github.workspace }}
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git init rubrc
+          git -C rubrc fetch --no-tags --depth=1 https://github.com/oligamiq/rubrc.git "$SOURCE_SHA"
+          git -C rubrc checkout --detach FETCH_HEAD
       - uses: ./rubrc/.github/actions/stdlib-cache-setup
       - name: Install WASM tools
         run: |

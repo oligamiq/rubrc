@@ -90,6 +90,15 @@ RUBRC_STDLIB_RUNS=3 RUBRC_STDLIB_TIMEOUT_MS=360000 node scripts/stdlib_cache_bro
 - [ ] If a job fails, inspect that job's logs before changing anything or retrying.
   No blind rerun loop. Report run URL and completed/blocked acceptance criteria.
 
+## Execution notes
+
+- Analyzer snapshot: `07e8d30e340e504655ebace245a8df17f7f91fbf`.
+- Initial run `37728733895` stopped during checkout, before compilation. The existing
+  `test_repo` gitlink has no `.gitmodules` mapping; checkout's credential cleanup
+  traversed it and failed. Fetch the public rubrc repository directly by the validated
+  triggering SHA, without submodule traversal or stored credentials. Preserve the
+  existing gitlink; this CI change does not modify that unrelated repository content.
+
 ## Self-review
 
 The plan preserves the sibling paths required by existing scripts, avoids locally
