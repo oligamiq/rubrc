@@ -44,7 +44,7 @@ not establish WASM correctness. Report the run URL, tool versions and trial resu
 ## Toolchain
 
 Pin Rust nightly to `nightly-2026-09-13`, with `rust-src` and the threaded WASI target;
-pin WVL CLI to `0.8.0`, wasm-tools to `1.252.0`, and Binaryen to `version_131`.
+pin WVL CLI to `0.10.0` (matching the library), wasm-tools to `1.252.0`, and Binaryen to `version_131`.
 Use Bun for package management and the project's Deno scripts for WASI execution.
 Verify downloaded binary distributions against their published SHA-256 values.
 Preserve existing startup ordering: this work does not parallelize restoration or

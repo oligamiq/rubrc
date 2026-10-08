@@ -102,6 +102,11 @@ RUBRC_STDLIB_RUNS=3 RUBRC_STDLIB_TIMEOUT_MS=360000 node scripts/stdlib_cache_bro
   validated successfully. Cache generation then failed because Ubuntu 24.04's
   classic mksquashfs lacks the required flags. Install `squashfs-tools-ng` for the
   existing fallback, and preflight source archive creation before the heavy build.
+- Run `37758632553`: source archive preflight passed; generated runtime instantiation
+  failed on the `vfs:host/bridge` import. The local CLI reporting 0.8.0 was a local
+  source installation, not the published release binary. Pin published CLI 0.10.0
+  to match the library, handle its `rustup run nightly` invocation, and retain the
+  small generated JS adapter/hashes for diagnostics even if cache generation fails.
 
 ## Self-review
 

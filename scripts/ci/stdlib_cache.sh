@@ -28,8 +28,8 @@ case "${1:-}" in
       curl --fail --location --retry 2 --output "$file" "$url"
       printf '%s  %s\n' "$hash" "$file" | sha256sum --check -
     }
-    download 'https://github.com/oligamiq/wasi_virt_layer/releases/download/v0.8.0/wasi_virt_layer-cli-x86_64-unknown-linux-gnu.tar.xz' \
-      "$tools/wvl.tar.xz" 0823ffd015c15b429494bf5855e736362c7768b9c19c678ca68608fa3fe4ab5c
+    download 'https://github.com/oligamiq/wasi_virt_layer/releases/download/v0.10.0/wasi_virt_layer-cli-x86_64-unknown-linux-gnu.tar.xz' \
+      "$tools/wvl.tar.xz" c7bc0f357a1d5e12c8d95b360c377f4801c36085256e4281c444d47d4eaedba6
     download 'https://github.com/bytecodealliance/wasm-tools/releases/download/v1.252.0/wasm-tools-1.252.0-x86_64-linux.tar.gz' \
       "$tools/wasm-tools.tar.gz" 097b1181d5b2bc3f2ebc44b4e72edf18308902023f1f1483a1a7dc1268ea988d
     download 'https://github.com/WebAssembly/binaryen/releases/download/version_131/binaryen-version_131-x86_64-linux.tar.gz' \
@@ -73,14 +73,16 @@ case "${1:-}" in
     wasm-tools validate --features all dist/vfs.core.wasm
     node scripts/copy_vfs_bindings.mjs
     bun install --cwd page/src/worker_process/vfs_bindings
+    # Keep the small generated adapter as a diagnostic, never the WASM payload.
+    cp page/src/worker_process/vfs_bindings/vfs.js "$LOGS/generated-vfs-bindings.txt"
+    sha256sum crates/vfs/lsp_opt.wasm dist/vfs.core.wasm \
+      page/src/worker_process/vfs_bindings/vfs.core.wasm > "$LOGS/artifact-sha256.txt"
     bun run std-cache:generate target/std.salsa
     VITE_RUBRC_LSP_TEST=1 VITE_RUBRC_STD_CACHE_COMPARE=1 bun run --cwd page build
     VFS_BROTLI_QUALITY=1 bun run vfs:prepare:prod
     bun run rust-src:prepare-asset
     bun run std-cache:prepare-asset target/std.salsa page/dist
-    sha256sum crates/vfs/lsp_opt.wasm dist/vfs.core.wasm \
-      page/src/worker_process/vfs_bindings/vfs.core.wasm target/std.salsa \
-      > "$LOGS/artifact-sha256.txt"
+    sha256sum target/std.salsa >> "$LOGS/artifact-sha256.txt"
     ;;
   browser)
     bunx puppeteer browsers install chrome

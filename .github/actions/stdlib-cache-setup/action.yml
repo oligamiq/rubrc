@@ -32,11 +32,17 @@ runs:
         rustup toolchain install "$RA_TOOLCHAIN" --profile minimal --component rust-src --target wasm32-wasip1-threads
         # Internal WVL cargo +nightly invocations must use the same snapshot.
         real_cargo=$(command -v cargo)
+        real_rustup=$(command -v rustup)
         shim="$RUNNER_TEMP/stdlib-cache-bin"
         mkdir -p "$shim"
         printf '%s\n' '#!/usr/bin/env bash' \
           'if [[ "${1:-}" == "+nightly" ]]; then shift; set -- "+${RA_TOOLCHAIN}" "$@"; fi' \
           "exec \"$real_cargo\" \"\$@\"" > "$shim/cargo"
         chmod +x "$shim/cargo"
+        # WVL 0.10 also uses rustup run nightly cargo for unwind builds.
+        printf '%s\n' '#!/usr/bin/env bash' \
+          'if [[ "${1:-}" == "run" && "${2:-}" == "nightly" ]]; then shift 2; set -- run "${RA_TOOLCHAIN}" "$@"; fi' \
+          "exec \"$real_rustup\" \"\$@\"" > "$shim/rustup"
+        chmod +x "$shim/rustup"
         echo "$shim" >> "$GITHUB_PATH"
         bun install --frozen-lockfile
