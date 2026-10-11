@@ -38,7 +38,8 @@ jobs:
         run: |
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           git init rubrc
-          git -C rubrc fetch --no-tags --depth=1 https://github.com/oligamiq/rubrc.git "$SOURCE_SHA"
+          git -C rubrc remote add origin https://github.com/oligamiq/rubrc.git
+          git -C rubrc fetch --no-tags --depth=1 origin "$SOURCE_SHA"
           git -C rubrc checkout --detach FETCH_HEAD
       - uses: ./rubrc/.github/actions/stdlib-cache-setup
       - name: Targeted regressions
@@ -65,7 +66,8 @@ jobs:
         run: |
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           git init rubrc
-          git -C rubrc fetch --no-tags --depth=1 https://github.com/oligamiq/rubrc.git "$SOURCE_SHA"
+          git -C rubrc remote add origin https://github.com/oligamiq/rubrc.git
+          git -C rubrc fetch --no-tags --depth=1 origin "$SOURCE_SHA"
           git -C rubrc checkout --detach FETCH_HEAD
       - uses: ./rubrc/.github/actions/stdlib-cache-setup
       - name: Install WASM tools

@@ -107,6 +107,10 @@ RUBRC_STDLIB_RUNS=3 RUBRC_STDLIB_TIMEOUT_MS=360000 node scripts/stdlib_cache_bro
   source installation, not the published release binary. Pin published CLI 0.10.0
   to match the library, handle its `rustup run nightly` invocation, and retain the
   small generated JS adapter/hashes for diagnostics even if cache generation fails.
+- Run `37761380736`: generated and restored the 34,545,184-byte cache with the freshly
+  built WASM; the web build and WASM compression passed. Asset preparation needed
+  the normal `origin` remote for its existing `v1-dist` fetch. Restore that public
+  remote in the direct checkout while retaining SHA pinning and no credentials.
 
 ## Self-review
 
