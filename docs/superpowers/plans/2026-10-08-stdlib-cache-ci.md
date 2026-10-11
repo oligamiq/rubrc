@@ -24,16 +24,16 @@ Targeted checks gate a fresh WASM/cache build and three browser comparison pairs
 - Add `.github/workflows/stdlib-cache-ci.yml` for sibling checkout and gated jobs.
 - Add `scripts/ci/stdlib_cache.sh` for reproducible stage commands.
 
-- [ ] Inspect source diffs and staged file lists; commit the analyzer source/tests with
+- [x] Inspect source diffs and staged file lists; commit the analyzer source/tests with
   an AI disclosure and `[skip ci]` to suppress the unrelated coverage job.
-- [ ] Write its full `git rev-parse HEAD` output to the revision file.
-- [ ] Configure checkout paths `rubrc` and `rust-analyzer`, validate the revision with
+- [x] Write its full `git rev-parse HEAD` output to the revision file.
+- [x] Configure checkout paths `rubrc` and `rust-analyzer`, validate the revision with
   `[[ "$revision" =~ ^[0-9a-f]{40}$ ]]`, and use it in `actions/checkout`.
-- [ ] Configure workflow push trigger only for `ci/stdlib-cache-validation`,
+- [x] Configure workflow push trigger only for `ci/stdlib-cache-validation`,
   `permissions: { contents: read }`, and branch-scoped cancel-in-progress concurrency.
-- [ ] Install the pinned toolchain, runtime dependencies and checksum-verified tools.
+- [x] Install the pinned toolchain, runtime dependencies and checksum-verified tools.
   Use a Cargo shim for internal `cargo +nightly` invocations to select the pinned date.
-- [ ] Make every stage fail on command errors (`set -euo pipefail`); upload logs with
+- [x] Make every stage fail on command errors (`set -euo pipefail`); upload logs with
   `if: always()` and `retention-days: 1`.
 
 ## Task 2: Targeted checks
@@ -54,8 +54,8 @@ deno test --no-lock --allow-read --allow-env page/src/stdlib_cache_test.ts page/
 node --test scripts/copy_vfs_bindings_test.mjs scripts/finalize_vfs_asset_test.mjs
 ```
 
-- [ ] All selected tests must pass before the next job is eligible.
-- [ ] Check optional-feature persistence tests without enabling those features in the timing build.
+- [x] All selected tests must pass before the next job is eligible.
+- [x] Check optional-feature persistence tests without enabling those features in the timing build.
 
 ## Task 3: Fresh artifact and browser validation
 
@@ -75,19 +75,19 @@ bun run std-cache:prepare-asset target/std.salsa page/dist
 RUBRC_STDLIB_RUNS=3 RUBRC_STDLIB_TIMEOUT_MS=360000 node scripts/stdlib_cache_browser_test.mjs
 ```
 
-- [ ] Add a small tested helper for renderer-failure racing/bounded diagnostics to
+- [x] Add a small tested helper for renderer-failure racing/bounded diagnostics to
   `scripts/stdlib_cache_browser_test.mjs`, so crashes cannot masquerade as endless waits.
-- [ ] Assert cache load/merge on cached trials and report all attempted trial outcomes.
-- [ ] Record SHA-256 for the analyzer, generated VFS and cache plus source SHAs/tool versions.
-- [ ] Upload only diagnostic logs/hashes, not the hundreds-of-MB WASM or build trees.
+- [x] Assert cache load/merge on cached trials and report all attempted trial outcomes.
+- [x] Record SHA-256 for the analyzer, generated VFS and cache plus source SHAs/tool versions.
+- [x] Upload only diagnostic logs/hashes, not the hundreds-of-MB WASM or build trees.
 
 ## Task 4: Validate, publish and observe
 
-- [ ] Run small local script tests and YAML/shell checks only; hosted execution provides
+- [x] Run small local script tests and YAML/shell checks only; hosted execution provides
   the clean build validation. Review the precise staged diff and exclusions.
-- [ ] Push analyzer source first, then push the rubrc source/workflow snapshot.
-- [ ] Use `gh run list/view --repo oligamiq/rubrc` to observe the single run.
-- [ ] If a job fails, inspect that job's logs before changing anything or retrying.
+- [x] Push analyzer source first, then push the rubrc source/workflow snapshot.
+- [x] Use `gh run list/view --repo oligamiq/rubrc` to observe the single active run.
+- [x] If a job fails, inspect that job's logs before changing anything or retrying.
   No blind rerun loop. Report run URL and completed/blocked acceptance criteria.
 
 ## Execution notes
@@ -111,6 +111,11 @@ RUBRC_STDLIB_RUNS=3 RUBRC_STDLIB_TIMEOUT_MS=360000 node scripts/stdlib_cache_bro
   built WASM; the web build and WASM compression passed. Asset preparation needed
   the normal `origin` remote for its existing `v1-dist` fetch. Restore that public
   remote in the direct checkout while retaining SHA pinning and no credentials.
+- Run `38110216260`: both jobs passed. All 200 regression cases and all six browser
+  trials succeeded. Cold/cache medians were 181.742s / 152.688s; all three pairs
+  favored the cache. Full measurements, conditions and resource accounting are in
+  `docs/stdlib-cache-ci-results.md`. No application code changed after this run;
+  the final result-recording commit skips CI to avoid a redundant rebuild.
 
 ## Self-review
 
