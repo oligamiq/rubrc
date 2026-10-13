@@ -2,6 +2,7 @@ import { withDeadline } from "./stdlib_cache_browser_support.mjs";
 
 export async function measureEditorInteractions(page, screenshotPrefix) {
   const original = await page.evaluate(() => window.__rubrcLspTest.model.getValue());
+  const input = await page.createCDPSession();
   async function paste(text) {
     const element = await page.waitForSelector(".monaco-editor", { visible: true, timeout: 10000 });
     const box = await element.boundingBox();
@@ -15,7 +16,7 @@ export async function measureEditorInteractions(page, screenshotPrefix) {
       api.editor.setSelection(api.model.getFullModelRange());
     });
     const inputStarted = performance.now();
-    await page.keyboard.insertText(text);
+    await input.send("Input.insertText", { text });
     await page.waitForFunction(value => window.__rubrcLspTest.model.getValue() === value, { timeout: 10000 }, text);
     return inputStarted;
   }
@@ -25,23 +26,14 @@ export async function measureEditorInteractions(page, screenshotPrefix) {
     await page.evaluate(column => {
       const api = window.__rubrcLspTest;
       api.editor.setPosition({ lineNumber: 1, column });
-      window.__rubrcPreviousCompletions = new Set((api.lspEvents ?? []).filter(e => e.message?.method === "textDocument/completion").map(e => e.message.id));
     }, prefix.length + 1);
     const completionStart = performance.now();
     await page.evaluate(() => window.__rubrcLspTest.editor.trigger("measurement", "editor.action.triggerSuggest", {}));
     await page.waitForFunction(() => {
-      const events = window.__rubrcLspTest.lspEvents ?? [];
-      const ids = new Set(events.filter(e => e.message?.method === "textDocument/completion" && !window.__rubrcPreviousCompletions.has(e.message.id)).map(e => e.message.id));
-      for (const e of events) {
-        if (e.boundary !== "inbound" || !ids.has(e.message?.id) || !e.message.result) continue;
-        const result = e.message.result;
-        const labels = (Array.isArray(result) ? result : result.items ?? []).map(item => item.label);
-        if (labels.some(label => /collections/.test(label)) && document.querySelector(".suggest-widget.visible")) {
-          window.__rubrcCompletionLabels = labels;
-          return true;
-        }
-      }
-      return false;
+      const labels = [...document.querySelectorAll(".suggest-widget.visible .monaco-list-row")].map(row => row.textContent ?? "");
+      if (!labels.some(label => /\b(alloc|any|arch|array|collections|env|time)\b/.test(label))) return false;
+      window.__rubrcCompletionLabels = labels;
+      return true;
     }, { timeout: 60000 });
     const completionMs = performance.now() - completionStart;
     const labels = await page.evaluate(() => window.__rubrcCompletionLabels);
@@ -64,5 +56,6 @@ export async function measureEditorInteractions(page, screenshotPrefix) {
       diagnosticMs, diagnostics };
   } finally {
     await withDeadline(page.evaluate(text => window.__rubrcLspTest.model.setValue(text), original), 5000, "restore model").catch(() => {});
+    await withDeadline(input.detach(), 3000, "detach input session").catch(() => {});
   }
 }

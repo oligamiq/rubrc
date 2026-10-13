@@ -4,7 +4,7 @@ import { resolve, join } from "node:path";
 import { startBrowserStaticServer, closeBrowserStaticServer } from "./lsp_browser_static_server.mjs";
 import { monitorRenderer, withDeadline, assertCacheOutcome } from "./stdlib_cache_browser_support.mjs";
 import { measureNetwork } from "./startup_network_measurement.mjs";
-import { summarizeStartup } from "./startup_measurement_support.mjs";
+import { installLspEventTiming, summarizeStartup } from "./startup_measurement_support.mjs";
 import { measureEditorInteractions } from "./startup_interaction_measurement.mjs";
 
 const root = resolve(process.env.RUBRC_MEASURE_ROOT ?? "page/dist");
@@ -64,23 +64,7 @@ try {
     const vfsManifest = JSON.parse(await readFile(join(root, "assets", manifestName), "utf8"));
     const cacheManifest = JSON.parse(await readFile(join(root, "std-cache.json"), "utf8"));
     const expectedPaths = ["/rust-src.sqfs", ...vfsManifest.parts.map(part => `/assets/${part.file}`), ...cacheManifest.parts.map(part => `/${part.file}`)];
-    await page.evaluateOnNewDocument(() => {
-      const events = [];
-      const seen = new WeakSet();
-      window.__rubrcMeasureEvents = events;
-      setInterval(() => {
-        for (const event of window.__rubrcLspTest?.lspEvents ?? []) {
-          if (!event || typeof event !== "object" || seen.has(event)) continue;
-          seen.add(event);
-          const msg = event.message;
-          if (!msg || events.length >= 2000) continue;
-          events.push({ atMs: performance.now(), boundary: event.boundary, method: msg.method,
-            id: msg.id, errorCode: msg.error?.code,
-            diagnosticVersion: msg.method === "textDocument/publishDiagnostics" ? msg.params?.version : undefined,
-            diagnosticUri: msg.method === "textDocument/publishDiagnostics" ? msg.params?.uri : undefined });
-        }
-      }, 100);
-    });
+    await page.evaluateOnNewDocument(installLspEventTiming);
     for (const visit of ["cold", "reload"]) {
       cacheReports.length = 0;
       sysrootReports.length = 0;
@@ -98,6 +82,8 @@ try {
           });
           if (!lock) throw new Error("screen wake lock was not acquired");
         }
+        await renderer.race(page.waitForSelector("[data-rust-analyzer-parallelism]", { timeout: 60000 }));
+        const parallelism = await page.$eval("[data-rust-analyzer-parallelism]", node => node.textContent);
         await renderer.race(page.waitForFunction(() => {
           const api = window.__rubrcLspTest;
           if (api?.startup?.phase === "failed") throw new Error(api.startup.error);
@@ -110,9 +96,9 @@ try {
           measurements: window.__rubrcLspTest.startupMeasurements,
           events: window.__rubrcMeasureEvents,
           modelVersion: window.__rubrcLspTest.model.getVersionId(),
-          parallelism: document.querySelector("[data-rust-analyzer-parallelism]")?.textContent,
           timeOrigin: performance.timeOrigin,
         })));
+        state.parallelism = parallelism;
         const installedSysroots = Object.fromEntries(sysrootReports.filter(report => report.epochMs >= state.timeOrigin)
           .map(report => [report.kind, report.epochMs - state.timeOrigin]));
         const summary = summarizeStartup(state.measurements, installedSysroots);
