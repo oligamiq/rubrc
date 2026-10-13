@@ -17,8 +17,9 @@ case "${1:-}" in
     deno test --no-lock --allow-read --allow-env \
       page/src/stdlib_cache_test.ts page/src/worker_process/lsp_dispatch_test.ts \
       page/src/startup_coordinator_test.ts page/src/workspace_sync_test.ts
+    deno test --no-lock --allow-read --allow-env page/src/startup_measurements_test.ts page/src/startup_sysroot_measurement_test.ts page/src/lsp_test_api_state_test.ts page/src/vfs_readiness_test.ts
     node --test scripts/copy_vfs_bindings_test.mjs scripts/finalize_vfs_asset_test.mjs \
-      scripts/stdlib_cache_browser_support_test.mjs
+      scripts/stdlib_cache_browser_support_test.mjs scripts/startup_measurement_support_test.mjs
     ;;
   tools)
     tools="$RUNNER_TEMP/stdlib-cache-tools"
@@ -89,8 +90,13 @@ case "${1:-}" in
     RUBRC_STDLIB_RUNS=3 RUBRC_STDLIB_TIMEOUT_MS=360000 \
       node scripts/stdlib_cache_browser_test.mjs
     ;;
+  measure)
+    bunx puppeteer browsers install chrome
+    RUBRC_MEASURE_PROFILE=normal node scripts/measure_startup_device.mjs
+    RUBRC_MEASURE_PROFILE=constrained node scripts/measure_startup_device.mjs
+    ;;
   *)
-    printf 'Usage: %s {checks|tools|build|browser}\n' "$0" >&2
+    printf 'Usage: %s {checks|tools|build|browser|measure}\n' "$0" >&2
     exit 2
     ;;
 esac

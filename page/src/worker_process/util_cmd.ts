@@ -650,6 +650,12 @@ async function startUtilityGuest(
     new SharedObject(
       createStartupSysrootStatusEndpoint(vfs_root, {
         timeoutMs: STARTUP_SYSROOT_TIMEOUT_MS,
+        ...(import.meta.env.VITE_RUBRC_LSP_TEST === "1" ? {
+          onReady: (kind: 0 | 1) => console.info(`[startup-sysroot] ${JSON.stringify({
+            kind: kind === 0 ? "rust-src" : "target-sysroot",
+            epochMs: performance.timeOrigin + performance.now(),
+          })}`),
+        } : {}),
       }),
       ctx.install_startup_sysroots_id,
     ),

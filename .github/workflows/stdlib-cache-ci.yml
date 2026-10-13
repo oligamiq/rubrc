@@ -4,6 +4,12 @@ on:
   push:
     branches: [ci/stdlib-cache-validation]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Validation or one-build desktop/mobile measurement preview
+        type: choice
+        options: [validation, mobile-baseline]
+        default: validation
 
 permissions:
   contents: read
@@ -75,9 +81,29 @@ jobs:
           mkdir -p ci-logs
           bash scripts/ci/stdlib_cache.sh tools 2>&1 | tee ci-logs/tools.log
       - name: Build same-WASM cache and browser assets
+        id: build
         run: bash scripts/ci/stdlib_cache.sh build 2>&1 | tee ci-logs/build.log
+      - name: Package short-lived measurement preview
+        if: inputs.mode == 'mobile-baseline'
+        run: |
+          printf '{"sourceSha":"%s","analyzerSha":"%s"}\n' "$GITHUB_SHA" "$(<.github/stdlib-cache-analyzer-revision)" > page/dist/__rubrc_measurement_build.json
+          tar -czf "$RUNNER_TEMP/rubrc-startup-preview.tar.gz" -C page/dist .
+          size=$(stat -c %s "$RUNNER_TEMP/rubrc-startup-preview.tar.gz")
+          test "$size" -lt 268435456
+          sha256sum "$RUNNER_TEMP/rubrc-startup-preview.tar.gz" > ci-logs/preview-sha256.txt
+      - uses: actions/upload-artifact@v4
+        if: inputs.mode == 'mobile-baseline' && steps.build.outcome == 'success'
+        with:
+          name: rubrc-startup-preview
+          path: ${{ runner.temp }}/rubrc-startup-preview.tar.gz
+          compression-level: 0
+          retention-days: 1
       - name: Matched browser trials
+        if: inputs.mode != 'mobile-baseline'
         run: bash scripts/ci/stdlib_cache.sh browser 2>&1 | tee ci-logs/browser.log
+      - name: Desktop normal and constrained startup measurements
+        if: inputs.mode == 'mobile-baseline'
+        run: bash scripts/ci/stdlib_cache.sh measure 2>&1 | tee ci-logs/measurement.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

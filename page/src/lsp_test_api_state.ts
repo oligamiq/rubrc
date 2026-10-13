@@ -52,6 +52,7 @@ export type LspTestGenerationState<TMonaco, TEditor, TModel> = {
   mainDiagnosticsPublicationCount?: number;
   runtime?: RuntimeTestState;
   startup?: StartupTestState;
+  startupMeasurements?: import("./startup_measurements.ts").StartupMeasurements;
   lifecycleEvents?: AppRuntimeLifecycleEvent[];
   runtimeHistory?: RuntimeTestState[];
   completedGenerations?: CompletedLspTestGeneration[];
@@ -126,6 +127,7 @@ export function beginLspTestGeneration<TMonaco, TEditor, TModel>(
   generationState.generation = generation;
   state.ready = false;
   state.vfsWrites = [];
+  delete state.startupMeasurements;
   state.monaco = monaco;
   state.editor = editor;
   state.model = model;

@@ -17,6 +17,7 @@ export type StartupSysrootTiming = {
   timeoutMs?: number;
   now?: () => number;
   sleep?: () => Promise<void>;
+  onReady?: (kind: StartupSysrootKind) => void;
 };
 
 export type StartupSysrootStatus =
@@ -141,9 +142,16 @@ async function pollStartupSysroots(
     timing.sleep ??
     (() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
   const deadline = now() + timeoutMs;
+  const observed = new Set<StartupSysrootKind>();
 
   while (true) {
     const { states, result } = readStartupSysrootSnapshot(root);
+    for (const { kind } of STARTUP_SYSROOTS) {
+      if (states[kind] === 2 && !observed.has(kind)) {
+        observed.add(kind);
+        timing.onReady?.(kind);
+      }
+    }
     if (result) return result;
     if (now() >= deadline) {
       return {

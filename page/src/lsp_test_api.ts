@@ -14,6 +14,7 @@ import {
 import type { AppRuntime, AppRuntimeState } from "./app_runtime.ts";
 import type { AppRuntimeLifecycleEvent } from "./app_runtime.ts";
 import type { StartupSnapshot } from "./startup_coordinator.ts";
+import { recordStartupMeasurement } from "./startup_measurements.ts";
 
 type TestApi =
   & DiagnosticsPublicationTestState
@@ -392,6 +393,9 @@ export function recordStartupTestState(
   if (!enabled) return;
   generation.record((state) => {
     state.startup = createStartupTestState(state.startup, snapshot);
+    state.startupMeasurements = recordStartupMeasurement(
+      state.startupMeasurements, snapshot, performance.now(),
+    );
   });
 }
 
