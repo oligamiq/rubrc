@@ -3,6 +3,8 @@ export const NETWORK_PROFILES = {
   constrained: { latency: 150, downloadThroughput: 5_000_000 / 8, uploadThroughput: 1_000_000 / 8 },
 };
 
+export { startupReachedTerminalState } from "./stdlib_cache_browser_support.mjs";
+
 export function validateWorkerTransfer(profile, bytes, elapsedMs, expectedBytes = 2 * 1024 * 1024) {
   if (bytes !== expectedBytes || bytes <= 0 || !Number.isFinite(elapsedMs) || elapsedMs <= 0) {
     throw new Error("invalid Worker network probe");

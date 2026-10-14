@@ -1,5 +1,5 @@
 import puppeteer from "puppeteer";
-import { assertCacheOutcome, monitorRenderer, withDeadline } from "./stdlib_cache_browser_support.mjs";
+import { assertCacheOutcome, monitorRenderer, startupReachedTerminalState, withDeadline } from "./stdlib_cache_browser_support.mjs";
 import {
   closeBrowserStaticServer,
   startBrowserStaticServer,
@@ -116,13 +116,10 @@ try {
         continue;
       }
       try {
-        await renderer.race(page.waitForFunction(() => {
-          const api = window.__rubrcLspTest;
-          if (api?.startup?.phase === "failed") {
-            throw new Error(api.startup.error);
-          }
-          return api?.ready && api?.startup?.phase === "ready";
-        }, { timeout: Number(process.env.RUBRC_STDLIB_TIMEOUT_MS ?? 300_000) }));
+        await renderer.race(page.waitForFunction(startupReachedTerminalState,
+          { timeout: Number(process.env.RUBRC_STDLIB_TIMEOUT_MS ?? 300_000), polling: 250 }));
+        const terminalState = await page.evaluate(() => window.__rubrcLspTest?.startup);
+        if (terminalState?.phase === "failed") throw new Error(terminalState.error ?? "startup failed");
       } catch (error) {
         console.error(recent);
         // Evaluating JS in a crashed renderer cannot produce useful diagnostics.

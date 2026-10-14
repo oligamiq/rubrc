@@ -1,10 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { installLspEventTiming, NETWORK_PROFILES, summarizeStartup, validateWorkerTransfer } from "./startup_measurement_support.mjs";
+import { installLspEventTiming, NETWORK_PROFILES, startupReachedTerminalState, summarizeStartup, validateWorkerTransfer } from "./startup_measurement_support.mjs";
 
 test("network profile converts megabits to bytes per second", () => {
   assert.equal(NETWORK_PROFILES.constrained.downloadThroughput, 625000);
   assert.equal(NETWORK_PROFILES.constrained.uploadThroughput, 125000);
+});
+
+test("startup polling resolves on failed state instead of throwing inside its timer", () => {
+  const oldWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    assert.equal(startupReachedTerminalState(), false);
+    window.__rubrcLspTest = { ready: false, startup: { phase: "failed", error: "archive timeout" } };
+    assert.equal(startupReachedTerminalState(), true);
+    window.__rubrcLspTest = { ready: false, startup: { phase: "semantic-warming" } };
+    assert.equal(startupReachedTerminalState(), false);
+    window.__rubrcLspTest = { ready: true, startup: { phase: "ready" } };
+    assert.equal(startupReachedTerminalState(), true);
+  } finally {
+    if (oldWindow === undefined) delete globalThis.window;
+    else globalThis.window = oldWindow;
+  }
 });
 
 test("diagnostic observation is synchronous and preserves the original event sink", () => {

@@ -36,3 +36,13 @@ bandwidth is shared rather than granting each Worker a separate 5 Mbps budget.
 The optional CDP applied-rule ID was absent from Worker events in this browser;
 the driver records that absence and uses acknowledged page configuration plus
 the measured concurrent transfer as its calibration evidence.
+
+## Outcome
+
+Baseline measurements and physical-device trials were performed; see
+`docs/mobile-startup-measurement-results.md`. Desktop normal-network startup and
+editor interactions passed. Constrained networking failed on the application's
+60-second archive deadline, and the physical Pixel renderer was killed for low
+memory. The one-worker experiment and a non-CDP manual launch did not establish
+a working mobile configuration. These failures are retained, not omitted from the
+report. No application speed fix or successful mobile acceptance is claimed.

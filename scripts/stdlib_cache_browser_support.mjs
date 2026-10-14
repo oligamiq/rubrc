@@ -16,6 +16,13 @@ export function monitorRenderer(page) {
   };
 }
 
+// Resolve the polling promise on failure; throwing inside an asynchronous RAF
+// callback can otherwise leave it pending until the outer timeout.
+export function startupReachedTerminalState() {
+  const api = window.__rubrcLspTest;
+  return api?.startup?.phase === "failed" || Boolean(api?.ready && api?.startup?.phase === "ready");
+}
+
 export async function withDeadline(operation, timeoutMs, label) {
   let timer;
   try {

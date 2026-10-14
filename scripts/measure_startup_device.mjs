@@ -4,7 +4,7 @@ import { resolve, join } from "node:path";
 import { startBrowserStaticServer, closeBrowserStaticServer } from "./lsp_browser_static_server.mjs";
 import { monitorRenderer, withDeadline, assertCacheOutcome } from "./stdlib_cache_browser_support.mjs";
 import { measureNetwork } from "./startup_network_measurement.mjs";
-import { installLspEventTiming, summarizeStartup } from "./startup_measurement_support.mjs";
+import { installLspEventTiming, startupReachedTerminalState, summarizeStartup } from "./startup_measurement_support.mjs";
 import { measureEditorInteractions } from "./startup_interaction_measurement.mjs";
 
 const root = resolve(process.env.RUBRC_MEASURE_ROOT ?? "page/dist");
@@ -13,6 +13,8 @@ const profile = process.env.RUBRC_MEASURE_PROFILE ?? "normal";
 const port = Number(process.env.RUBRC_MEASURE_PORT ?? 4187);
 const timeout = Number(process.env.RUBRC_MEASURE_TIMEOUT_MS ?? 600000);
 const remote = process.env.RUBRC_MEASURE_CDP;
+const reportedCpus = Number(process.env.RUBRC_MEASURE_REPORTED_CPUS ?? 0);
+if (!Number.isInteger(reportedCpus) || reportedCpus < 0 || reportedCpus > 16) throw new Error("invalid reported CPU override");
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("invalid measurement port");
 await access(join(root, "index.html"));
 await mkdir(output, { recursive: true });
@@ -56,6 +58,10 @@ try {
   await record({ kind: "calibration", profile, remote: Boolean(remote), browser: await browser.version(),
     limits: network.profile, ...environment, calibration });
   if (process.env.RUBRC_MEASURE_CALIBRATION_ONLY !== "1") {
+    if (reportedCpus) {
+      await page.evaluateOnNewDocument(value => Object.defineProperty(navigator, "hardwareConcurrency", { get: () => value }), reportedCpus);
+      await record({ kind: "configuration-experiment", actualReportedCpus: environment.hardwareConcurrency, overriddenReportedCpus: reportedCpus });
+    }
     const build = JSON.parse(await readFile(join(root, "__rubrc_measurement_build.json"), "utf8"));
     if (!/^[0-9a-f]{40}$/.test(build.sourceSha) || !/^[0-9a-f]{40}$/.test(build.analyzerSha)) throw new Error("invalid preview build identity");
     await record({ kind: "build", ...build });
@@ -84,11 +90,9 @@ try {
         }
         await renderer.race(page.waitForSelector("[data-rust-analyzer-parallelism]", { timeout: 60000 }));
         const parallelism = await page.$eval("[data-rust-analyzer-parallelism]", node => node.textContent);
-        await renderer.race(page.waitForFunction(() => {
-          const api = window.__rubrcLspTest;
-          if (api?.startup?.phase === "failed") throw new Error(api.startup.error);
-          return api?.ready && api?.startup?.phase === "ready";
-        }, { timeout }));
+        await renderer.race(page.waitForFunction(startupReachedTerminalState, { timeout, polling: 250 }));
+        const terminalState = await page.evaluate(() => window.__rubrcLspTest?.startup);
+        if (terminalState?.phase === "failed") throw new Error(terminalState.error ?? "startup failed");
         const elapsedMs = performance.now() - start;
         assertCacheOutcome(true, cacheDownloaded, cacheReports);
         const state = await renderer.race(page.evaluate(() => ({
@@ -130,6 +134,7 @@ try {
         })), 5000, "failure snapshot").catch(String);
         await record({ kind: "failure", profile, visit, elapsedMs: performance.now() - start,
           error: String(error), rendererCrashed: Boolean(renderer.error), cacheReports: [...cacheReports], state });
+        await writeFile(join(output, `${profile}-${visit}-failure-network.json`), JSON.stringify(network.snapshot(), null, 2));
         if (!renderer.error) await withDeadline(page.screenshot({ path: join(output, `${profile}-${visit}-failure.png`) }), 5000, "failure screenshot").catch(() => {});
         throw error;
       }
