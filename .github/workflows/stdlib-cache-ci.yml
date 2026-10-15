@@ -35,6 +35,8 @@ env:
   BINARYEN_CORES: "2"
   PUPPETEER_SKIP_DOWNLOAD: "true"
   VFS_CORE_OPT_LEVEL: ${{ inputs.core_opt || 'none' }}
+  ACTUAL_VFS_CORE_OPT_LEVEL: none
+  CORE_OPT_FAILED: "0"
 
 defaults:
   run:
@@ -150,7 +152,7 @@ jobs:
       - name: Package short-lived measurement preview
         if: inputs.mode == 'mobile-baseline'
         run: |
-          printf '{"sourceSha":"%s","analyzerSha":"%s","coreOptimization":"%s"}\n' "$GITHUB_SHA" "$(<.github/stdlib-cache-analyzer-revision)" "$VFS_CORE_OPT_LEVEL" > page/dist/__rubrc_measurement_build.json
+          printf '{"sourceSha":"%s","analyzerSha":"%s","coreOptimizationRequested":"%s","coreOptimization":"%s"}\n' "$GITHUB_SHA" "$(<.github/stdlib-cache-analyzer-revision)" "$VFS_CORE_OPT_LEVEL" "$ACTUAL_VFS_CORE_OPT_LEVEL" > page/dist/__rubrc_measurement_build.json
           tar -czf "$RUNNER_TEMP/rubrc-startup-preview.tar.gz" -C page/dist .
           size=$(stat -c %s "$RUNNER_TEMP/rubrc-startup-preview.tar.gz")
           test "$size" -lt 268435456
@@ -168,6 +170,11 @@ jobs:
       - name: Desktop normal and constrained startup measurements
         if: inputs.mode == 'mobile-baseline'
         run: bash scripts/ci/stdlib_cache.sh measure 2>&1 | tee ci-logs/measurement.log
+      - name: Report unsuccessful optimization experiment
+        if: always() && env.CORE_OPT_FAILED == '1'
+        run: |
+          echo "Requested optimization was not applied; any preview uses the original validated core."
+          exit 1
       - uses: actions/upload-artifact@v4
         if: always()
         with:

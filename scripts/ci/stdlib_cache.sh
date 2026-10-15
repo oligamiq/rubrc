@@ -75,21 +75,48 @@ case "${1:-}" in
       crates/vfs/cargo_opt.wasm vfs-shell \
       --features debug-log --dev --own-memory --vfs-unwind --validate
     wasm-tools validate --features all dist/vfs.core.wasm
+    if [[ -n "${GITHUB_ENV:-}" ]]; then
+      printf 'ACTUAL_VFS_CORE_OPT_LEVEL=none\nCORE_OPT_FAILED=0\n' >> "$GITHUB_ENV"
+    fi
     case "${VFS_CORE_OPT_LEVEL:-none}" in
       none) ;;
       O1)
         # One bounded trial on the final core: its export ABI remains unchanged,
         # and cache generation below runs this exact optimized module.
         stat -c 'before: %s bytes' dist/vfs.core.wasm > "$LOGS/core-optimization.txt"
-        BINARYEN_CORES=1 timeout --kill-after=30s 30m \
-          /usr/bin/time -v -o "$LOGS/core-optimization-time.txt" \
-          wasm-opt -O1 --enable-threads --enable-bulk-memory \
-          --enable-reference-types --enable-exception-handling --enable-simd \
-          --enable-multivalue --enable-mutable-globals --enable-sign-ext \
-          --enable-nontrapping-float-to-int --enable-extended-const \
-          dist/vfs.core.wasm -o dist/vfs.core.optimized.wasm
-        wasm-tools validate --features all dist/vfs.core.optimized.wasm
-        mv dist/vfs.core.optimized.wasm dist/vfs.core.wasm
+        (
+          while true; do
+            date -u +%FT%TZ
+            free -m
+            ps -C wasm-opt -o pid,rss,vsz,etime || true
+            sleep 15
+          done
+        ) &
+        monitor_pid=$!
+        trap 'kill "$monitor_pid" 2>/dev/null || true' EXIT
+        # Keep optimizer allocation failure isolated from the runner process.
+        if (
+          ulimit -v 12582912 || exit 1
+          ulimit -c 0 || exit 1
+          BINARYEN_CORES=1 timeout --kill-after=30s 30m \
+            /usr/bin/time -v -o "$LOGS/core-optimization-time.txt" \
+            wasm-opt -O1 --enable-threads --enable-bulk-memory \
+            --enable-reference-types --enable-exception-handling --enable-simd \
+            --enable-multivalue --enable-mutable-globals --enable-sign-ext \
+            --enable-nontrapping-float-to-int --enable-extended-const \
+            dist/vfs.core.wasm -o dist/vfs.core.optimized.wasm
+        ) && wasm-tools validate --features all dist/vfs.core.optimized.wasm; then
+          mv dist/vfs.core.optimized.wasm dist/vfs.core.wasm
+          printf 'optimization applied\n' >> "$LOGS/core-optimization.txt"
+          if [[ -n "${GITHUB_ENV:-}" ]]; then printf 'ACTUAL_VFS_CORE_OPT_LEVEL=O1\n' >> "$GITHUB_ENV"; fi
+        else
+          rm -f dist/vfs.core.optimized.wasm
+          printf 'optimization failed; original validated core retained\n' >> "$LOGS/core-optimization.txt"
+          if [[ -n "${GITHUB_ENV:-}" ]]; then printf 'CORE_OPT_FAILED=1\n' >> "$GITHUB_ENV"; fi
+        fi
+        kill "$monitor_pid" 2>/dev/null || true
+        wait "$monitor_pid" 2>/dev/null || true
+        trap - EXIT
         stat -c 'after: %s bytes' dist/vfs.core.wasm >> "$LOGS/core-optimization.txt"
         ;;
       *) printf 'Unsupported VFS_CORE_OPT_LEVEL\n' >&2; exit 2 ;;

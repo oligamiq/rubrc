@@ -23,7 +23,7 @@ type ArchiveOptions = {
 export type ArchiveBytesOptions = {
   /** Overall transfer budget; progress cannot extend this deadline. */
   timeoutMs?: number;
-  /** Maximum time without a non-empty decoded chunk (including initial fetch). */
+  /** Maximum time without input or decoded byte progress (including initial fetch). */
   idleTimeoutMs?: number;
   signal?: AbortSignal;
   fetchStream?: (

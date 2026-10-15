@@ -60,3 +60,11 @@ limit. Validate before replacing the staged core and generate the Salsa cache
 using that exact optimized runtime. Keep the default CI configuration unchanged.
 This is a measured experiment; do not assume that optimization will make the
 Pixel pass or claim a performance improvement before device verification.
+
+The first optimization run (`38692166468`) ended when the hosted runner received
+a shutdown signal (exit 143); no resource report survived, so the cause is not
+classified as proven OOM. One guarded follow-up caps optimizer virtual memory at
+12 GiB and logs usage every 15 seconds. A failed optimization retains the original
+validated core for functional download testing, records the actual mode in the
+preview metadata, and explicitly fails the optimization result rather than
+silently reporting success.
