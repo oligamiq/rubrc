@@ -18,6 +18,8 @@ case "${1:-}" in
       page/src/stdlib_cache_test.ts page/src/worker_process/lsp_dispatch_test.ts \
       page/src/startup_coordinator_test.ts page/src/workspace_sync_test.ts
     deno test --no-lock --allow-read --allow-env page/src/startup_measurements_test.ts page/src/startup_sysroot_measurement_test.ts page/src/lsp_test_api_state_test.ts page/src/vfs_readiness_test.ts
+    deno test --no-lock --allow-read --allow-env page/src/sysroot_transfer_timeout_test.ts page/src/sysroot_archive_test.ts page/src/sysroot_archive_store_test.ts
+    deno test --no-lock lib/src/compressed_progress_test.ts lib/src/fetch_compressed_stream_test.ts
     node --test scripts/copy_vfs_bindings_test.mjs scripts/finalize_vfs_asset_test.mjs \
       scripts/stdlib_cache_browser_support_test.mjs scripts/startup_measurement_support_test.mjs
     ;;
@@ -63,6 +65,7 @@ case "${1:-}" in
       wasi_virt_layer --version
       wasm-tools --version
       wasm-opt --version
+      printf 'VFS_CORE_OPT_LEVEL=%s\n' "${VFS_CORE_OPT_LEVEL:-none}"
       free -h
       df -h .
     } > "$LOGS/build-identity.txt"
@@ -72,6 +75,25 @@ case "${1:-}" in
       crates/vfs/cargo_opt.wasm vfs-shell \
       --features debug-log --dev --own-memory --vfs-unwind --validate
     wasm-tools validate --features all dist/vfs.core.wasm
+    case "${VFS_CORE_OPT_LEVEL:-none}" in
+      none) ;;
+      O1)
+        # One bounded trial on the final core: its export ABI remains unchanged,
+        # and cache generation below runs this exact optimized module.
+        stat -c 'before: %s bytes' dist/vfs.core.wasm > "$LOGS/core-optimization.txt"
+        BINARYEN_CORES=1 timeout --kill-after=30s 30m \
+          /usr/bin/time -v -o "$LOGS/core-optimization-time.txt" \
+          wasm-opt -O1 --enable-threads --enable-bulk-memory \
+          --enable-reference-types --enable-exception-handling --enable-simd \
+          --enable-multivalue --enable-mutable-globals --enable-sign-ext \
+          --enable-nontrapping-float-to-int --enable-extended-const \
+          dist/vfs.core.wasm -o dist/vfs.core.optimized.wasm
+        wasm-tools validate --features all dist/vfs.core.optimized.wasm
+        mv dist/vfs.core.optimized.wasm dist/vfs.core.wasm
+        stat -c 'after: %s bytes' dist/vfs.core.wasm >> "$LOGS/core-optimization.txt"
+        ;;
+      *) printf 'Unsupported VFS_CORE_OPT_LEVEL\n' >&2; exit 2 ;;
+    esac
     node scripts/copy_vfs_bindings.mjs
     bun install --cwd page/src/worker_process/vfs_bindings
     # Keep the small generated adapter as a diagnostic, never the WASM payload.

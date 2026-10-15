@@ -46,3 +46,17 @@ editor interactions passed. Constrained networking failed on the application's
 memory. The one-worker experiment and a non-CDP manual launch did not establish
 a working mobile configuration. These failures are retained, not omitted from the
 report. No application speed fix or successful mobile acceptance is claimed.
+
+## Measured follow-up
+
+The byte-download path now has a 60-second inactivity limit and a separate
+10-minute total budget. Existing explicit `timeoutMs` values remain total caps;
+parse-only and legacy archive paths retain their existing deadlines. Tests cover
+progress beyond 60 seconds, idle cancellation and progress not bypassing the cap.
+
+For mobile memory, run one optional `core_opt=O1` experiment on the final VFS core
+using the standard runner, one Binaryen worker and a hard 30-minute optimization
+limit. Validate before replacing the staged core and generate the Salsa cache
+using that exact optimized runtime. Keep the default CI configuration unchanged.
+This is a measured experiment; do not assume that optimization will make the
+Pixel pass or claim a performance improvement before device verification.

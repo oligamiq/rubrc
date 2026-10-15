@@ -21,11 +21,15 @@ type ArchiveOptions = {
   maintainRustSrcCache?: (archiveUrl: string) => void;
 };
 export type ArchiveBytesOptions = {
+  /** Overall transfer budget; progress cannot extend this deadline. */
   timeoutMs?: number;
+  /** Maximum time without a non-empty decoded chunk (including initial fetch). */
+  idleTimeoutMs?: number;
   signal?: AbortSignal;
   fetchStream?: (
     url: string,
     signal: AbortSignal,
+    onProgress?: (bytes: number) => void,
   ) => Promise<ReadableStream<Uint8Array>>;
 };
 type ParseArchiveOptions = {
@@ -37,6 +41,8 @@ type ParseArchiveOptions = {
 };
 
 const RUST_SRC_ASSET = "rust-src.sqfs";
+export const SYSROOT_TRANSFER_TIMEOUT_MS = 600_000;
+export const SYSROOT_TRANSFER_IDLE_TIMEOUT_MS = 60_000;
 declare const __RUBRC_SOURCE_REVISION__: string;
 declare const __RUBRC_BUILD_EPOCH__: string;
 const SOURCE_REVISION = typeof __RUBRC_SOURCE_REVISION__ === "undefined"
@@ -99,29 +105,50 @@ export async function loadSysrootArchiveBytes(
   const controller = new AbortController();
   const externalAbort = () => controller.abort(options.signal?.reason);
   options.signal?.addEventListener("abort", externalAbort, { once: true });
-  const timeoutMs = options.timeoutMs ?? 60_000;
+  const timeoutMs = options.timeoutMs ?? SYSROOT_TRANSFER_TIMEOUT_MS;
+  const idleTimeoutMs = options.idleTimeoutMs ?? SYSROOT_TRANSFER_IDLE_TIMEOUT_MS;
   const deadline = performance.now() + timeoutMs;
+  let lastActivity = performance.now();
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
   const timeoutError = () =>
     new Error(`sysroot archive ${triple} timed out after ${timeoutMs}ms`);
+  const idleError = () =>
+    new Error(`sysroot archive ${triple} stalled for ${idleTimeoutMs}ms without data`);
+  const noteActivity = () => {
+    lastActivity = performance.now();
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => controller.abort(idleError()), idleTimeoutMs);
+  };
   const checkDeadline = () => {
     controller.signal.throwIfAborted();
-    if (performance.now() >= deadline) {
+    const now = performance.now();
+    if (now >= deadline) {
       const error = timeoutError();
       controller.abort(error);
       throw error;
     }
+    if (now - lastActivity >= idleTimeoutMs) {
+      const error = idleError();
+      controller.abort(error);
+      throw error;
+    }
   };
+  noteActivity();
   const operation = (async () => {
-    const fetchStream = options.fetchStream ?? (triple === "rust-src"
+    const fetchStream: NonNullable<ArchiveBytesOptions["fetchStream"]> = options.fetchStream ?? (triple === "rust-src"
       ? (await import("../../lib/src/fetch_binary_stream.ts")).fetch_binary_stream
       : (await import("../../lib/src/brotli_stream.ts")).fetch_compressed_stream);
     const archiveUrl = sysrootArchiveUrl(triple);
-    const stream = await fetchStream(archiveUrl, controller.signal);
+    const stream = await fetchStream(archiveUrl, controller.signal, (bytes) => {
+      checkDeadline();
+      if (bytes > 0) noteActivity();
+    });
     const reader = stream.getReader();
     const cancelRead = () => {
       void reader.cancel(controller.signal.reason).catch(() => undefined);
     };
     controller.signal.addEventListener("abort", cancelRead, { once: true });
+    if (controller.signal.aborted) cancelRead();
     const chunks: Uint8Array[] = [];
     let totalLength = 0;
     try {
@@ -131,6 +158,7 @@ export async function loadSysrootArchiveBytes(
         checkDeadline();
         if (done) break;
         if (value.byteLength === 0) continue;
+        noteActivity();
         chunks.push(value);
         totalLength += value.byteLength;
       }
@@ -172,6 +200,7 @@ export async function loadSysrootArchiveBytes(
     throw error;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
     options.signal?.removeEventListener("abort", externalAbort);
   }
 }

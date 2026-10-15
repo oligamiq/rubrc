@@ -16,6 +16,7 @@ export type FetchCompressedStreamDependencies = Omit<
   "acceptResponse"
 > & {
   getDecompressStream(): Promise<TransformStream<Uint8Array, Uint8Array>>;
+  onCompressedBytes?: (bytes: number) => void;
 };
 
 function mediaType(response: Response): string | null {
@@ -95,5 +96,13 @@ export async function fetchCompressedStream(
     await response.body.cancel().catch(() => undefined);
     throw error;
   }
-  return response.body.pipeThrough(decompressStream);
+  const body = dependencies.onCompressedBytes
+    ? response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        if (chunk.byteLength > 0) dependencies.onCompressedBytes?.(chunk.byteLength);
+        controller.enqueue(chunk);
+      },
+    }))
+    : response.body;
+  return body.pipeThrough(decompressStream);
 }

@@ -49,6 +49,7 @@ export const get_brotli_decompress_stream = async (): Promise<
 export const fetch_compressed_stream = async (
   url: string | URL | globalThis.Request,
   signal?: AbortSignal,
+  onCompressedBytes?: (bytes: number) => void,
 ): Promise<ReadableStream<Uint8Array>> =>
   await fetchCompressedStream(url, signal, {
     cacheStorage: "caches" in globalThis ? caches : undefined,
@@ -57,4 +58,5 @@ export const fetch_compressed_stream = async (
       console.warn("Failed to cache compressed asset", error);
     },
     getDecompressStream: get_brotli_decompress_stream,
+    onCompressedBytes,
   });
