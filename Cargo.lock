@@ -26,8 +26,6 @@ checksum = "423134a960e72b6ec5616e760fdda847cf8f73ac3d416f76cdc2cf9ced8beda1"
 [[package]]
 name = "am-fs-squashfs"
 version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21c43fbe11c700efcd4ce9cba92f66886addc0b660e3e032cac3e4bcecf116ab"
 dependencies = [
  "am-fs-core",
  "am-lzo1x",

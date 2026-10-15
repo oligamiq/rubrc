@@ -68,3 +68,11 @@ classified as proven OOM. One guarded follow-up caps optimizer virtual memory at
 validated core for functional download testing, records the actual mode in the
 preview metadata, and explicitly fails the optimization result rather than
 silently reporting success.
+
+The guarded follow-up (`38726643538`) stopped before building VFS because the
+previously locked `am-fs-squashfs` release disappeared from the registry index.
+Recovered the exact 0.1.3 archive from cache, verified its original locked SHA-256,
+and vendored its unmodified source/license with provenance. All 28 extracted
+upstream files matched the archive byte-for-byte; only this dependency's registry
+source changed to a local path. This is build reproducibility recovery, not a
+filesystem behavior upgrade. See `vendor/am-fs-squashfs/VENDORED.md`.

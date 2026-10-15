@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/*"]
+exclude = ["vendor/am-fs-squashfs"]
 resolver = "2"
 
 default-members = ["crates/vfs"]

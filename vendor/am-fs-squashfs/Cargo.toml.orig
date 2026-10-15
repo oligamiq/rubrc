@@ -1,0 +1,66 @@
+[package]
+name = "am-fs-squashfs"
+version = "0.1.3"
+edition = "2021"
+license = "MIT"
+description = "Pure-Rust SquashFS (read-only) filesystem driver. Clean-room implementation; reads SquashFS 4.0 images with every standard compressor (gzip, xz, lz4, zstd, lzo). Exposes a C ABI (fs_squashfs_*) suitable for FFI from C/C++/Swift/Go/etc."
+repository = "https://github.com/antimatter-studios/rust-fs-squashfs"
+
+[lib]
+name = "fs_squashfs"
+crate-type = ["staticlib", "rlib"]
+
+# Standalone CLI tool — list + cat over a SquashFS image. Cross-platform;
+# only depends on this crate's own pure-Rust format path. Mirrors the
+# mkfs_ext4 / mkfs_erofs binary convention of the sister crates.
+[[bin]]
+name = "lssquashfs"
+path = "src/bin/lssquashfs.rs"
+
+[dependencies]
+# Block-device trait surface shared with the sister crates (qcow2 reader,
+# partition probe, fs-ext4 / fs-ntfs drivers). Local path dep until the
+# crates publish; the FFI mount path consumes `fs_core::ffi::FsCoreDevice`
+# so an FSKit extension (or any FFI consumer) can hand us a block-device
+# resource.
+am-fs-core = { path = "../rust-fs-core", version = "0.2" }
+# LZO1X codec (compression id 3). Extracted from this crate into its own
+# published crate so the Btrfs driver can share it rather than each
+# carrying a copy — the decoder is identical and the format is not
+# SquashFS-specific. Independent implementation from the published stream
+# grammar; the widely-used LZO libraries are GPL and unusable here.
+am-lzo1x = "0.1.0"
+# gzip/zlib codec (compression id 1). SquashFS gzip blocks are zlib-wrapped
+# DEFLATE, decoded via `flate2::Decompress::new(true)`. rust_backend
+# (miniz_oxide) keeps the dependency pure-Rust + cleanroom-safe; no
+# proc-macro deps.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# xz codec (compression id 4). SquashFS xz blocks are full `.xz` container
+# streams, decoded via `lzma_rs::xz_decompress`. Pure-Rust, MIT.
+lzma-rs = "0.3"
+# lz4 codec (compression id 5). SquashFS uses the LZ4 *block* format with
+# the uncompressed size known from block geometry; decoded via
+# `lz4_flex::block::decompress_into`. `default-features = false` +
+# `safe-decode` keeps it pure-safe-Rust; no encoder pulled in. MIT.
+lz4_flex = { version = "0.11", default-features = false, features = ["safe-decode"] }
+# zstd codec (compression id 6). SquashFS uses standard zstd frames,
+# decoded via `ruzstd`'s pure-Rust streaming decoder. MIT.
+ruzstd = "0.8"
+
+[dev-dependencies]
+# Integration tests spawn `mksquashfs` to build fixtures into a tempdir.
+tempfile = "3"
+# CLI integration tests use `Command::cargo_bin("lssquashfs")` to spawn the
+# freshly-built binary. MIT/Apache-2.0; no proc-macro deps that would pull
+# GPL'd code into the test build.
+assert_cmd = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+panic = "unwind"  # required for catch_unwind at the FFI boundary (see src/capi.rs)
+
+[profile.dev]
+opt-level = 1
+panic = "unwind"

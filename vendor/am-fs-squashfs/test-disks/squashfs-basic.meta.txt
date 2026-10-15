@@ -1,0 +1,16 @@
+image: squashfs-basic.sqfs
+compressor: gzip
+block_size: 4096
+committed: yes (read by non-ignored cargo tests)
+contents:
+  /hello.txt          — "hi\n" (3 bytes; tail fragment)
+  /sub/note.md        — "# note\nsome words here\n" (nested small file)
+  /sub/deep/big.bin   — 20000 bytes deterministic LCG pattern (multi-block + tail)
+  /empty.txt          — zero-length file
+  /link               — symlink -> hello.txt
+test_targets:
+  - root listing == [empty.txt, hello.txt, link, sub]
+  - read /hello.txt, /sub/note.md exact bytes
+  - read /sub/deep/big.bin full + mid-file offset; matches LCG pattern
+  - readlink /link == "hello.txt"
+  - stat /empty.txt size == 0
