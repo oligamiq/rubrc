@@ -224,3 +224,9 @@ inlay work before selecting a targeted optimization or an LSP/compiler split.
 Repeating the same final-core `O1` experiment without new evidence is not justified.
 No further hosted build was dispatched for these checks, and no deployment or
 main/develop update was performed.
+
+Subsequent profiling identified repeated physical thread-margin reservation and
+substantial generated memory-lock overhead. See
+[`startup-memory-root-cause.md`](startup-memory-root-cause.md) for the evidence,
+unsuccessful probes, and the proposed bounded reservation fix. Mobile acceptance
+remains incomplete.
