@@ -129,7 +129,7 @@ jobs:
   wasm-browser:
     needs: checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - name: Checkout validation source
         working-directory: ${{ github.workspace }}
@@ -146,6 +146,23 @@ jobs:
         run: |
           mkdir -p ci-logs
           bash scripts/ci/stdlib_cache.sh tools 2>&1 | tee ci-logs/tools.log
+      - name: Prepare optimizer memory headroom
+        if: inputs.core_opt == 'O1'
+        run: |
+          {
+            free -m
+            df -h "$RUNNER_TEMP"
+            available_bytes=$(( $(stat -f -c %a "$RUNNER_TEMP") * $(stat -f -c %S "$RUNNER_TEMP") ))
+            test "$available_bytes" -ge 21474836480
+            swap_file="$RUNNER_TEMP/rubrc-optimizer.swap"
+            test ! -e "$swap_file"
+            sudo install -m 600 /dev/null "$swap_file"
+            sudo fallocate -l 16G "$swap_file"
+            sudo mkswap "$swap_file"
+            sudo swapon "$swap_file"
+            free -m
+            swapon --show --bytes
+          } 2>&1 | tee ci-logs/optimization-environment.log
       - name: Build same-WASM cache and browser assets
         id: build
         run: bash scripts/ci/stdlib_cache.sh build 2>&1 | tee ci-logs/build.log
@@ -175,6 +192,14 @@ jobs:
         run: |
           echo "Requested optimization was not applied; any preview uses the original validated core."
           exit 1
+      - name: Release optimizer swap
+        if: always() && inputs.core_opt == 'O1'
+        run: |
+          swap_file="$RUNNER_TEMP/rubrc-optimizer.swap"
+          if swapon --show=NAME --noheadings | grep -Fxq -- "$swap_file"; then
+            sudo swapoff "$swap_file"
+          fi
+          sudo rm -f -- "$swap_file"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

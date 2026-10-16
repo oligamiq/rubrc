@@ -85,20 +85,30 @@ case "${1:-}" in
         # and cache generation below runs this exact optimized module.
         stat -c 'before: %s bytes' dist/vfs.core.wasm > "$LOGS/core-optimization.txt"
         (
+          monitor_started=$SECONDS
+          checkpoint_logged=false
           while true; do
             date -u +%FT%TZ
             free -m
-            ps -C wasm-opt -o pid,rss,vsz,etime || true
+            swapon --show --bytes
+            ps -C wasm-opt -o pid,rss,vsz,pcpu,etime || true
+            if (( SECONDS - monitor_started >= 1800 )) && [[ "$checkpoint_logged" == false ]]; then
+              printf 'Optimizer passed the 30-minute progress checkpoint; continuing within the 90-minute emergency deadline.\n'
+              checkpoint_logged=true
+            fi
             sleep 15
           done
         ) &
         monitor_pid=$!
         trap 'kill "$monitor_pid" 2>/dev/null || true' EXIT
-        # Keep optimizer allocation failure isolated from the runner process.
+        # The optimizer is expected to need about 16 GiB. The CI job adds
+        # 16 GiB swap; allow address-space headroom instead of the old 12 GiB
+        # cap, which could abort an otherwise viable optimization. This is
+        # a virtual-address-space limit, not a physical-memory allocation.
         if (
-          ulimit -v 12582912 || exit 1
+          ulimit -v 25165824 || exit 1
           ulimit -c 0 || exit 1
-          BINARYEN_CORES=1 timeout --kill-after=30s 30m \
+          BINARYEN_CORES=1 timeout --kill-after=30s 90m \
             /usr/bin/time -v -o "$LOGS/core-optimization-time.txt" \
             wasm-opt -O1 --enable-threads --enable-bulk-memory \
             --enable-reference-types --enable-exception-handling --enable-simd \
