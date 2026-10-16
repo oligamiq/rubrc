@@ -76,3 +76,28 @@ and vendored its unmodified source/license with provenance. All 28 extracted
 upstream files matched the archive byte-for-byte; only this dependency's registry
 source changed to a local path. This is build reproducibility recovery, not a
 filesystem behavior upgrade. See `vendor/am-fs-squashfs/VENDORED.md`.
+
+## Follow-up verification — 2026-10-16
+
+Run `38821782668` passed regressions, build/preview generation and desktop normal
+and constrained startup/editor measurements. It remains a failed workflow because
+the explicitly reported optional optimizer experiment aborted (signal 6, maximum
+RSS about 11.77 GiB, virtual size close to its 12 GiB cap). The preview records
+actual optimization `none`; its archive, decoded core and cache were verified
+before physical-device use.
+
+The constrained desktop now reaches ready: cold 522.586 s, reload 141.128 s.
+Post-sysroot time across the four desktop visits remains 106–109 s. This verifies
+the slow-transfer reliability fix, not startup acceleration.
+
+Physical Pixel 6a retests on the same preview (now Chrome 155 rather than 154)
+still failed with Android `LOW_MEMORY`: normal after 80.058 s at about 2.8 GB RSS,
+constrained after 367.176 s at about 2.7 GB. The constrained case reached cache
+restoration, but neither case reached mobile acceptance. Dedicated test storage,
+tabs, servers and forwarding rules were cleaned up. Full measurements and build
+identities are in `docs/mobile-startup-measurement-results.md`.
+
+Remaining investigation: attribute runtime memory and initial semantic query
+cost before choosing a targeted optimization or runtime split. Do not repeat the
+same costly final-core optimization without new evidence, or mark mobile
+acceptance complete based on the successful desktop transfer test.

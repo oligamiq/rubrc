@@ -2,9 +2,11 @@
 
 ## Scope and build identity
 
-These are baseline investigations, including failures, **not a successful mobile
+These are investigations, including failures, **not a successful mobile
 acceptance result or an implemented speed improvement**. The public site was not
-updated. All device runs used the same CI-produced preview:
+updated. The initial baseline device runs used the same CI-produced preview
+listed below. The timeout-fix follow-up has its own build identity and results
+at the end of this report.
 
 - Preview source: `00efe87526f91f38f01abb741d39ef6ebea415c3`.
 - Analyzer source: `07e8d30e340e504655ebace245a8df17f7f91fbf`.
@@ -109,7 +111,7 @@ No successful mobile edit/completion/diagnostic result is claimed. Temporary
 forwarding rules and the test server were removed, and the device's original
 stay-awake setting was restored. Raw device identifiers/history remain local.
 
-## Conclusions and next changes
+## Initial baseline conclusions and next changes
 
 1. **Post-sysroot computation is substantial even on desktop:** 75–98 seconds,
    dominated by the 62–76-second semantic-readiness phase. More download tuning
@@ -127,3 +129,98 @@ One WASM build was used for these tests. The build run and replay consumed about
 40.1 hosted runner-minutes in total, using standard public-repository Linux
 runners. The preview archive is 119,273,655 bytes and its uploaded artifact was
 retained for one day; no deployment was performed.
+
+## Timeout-fix follow-up — 2026-10-16
+
+### Verified build and CI outcome
+
+- [Run 38821782668](https://github.com/oligamiq/rubrc/actions/runs/38821782668).
+- Source: `7c7845ea61be1a5ff0fd225264ea45701e33e1e1`.
+- Analyzer: `07e8d30e340e504655ebace245a8df17f7f91fbf` (unchanged).
+- Archive SHA-256: `0baf3ee4f204b9d881f0352122964f9b583afc03444eb83daab8afb3ed8ec9b2`.
+- Decoded VFS: 469,321,933 bytes, SHA-256
+  `7412bcd33ffcb11933c84176b7ace1e0c15001fea61285c96c9e73a6b09aeb8e`.
+- Cache: 34,545,183 bytes, SHA-256
+  `59ebe3d9afa9baae2cb9160414cf392c4687a0f3d0efa48367b0c793bbd21c72`.
+
+The downloaded archive matched the CI checksum; streamed decompression of the
+VFS and concatenation of the cache parts matched their manifests independently.
+Both desktop and physical-device tests used this preview. Metadata explicitly
+records `coreOptimizationRequested: "O1"` and `coreOptimization: "none"`.
+
+Targeted regressions, build, preview packaging, and desktop normal/constrained
+measurements passed. The overall workflow **failed** at the explicit optimization
+failure-reporting step. The optional optimizer terminated with signal 6 after
+2:14.49, with maximum RSS 12,337,208 KiB (about 11.77 GiB). Sampled virtual size
+reached 12,568,288 KiB, close to the configured 12,582,912 KiB limit. This is
+consistent with memory pressure at the imposed limit, but the retained logs do
+not contain a specific allocation-failure diagnostic proving the abort cause.
+The original validated core was retained; no optimized-core benefit is claimed.
+
+### Desktop: slow-link startup now completes
+
+Hosted Chrome 150, 2 main analysis workers, same normal and constrained profiles
+as the baseline. Concurrent Worker calibration transferred 4 MiB in 29.6 ms
+normally and 6.874 s under the shared 5 Mbps limit.
+
+| Network / visit | Total to ready | After both sysroots ready | Project activation | Semantic warming |
+| --- | ---: | ---: | ---: | ---: |
+| Normal / cold | 134.324 s | 107.231 s | 16.045 s | 90.732 s |
+| Normal / reload | 119.753 s | 106.225 s | 15.164 s | 90.644 s |
+| Constrained / cold | 522.586 s | 106.145 s | 15.633 s | 90.088 s |
+| Constrained / reload | 141.128 s | 108.566 s | 22.743 s | 85.386 s |
+
+All four reached `ready` with cache load/merge confirmed. The constrained cold
+case takes about 8 minutes 43 seconds overall; it is a reliability pass, not an
+acceptable speed result. Post-sysroot time remains approximately 106–109 seconds,
+dominated by semantic readiness. These individual trials and the earlier runner
+results are not a controlled speed comparison.
+
+After reload, actual editor input produced standard-library suggestions and the
+expected `u32`/string type-error marker in both profiles:
+
+| Network | Trigger to visible suggestions | Input to observed diagnostic |
+| --- | ---: | ---: |
+| Normal | 6.526 s | 0.348 s |
+| Constrained | 4.983 s | 0.510 s |
+
+The constrained completion and diagnostic screenshots were also inspected.
+Screenshot encoding is excluded from the timings.
+
+### Physical Pixel: memory failure remains
+
+The attached Pixel 6a now runs Chrome **155.0.8059.79**, updated since the Chrome
+154 baseline. Its reported CPU count remained 8; no worker-count override was
+applied. Browser-version and device-state differences preclude a controlled
+before/after performance comparison.
+
+Concurrent 4 MiB Worker calibration took 133.8 ms normally and 6.938 s under the
+shared 5 Mbps profile. Cold-load outcomes:
+
+| Network | Time until crash | Last cache evidence | Android exit reason / renderer RSS |
+| --- | ---: | --- | --- |
+| Normal | 80.058 s | Loaded, merge prepared, merged | `LOW_MEMORY`, about 2.8 GB |
+| Constrained | 367.176 s | Loaded, merge prepared | `LOW_MEMORY`, about 2.7 GB |
+
+Normal cache validation/decode took 1.396/16.043 seconds; constrained
+validation/decode took 1.379/25.741 seconds. The constrained attempt reached cache
+restoration rather than the former fixed archive-timeout failure, but no completed
+merge or ready state was observed. Neither case reached reload or editor
+interaction acceptance. A renderer crash prevents a final page-state snapshot;
+do not substitute time-to-crash for time-to-ready or post-sysroot duration.
+
+Failure JSONL/network records were retained locally. Android exit history
+corroborated both foreground renderer low-memory kills. Dedicated test tabs were
+closed, storage for test origins 4187/4188 was cleared, forwarding rules were
+removed, and no test-port listeners remained. The original stay-awake setting
+remained 15 throughout this follow-up.
+
+### Remaining work
+
+The progress-aware transfer fix has a verified constrained-desktop pass. It does
+not solve the large runtime's mobile memory requirement or the desktop semantic
+warming delay. Next, attribute runtime memory and profile initial diagnostics /
+inlay work before selecting a targeted optimization or an LSP/compiler split.
+Repeating the same final-core `O1` experiment without new evidence is not justified.
+No further hosted build was dispatched for these checks, and no deployment or
+main/develop update was performed.
