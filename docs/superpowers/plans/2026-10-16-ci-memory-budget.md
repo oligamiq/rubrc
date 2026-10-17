@@ -58,3 +58,30 @@ path uses the same `RUNNER_TEMP` value in setup and cleanup. Do not suppress
 `swapoff` failures and then remove an active swap file. GNU `stat` usage is
 intentional for the pinned Ubuntu runner. The 24 GiB virtual cap remains a budget
 to measure, not proof of the optimizer's actual peak requirement.
+
+## First hosted outcome and corrected resource control
+
+Run `38952582136` on source `8bca8d783a20ad3db8ece33b8ecfedba1dcde7f8`
+completed the swap setup, functional build/measurements and swap cleanup. The
+optimizer still failed. RSS peaked around 14.50 GiB, while VSZ stayed near the
+24 GiB imposed cap; RAM and swap still had capacity at the last sample. The
+one-day artifact expired, but direct job-log retrieval preserved resource
+evidence. See `docs/ci-execution-environment.md` for the exact observations and
+the uncertainty about the termination cause.
+
+### Task 2: Replace address-space containment with cgroup containment
+
+This task supersedes Task 1's 24 GiB virtual cap and 16 GiB dedicated swap.
+
+- [x] Increase dedicated swap to 32 GiB and free-disk preflight to 48 GiB.
+- [x] Preflight systemd transient-service controls before the heavy build.
+- [x] Run the optimizer as the runner user in a service with `MemoryHigh=11G`,
+  `MemoryMax=12G`, `MemorySwapMax=28G`, `LimitAS=infinity`, `LimitCORE=0`,
+  `RuntimeMaxSec=90min` and `TimeoutStopSec=30s`. Pass PATH and one-worker settings.
+- [x] Record cgroup memory status alongside RSS/VSZ/swap, and print the final
+  outcome/timing files into the job log so their evidence outlives artifacts.
+- [x] Review cancellation cleanup: stop the exact transient service before
+  disabling swap. Include runner identity and timeout properties in preflight.
+- [ ] Re-run shell syntax/actionlint/diff checks and review the configuration.
+- [ ] Commit and dispatch one hosted `mobile-baseline`/`O1` verification run.
+- [ ] Read its actual optimizer outcome before claiming the environment suffices.

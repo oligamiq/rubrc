@@ -84,6 +84,7 @@ case "${1:-}" in
         # One bounded trial on the final core: its export ABI remains unchanged,
         # and cache generation below runs this exact optimized module.
         stat -c 'before: %s bytes' dist/vfs.core.wasm > "$LOGS/core-optimization.txt"
+        optimizer_unit="rubrc-wasm-opt-${GITHUB_RUN_ID:-$$}-${GITHUB_RUN_ATTEMPT:-1}.service"
         (
           monitor_started=$SECONDS
           checkpoint_logged=false
@@ -92,6 +93,8 @@ case "${1:-}" in
             free -m
             swapon --show --bytes
             ps -C wasm-opt -o pid,rss,vsz,pcpu,etime || true
+            systemctl show "$optimizer_unit" --no-pager \
+              -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p Result 2>/dev/null || true
             if (( SECONDS - monitor_started >= 1800 )) && [[ "$checkpoint_logged" == false ]]; then
               printf 'Optimizer passed the 30-minute progress checkpoint; continuing within the 90-minute emergency deadline.\n'
               checkpoint_logged=true
@@ -100,22 +103,24 @@ case "${1:-}" in
           done
         ) &
         monitor_pid=$!
-        trap 'kill "$monitor_pid" 2>/dev/null || true' EXIT
-        # The optimizer is expected to need about 16 GiB. The CI job adds
-        # 16 GiB swap; allow address-space headroom instead of the old 12 GiB
-        # cap, which could abort an otherwise viable optimization. This is
-        # a virtual-address-space limit, not a physical-memory allocation.
-        if (
-          ulimit -v 25165824 || exit 1
-          ulimit -c 0 || exit 1
-          BINARYEN_CORES=1 timeout --kill-after=30s 90m \
+        trap 'sudo systemctl stop "$optimizer_unit" 2>/dev/null || true; kill "$monitor_pid" 2>/dev/null || true' EXIT
+        # VSZ can exceed working-set size substantially. Control resident/cgroup
+        # memory and swap separately instead of failing mmap at an artificial
+        # address-space cap. Leave RAM and swap headroom for the hosted runner.
+        if sudo systemd-run --unit="$optimizer_unit" --wait --pipe --collect \
+            --uid="$(id -u)" --gid="$(id -g)" --working-directory="$ROOT" \
+            --setenv="PATH=$PATH" --setenv=BINARYEN_CORES=1 \
+            --property=MemoryAccounting=yes --property=MemoryHigh=11G \
+            --property=MemoryMax=12G --property=MemorySwapMax=28G \
+            --property=LimitAS=infinity --property=LimitCORE=0 \
+            --property=RuntimeMaxSec=90min --property=TimeoutStopSec=30s \
             /usr/bin/time -v -o "$LOGS/core-optimization-time.txt" \
             wasm-opt -O1 --enable-threads --enable-bulk-memory \
             --enable-reference-types --enable-exception-handling --enable-simd \
             --enable-multivalue --enable-mutable-globals --enable-sign-ext \
             --enable-nontrapping-float-to-int --enable-extended-const \
-            dist/vfs.core.wasm -o dist/vfs.core.optimized.wasm
-        ) && wasm-tools validate --features all dist/vfs.core.optimized.wasm; then
+            dist/vfs.core.wasm -o dist/vfs.core.optimized.wasm \
+            && wasm-tools validate --features all dist/vfs.core.optimized.wasm; then
           mv dist/vfs.core.optimized.wasm dist/vfs.core.wasm
           printf 'optimization applied\n' >> "$LOGS/core-optimization.txt"
           if [[ -n "${GITHUB_ENV:-}" ]]; then printf 'ACTUAL_VFS_CORE_OPT_LEVEL=O1\n' >> "$GITHUB_ENV"; fi
@@ -128,6 +133,12 @@ case "${1:-}" in
         wait "$monitor_pid" 2>/dev/null || true
         trap - EXIT
         stat -c 'after: %s bytes' dist/vfs.core.wasm >> "$LOGS/core-optimization.txt"
+        # Keep the outcome and termination report in the longer-lived job log,
+        # not only in the one-day diagnostic artifact.
+        cat "$LOGS/core-optimization.txt"
+        if [[ -f "$LOGS/core-optimization-time.txt" ]]; then
+          cat "$LOGS/core-optimization-time.txt"
+        fi
         ;;
       *) printf 'Unsupported VFS_CORE_OPT_LEVEL\n' >&2; exit 2 ;;
     esac
