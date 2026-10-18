@@ -17,10 +17,15 @@ Current configuration:
 - A dedicated **32 GiB swap file**, alongside existing runner swap. Setup requires
   at least 48 GiB free disk, leaving 16 GiB for builds, and fails before the heavy
   build if unavailable.
-- A transient systemd service running as the runner user, with **MemoryHigh=11G**,
-  **MemoryMax=12G**, **MemorySwapMax=28G**, and **LimitAS=infinity**.
-- These are cgroup resident/accounted-memory and swap controls; they leave room
-  for the OS and runner. The budget is not a promise of 40 GiB physical RAM.
+- A transient systemd service running as the runner user, with
+  **MemoryHigh=infinity**, **MemoryMax=infinity**, **MemorySwapMax=28G**, and
+  **LimitAS=infinity**. The former 11 GiB throttle and 12 GiB cap were our settings,
+  not the standard runner's RAM capacity; they have been removed for revalidation.
+- Available RAM is now governed by the host and any ancestor cgroup limits.
+  `OOMScoreAdjust=500` preferentially makes the optimizer an OOM victim and
+  `OOMPolicy=kill` stops its service as a unit. This is not guaranteed isolation
+  from global memory pressure. The dedicated swap allocation and its 28 GiB
+  service limit remain unchanged to isolate the RAM-policy comparison.
 - One Binaryen worker, no core dumps, a 30-minute logged progress checkpoint,
   a 90-minute emergency service deadline and a 150-minute whole-job deadline.
 - Every 15 seconds: RAM, swap, optimizer RSS/VSZ/CPU, and cgroup memory status.
@@ -176,7 +181,28 @@ Hosted startup profiling is now verified. Whole-core `wasm-opt` is a separate,
 unresolved resource requirement: the 12 GiB memory plus 28 GiB swap service was
 killed at its limits. No further identical optimization run has been dispatched.
 There are currently no self-hosted runners registered for this repository
-(`actions/runners` returned `total_count: 0`). A higher-RAM machine (64 GiB or
-more as a candidate, not a guaranteed sufficient size) is the recommended next
-capacity experiment. Execution-host selection and any associated costs need a
-user decision. No paid runner/VM has been provisioned.
+(`actions/runners` returned `total_count: 0`). A higher-RAM machine was suggested,
+but that recommendation preceded testing the standard runner without our artificial
+RAM limits. The user requested that revalidation first. No paid runner/VM has
+been provisioned.
+
+## Standard-runner RAM-policy revalidation
+
+`optimizer-replay` reuses an existing, unoptimized preview instead of rebuilding
+the toolchain. It verifies the archive checksum, streams the ordered Brotli parts
+back into a core, and verifies both its manifest hash/size and the preceding CI
+`dist/vfs.core.wasm` checksum before running the same Binaryen 131 `-O1` command.
+The reference is preview run `39068855482`, core SHA-256
+`b031c901476a2022ab4ce46ace2eea264c3d9c3e7aee6af335aa79c61e780d8d`.
+
+The experiment changes `MemoryHigh`/`MemoryMax` to infinity, with the same 32 GiB
+dedicated swap, 28 GiB service swap limit, one optimizer worker, 30-minute progress
+checkpoint and 90-minute emergency deadline. Effective RAM/address-space/swap
+properties are included in periodic telemetry. Setup/cleanup are shared between
+full-build and replay jobs through `scripts/ci/optimizer_memory.sh`.
+
+An optimized output must pass WASM validation. On success, its checksummed core
+archive is retained for one day, capped at 256 MiB compressed, so later acceptance
+testing need not repeat optimization. This replay verifies optimization/resource
+behavior only; it does not regenerate the Salsa cache or claim browser acceptance
+of the optimized output. Revalidation results are pending.

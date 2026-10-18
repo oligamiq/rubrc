@@ -92,3 +92,29 @@ Run `39068855482` confirmed setup and cleanup, but the optimizer exhausted its
 are in `docs/ci-execution-environment.md`. Do not repeat the same optimizer run
 or claim that its resource requirement is satisfied. The fallback preview is
 available for the separate hosted profiling task.
+
+### Task 3: Revalidate standard-runner RAM usage on the exact same input
+
+The user noted that public Linux runners have approximately 16 GiB RAM. Our
+`MemoryHigh=11G` / `MemoryMax=12G` settings prevented the optimizer from using
+all available RAM; a larger-host recommendation was premature without checking
+this condition. This task supersedes those two limits, not the swap allocation.
+
+- [x] Add streamed restoration of the exact prior core from the verified preview;
+  test ordered parts, disagreement with the CI checksum, corruption rejection and
+  preservation of an existing input on failure (red then green).
+- [x] Add explicit `optimizer-replay` dispatch using that input. Reuse the optimizer
+  command/validation/outcome logic, skipping toolchain/WASM/cache rebuilds.
+- [x] Share memory setup/cleanup. Use `MemoryHigh=infinity`, `MemoryMax=infinity`,
+  `LimitAS=infinity`, existing `MemorySwapMax=28G`, `OOMScoreAdjust=500` and
+  `OOMPolicy=kill`. Log effective limits; retain the 30-minute checkpoint and
+  90-minute emergency service deadline.
+- [x] Preserve a successful optimized core as a checksummed, one-day artifact
+  capped at 256 MiB compressed. Do not claim optimized browser acceptance yet.
+- [x] Finish shell/workflow/static checks and inspect the intended diff. The
+  restoration and existing measurement-support tests passed (18 tests); bash
+  syntax, JavaScript syntax, actionlint and whitespace checks passed.
+- [ ] Commit/push the validation branch and dispatch `mode=optimizer-replay`,
+  `preview_run=39068855482` while its artifacts are available.
+- [ ] Verify exact input SHA, effective limits, RAM/swap peaks, duration and exit
+  reason. Record the observed result, including any failure.
