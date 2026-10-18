@@ -18,14 +18,15 @@ Current configuration:
   at least 48 GiB free disk, leaving 16 GiB for builds, and fails before the heavy
   build if unavailable.
 - A transient systemd service running as the runner user, with
-  **MemoryHigh=infinity**, **MemoryMax=infinity**, **MemorySwapMax=28G**, and
+  **MemoryHigh=infinity**, **MemoryMax=infinity**, **MemorySwapMax=infinity**, and
   **LimitAS=infinity**. The former 11 GiB throttle and 12 GiB cap were our settings,
   not the standard runner's RAM capacity; they have been removed for revalidation.
 - Available RAM is now governed by the host and any ancestor cgroup limits.
   `OOMScoreAdjust=500` preferentially makes the optimizer an OOM victim and
   `OOMPolicy=kill` stops its service as a unit. This is not guaranteed isolation
-  from global memory pressure. The dedicated swap allocation and its 28 GiB
-  service limit remain unchanged to isolate the RAM-policy comparison.
+  from global memory pressure. The dedicated swap allocation remains 32 GiB;
+  the follow-up removes the service's 28 GiB swap cap so it can use the host's
+  available swap. This does not add RAM or make host capacity unlimited.
 - One Binaryen worker, no core dumps, a 30-minute logged progress checkpoint,
   a 90-minute emergency service deadline and a 150-minute whole-job deadline.
 - Every 15 seconds: RAM, swap, optimizer RSS/VSZ/CPU, and cgroup memory status.
@@ -195,7 +196,7 @@ back into a core, and verifies both its manifest hash/size and the preceding CI
 The reference is preview run `39068855482`, core SHA-256
 `b031c901476a2022ab4ce46ace2eea264c3d9c3e7aee6af335aa79c61e780d8d`.
 
-The experiment changes `MemoryHigh`/`MemoryMax` to infinity, with the same 32 GiB
+The first replay changed `MemoryHigh`/`MemoryMax` to infinity, with the same 32 GiB
 dedicated swap, 28 GiB service swap limit, one optimizer worker, 30-minute progress
 checkpoint and 90-minute emergency deadline. Effective RAM/address-space/swap
 properties are included in periodic telemetry. Setup/cleanup are shared between
@@ -255,3 +256,14 @@ The conclusion is limited to **standard runner RAM with a 28 GiB service swap
 budget and this 469 MB core**. It does not prove that every possible standard
 runner/swap configuration is insufficient, nor establish that 64 GiB RAM is
 mandatory. No larger paid host was used.
+
+### Follow-up: use available host swap
+
+The next controlled replay removes only the remaining service swap limit
+(`MemorySwapMax=infinity`), retaining the same input hash, Binaryen command,
+standard runner and 32 GiB dedicated swap file. Thus the optimizer can use the
+roughly 35 GiB total host swap (dedicated plus existing), rather than stopping
+at its own 28 GiB allowance. OOM victim preference, service cleanup and emergency
+deadline remain in place. Read-only overcommit settings and commit accounting
+are logged to distinguish address commitment from resident memory pressure.
+This experiment is pending; no successful optimization is claimed.

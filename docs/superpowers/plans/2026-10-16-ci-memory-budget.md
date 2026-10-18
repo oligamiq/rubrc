@@ -126,3 +126,17 @@ runner reported 15,989 MiB RAM; swap setup and cleanup passed. This establishes
 failure without our artificial RAM cap, but with the intentionally unchanged
 28 GiB service swap budget. No optimized output or 64 GiB minimum requirement
 is claimed. Details are in `docs/ci-execution-environment.md`.
+
+### Task 4: Use the remaining host swap on the identical input
+
+The preceding run still had host swap available when its 28 GiB service budget
+was exhausted. The user asked to continue. Keep the exact reference core and
+all optimizer options, remove the service swap cap, and keep the dedicated swap
+file at 32 GiB. Do not provision a different or paid runner.
+
+- [x] Set `MemorySwapMax=infinity` in preflight and the optimizer service, leaving
+  RAM/address-space limits infinite. Record overcommit policy and commit usage.
+- [ ] Verify shell/workflow syntax and intended diff, then commit/push and dispatch
+  one `optimizer-replay` with `preview_run=39068855482`.
+- [ ] Verify input identity, effective limits, memory/swap peaks and termination
+  reason; record the result without treating failed-run duration as speedup.

@@ -100,6 +100,7 @@ case "${1:-}" in
           while true; do
             date -u +%FT%TZ
             free -m
+            grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree|CommitLimit|Committed_AS):' /proc/meminfo
             swapon --show --bytes
             ps -C wasm-opt -o pid,rss,vsz,pcpu,etime || true
             systemctl show "$optimizer_unit" --no-pager \
@@ -117,12 +118,12 @@ case "${1:-}" in
         trap 'sudo systemctl stop "$optimizer_unit" 2>/dev/null || true; kill "$monitor_pid" 2>/dev/null || true' EXIT
         # Recheck using all RAM available to the standard runner. Do not impose
         # the previous 11 GiB throttle / 12 GiB cap or an address-space cap.
-        # Keep the same swap budget, and prefer the optimizer if global OOM occurs.
+        # Use the host's existing swap as well, and prefer the optimizer if global OOM occurs.
         if sudo systemd-run --unit="$optimizer_unit" --wait --pipe --collect \
             --uid="$(id -u)" --gid="$(id -g)" --working-directory="$ROOT" \
             --setenv="PATH=$PATH" --setenv=BINARYEN_CORES=1 \
             --property=MemoryAccounting=yes --property=MemoryHigh=infinity \
-            --property=MemoryMax=infinity --property=MemorySwapMax=28G \
+            --property=MemoryMax=infinity --property=MemorySwapMax=infinity \
             --property=LimitAS=infinity --property=LimitCORE=0 \
             --property=OOMScoreAdjust=500 --property=OOMPolicy=kill \
             --property=RuntimeMaxSec=90min --property=TimeoutStopSec=30s \

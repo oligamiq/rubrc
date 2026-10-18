@@ -7,6 +7,7 @@ swap_file="${RUNNER_TEMP:?}/rubrc-optimizer.swap"
 case "${1:-}" in
   prepare)
     free -m
+    sysctl vm.overcommit_memory vm.overcommit_ratio
     df -h "$RUNNER_TEMP"
     available_bytes=$(( $(stat -f -c %a "$RUNNER_TEMP") * $(stat -f -c %S "$RUNNER_TEMP") ))
     test "$available_bytes" -ge 51539607552
@@ -21,7 +22,7 @@ case "${1:-}" in
     sudo systemd-run --wait --pipe --collect \
       --uid="$(id -u)" --gid="$(id -g)" --working-directory="$PWD" \
       --property=MemoryAccounting=yes --property=MemoryHigh=infinity \
-      --property=MemoryMax=infinity --property=MemorySwapMax=28G \
+      --property=MemoryMax=infinity --property=MemorySwapMax=infinity \
       --property=LimitAS=infinity --property=LimitCORE=0 \
       --property=OOMScoreAdjust=500 --property=OOMPolicy=kill \
       --property=RuntimeMaxSec=90min --property=TimeoutStopSec=30s \
