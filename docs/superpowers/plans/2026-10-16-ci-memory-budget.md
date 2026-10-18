@@ -35,10 +35,10 @@
 - [x] Set the WASM job timeout to 150 minutes. Change the optimizer command to `ulimit -v 25165824` and `timeout --kill-after=30s 90m`.
 - [x] Extend the 15-second monitor with `swapon --show --bytes` and process CPU utilization. Emit one explicit checkpoint after 1,800 seconds and continue; do not convert that checkpoint into a failure.
 - [x] Run `bash -n scripts/ci/stdlib_cache.sh`, `/tmp/opencode/actionlint -shellcheck= -pyflakes= .github/workflows/stdlib-cache-ci.yml`, and `git diff --check`. Review the small diff; there is no application behavior change requiring new application tests.
-- [ ] Commit only these configuration files and this plan with `[skip ci]` and AI disclosure. Push the validation branch.
-- [ ] Dispatch one `mobile-baseline` run with `core_opt=O1`, using `gh workflow run stdlib-cache-ci.yml --repo oligamiq/rubrc --ref ci/stdlib-cache-validation -f mode=mobile-baseline -f core_opt=O1`.
-- [ ] Observe the hosted resource log. If the run exceeds 30 minutes, evaluate logged CPU progress, RSS, swap and elapsed time rather than treating elapsed time alone as failure. Preserve any failed result accurately.
-- [ ] Download the small diagnostic artifact; verify actual optimization outcome, peak memory and subsequent build/browser steps before reporting success. Update this plan with the run URL and evidence.
+- [x] Commit only these configuration files and this plan with `[skip ci]` and AI disclosure. Push the validation branch.
+- [x] Dispatch one `mobile-baseline` run with `core_opt=O1`, using `gh workflow run stdlib-cache-ci.yml --repo oligamiq/rubrc --ref ci/stdlib-cache-validation -f mode=mobile-baseline -f core_opt=O1`.
+- [x] Observe the hosted resource log. If the run exceeds 30 minutes, evaluate logged CPU progress, RSS, swap and elapsed time rather than treating elapsed time alone as failure. Preserve any failed result accurately.
+- [x] Retrieve diagnostics and verify actual optimization outcome, peak memory and subsequent build/browser steps. The first artifact expired; direct job-log retrieval provided the retained evidence instead. Update this plan with the run URL and evidence.
 
 ## Follow-on
 

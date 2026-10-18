@@ -128,4 +128,55 @@ is correctly failed despite successful CPU capture.
 The next comparison removes constructor interception and uses OS-side RSS only.
 That reduces observer interference and is sufficient for hosted process-memory
 profiling, but does not provide per-guest allocation or linear-memory sizes.
-Verification of this simplified memory pass is pending.
+
+### Verified hosted CPU and process-memory replay
+
+Run [39089520461](https://github.com/oligamiq/rubrc/actions/runs/39089520461)
+**passed**, using harness `f170bf601617256cb90d8c2e4321e05695a4046a` and the same
+preview `39068855482` (source `60310a0ddcd723a2b062a8c7e622d42b8c839734`, actual
+optimization `none`). No Rust/WASM build ran in this replay. Whole workflow
+elapsed time was about 9 minutes 23 seconds.
+
+Both modes reached ready on cold load and reload, confirmed cache load/merge,
+and passed actual completion/type-error diagnostic checks. Instrumentation
+reported no errors. Saved evidence:
+
+| Mode | CPU profiles | WASI-worker profiles | Process-memory samples | Profile bytes |
+| --- | ---: | ---: | ---: | ---: |
+| CPU | 45 | 34 | 56 | 11,432,931 |
+| OS memory | 0 | 0 | 48 | 0 |
+
+Downloaded profile file counts and sizes matched their outcome records; WASI
+worker samples were present for both cold and reload visits. Memory mode attached
+no profiling sessions to worker targets and performed no constructor interception.
+
+| Mode / visit | Total to ready | Post-sysroot | Semantic warming |
+| --- | ---: | ---: | ---: |
+| CPU / cold | 143.466 s | 98.149 s | 75.720 s |
+| CPU / reload | 129.082 s | 104.484 s | 82.574 s |
+| OS memory / cold | 117.094 s | 93.703 s | 77.321 s |
+| OS memory / reload | 117.027 s | 96.505 s | 78.443 s |
+
+Across each entire captured session (including reload and editor operations),
+peak sampled renderer RSS was 5,312,528 KiB in CPU mode and 5,246,320 KiB in
+OS-memory mode. Peak summed browser-tree RSS was 6,335,280 and 6,273,892 KiB,
+respectively. Do not interpret these sums as unique physical memory, or their
+differences as an application optimization. The OS-memory session's renderer
+peak is approximately 5.00 GiB, within the hosted runner's capacity.
+
+Completion/diagnostic observation took 7.544/0.492 seconds in CPU mode and
+6.089/0.492 seconds in OS-memory mode. These remain instrumented observations;
+the useful outcome here is a verified remote execution/measurement environment.
+The earlier constructor-observed hang remains unexplained, not silently reclassified
+as a confirmed application bug or fully attributed instrumentation defect.
+
+## Capacity still needed for whole-core optimization
+
+Hosted startup profiling is now verified. Whole-core `wasm-opt` is a separate,
+unresolved resource requirement: the 12 GiB memory plus 28 GiB swap service was
+killed at its limits. No further identical optimization run has been dispatched.
+There are currently no self-hosted runners registered for this repository
+(`actions/runners` returned `total_count: 0`). A higher-RAM machine (64 GiB or
+more as a candidate, not a guaranteed sufficient size) is the recommended next
+capacity experiment. Execution-host selection and any associated costs need a
+user decision. No paid runner/VM has been provisioned.

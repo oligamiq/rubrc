@@ -42,9 +42,9 @@
 - [x] Add `startup-profile` as an explicit dispatch mode using the existing replay download and archive verification. Skip Rust/WASM build jobs in this mode.
 - [x] Run CPU and memory captures separately with the existing normal-network cold/reload driver and editor checks. Preserve a failed CPU result while still attempting the memory mode.
 - [x] Check shell syntax, actionlint and diff; review lifecycle cleanup and partial capture handling.
-- [ ] Commit only the observer/workflow/documentation changes with `[skip ci]` and AI disclosure.
+- [x] Commit only the observer/workflow/documentation changes with `[skip ci]` and AI disclosure.
 - [x] Wait for the active optimizer validation before dispatching profiling, because the workflow currently serializes runs by branch.
-- [ ] Dispatch one profile replay using the latest available verified preview; download its logs promptly, inspect observation coverage and failures, and record results.
+- [x] Dispatch one profile replay using the latest available verified preview; download its logs promptly, inspect observation coverage and failures, and record results.
 
 ## Validation commands
 
@@ -81,3 +81,18 @@ Remove the constructor observer and its now-inapplicable forwarding test; use
 OS process-tree RSS for the memory pass. This comparison preserves the application
 runtime and avoids claiming linear-memory coverage. Recheck the remaining helper
 and capture coverage tests, then replay the same preview once to verify this path.
+
+## Verified follow-up
+
+The simplified observer passed 15 local lightweight helper/support tests and
+shell/JavaScript/workflow static checks. Hosted replay `39089520461` then passed
+both CPU and OS-memory modes on preview `39068855482`. Cold/reload readiness,
+cache adoption and editor interactions succeeded in both modes. The observer
+saved 45 CPU profiles (34 WASI-worker profiles), 56 CPU-mode memory samples and
+48 OS-memory-mode samples with no recorded instrumentation errors. Downloaded
+file counts/sizes and measurement outcomes were verified against the JSONL records.
+
+See `docs/ci-execution-environment.md` for exact timing and memory values. CPU and
+process-memory profiling no longer requires executing the application on the
+faulty local PC. Whole-core optimization still needs a revised capacity strategy;
+that unsuccessful resource experiment is recorded separately.
