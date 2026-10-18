@@ -6,6 +6,7 @@ import { monitorRenderer, withDeadline, assertCacheOutcome } from "./stdlib_cach
 import { measureNetwork } from "./startup_network_measurement.mjs";
 import { installLspEventTiming, startupReachedTerminalState, summarizeStartup } from "./startup_measurement_support.mjs";
 import { measureEditorInteractions } from "./startup_interaction_measurement.mjs";
+import { startRuntimeProfile } from "./startup_runtime_profile.mjs";
 
 const root = resolve(process.env.RUBRC_MEASURE_ROOT ?? "page/dist");
 const output = resolve(process.env.RUBRC_MEASURE_OUTPUT ?? "ci-logs/startup");
@@ -13,6 +14,9 @@ const profile = process.env.RUBRC_MEASURE_PROFILE ?? "normal";
 const port = Number(process.env.RUBRC_MEASURE_PORT ?? 4187);
 const timeout = Number(process.env.RUBRC_MEASURE_TIMEOUT_MS ?? 600000);
 const remote = process.env.RUBRC_MEASURE_CDP;
+const runtimeProfile = process.env.RUBRC_RUNTIME_PROFILE;
+if (runtimeProfile && (remote || process.env.GITHUB_ACTIONS !== "true")) throw new Error("runtime profiling is hosted-CI-only");
+if (runtimeProfile && !["cpu", "memory"].includes(runtimeProfile)) throw new Error("invalid runtime profile mode");
 const reportedCpus = Number(process.env.RUBRC_MEASURE_REPORTED_CPUS ?? 0);
 if (!Number.isInteger(reportedCpus) || reportedCpus < 0 || reportedCpus > 16) throw new Error("invalid reported CPU override");
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("invalid measurement port");
@@ -22,7 +26,7 @@ await writeFile(join(root, "__rubrc_probe.html"), "<!doctype html><meta charset=
 await writeFile(join(root, "__rubrc_probe.bin"), Buffer.alloc(2 * 1024 * 1024, 123));
 const origin = `http://127.0.0.1:${port}`;
 const server = await startBrowserStaticServer({ rootDirectory: root, port });
-let browser, page, network, renderer;
+let browser, page, network, renderer, profiler;
 const file = join(output, `${profile}.jsonl`);
 const record = async data => {
   console.log(JSON.stringify(data));
@@ -40,6 +44,7 @@ try {
   await storage.send("Storage.clearDataForOrigin", { origin, storageTypes: "all" });
   await storage.detach();
   renderer = monitorRenderer(page);
+  if (runtimeProfile) profiler = await startRuntimeProfile({ browser, page, origin, output, mode: runtimeProfile });
   page.on("pageerror", error => console.error("PAGE ERROR", String(error)));
   const cacheReports = [];
   const sysrootReports = [];
@@ -115,6 +120,7 @@ try {
         const missingAssets = visit === "cold" ? expectedPaths.filter(path => !assetRows.some(r => new URL(r.url).pathname === path && r.bytes > 0)) : [];
         await writeFile(join(output, `${profile}-${visit}-network.json`), JSON.stringify(net, null, 2));
         await page.screenshot({ path: join(output, `${profile}-${visit}.png`) });
+        await profiler?.checkpoint(visit);
         await record({ kind: "startup", profile, visit, elapsedMs, ...summary, ...state, installedSysroots,
           cacheReports: [...cacheReports], networkRequests: net.requests.length,
           networkCalibration: calibration, missingAssets,
@@ -141,6 +147,9 @@ try {
     }
   }
 } finally {
+  if (profiler) await withDeadline(profiler.dispose(), 60000, "runtime profile cleanup").catch(error => {
+    console.error(error); process.exitCode = 1;
+  });
   await network?.dispose();
   renderer?.dispose();
   if (remote) {

@@ -82,6 +82,13 @@ This task supersedes Task 1's 24 GiB virtual cap and 16 GiB dedicated swap.
   outcome/timing files into the job log so their evidence outlives artifacts.
 - [x] Review cancellation cleanup: stop the exact transient service before
   disabling swap. Include runner identity and timeout properties in preflight.
-- [ ] Re-run shell syntax/actionlint/diff checks and review the configuration.
-- [ ] Commit and dispatch one hosted `mobile-baseline`/`O1` verification run.
-- [ ] Read its actual optimizer outcome before claiming the environment suffices.
+- [x] Re-run shell syntax/actionlint/diff checks and review the configuration.
+- [x] Commit and dispatch one hosted `mobile-baseline`/`O1` verification run.
+- [x] Read its actual optimizer outcome before claiming the environment suffices.
+
+Run `39068855482` confirmed setup and cleanup, but the optimizer exhausted its
+12 GiB memory / 28 GiB swap cgroup budget after 36min 18.364s (`oom-kill`). The
+30-minute checkpoint did not terminate it. Full environment and outcome details
+are in `docs/ci-execution-environment.md`. Do not repeat the same optimizer run
+or claim that its resource requirement is satisfied. The fallback preview is
+available for the separate hosted profiling task.

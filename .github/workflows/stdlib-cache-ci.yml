@@ -6,12 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Validation or one-build desktop/mobile measurement preview
+        description: Validation, measurement preview, or existing-preview measurements/profiling
         type: choice
-        options: [validation, mobile-baseline, mobile-replay]
+        options: [validation, mobile-baseline, mobile-replay, startup-profile]
         default: validation
       preview_run:
-        description: Existing mobile-baseline run ID for mobile-replay (first attempt)
+        description: Existing mobile-baseline run ID for replay/profiling (first attempt)
         type: string
       core_opt:
         description: Bounded final VFS core optimization experiment
@@ -45,7 +45,7 @@ defaults:
 
 jobs:
   checks:
-    if: github.repository == 'oligamiq/rubrc' && inputs.mode != 'mobile-replay'
+    if: github.repository == 'oligamiq/rubrc' && inputs.mode != 'mobile-replay' && inputs.mode != 'startup-profile'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -73,9 +73,9 @@ jobs:
           if-no-files-found: ignore
 
   mobile-replay:
-    if: github.repository == 'oligamiq/rubrc' && inputs.mode == 'mobile-replay'
+    if: github.repository == 'oligamiq/rubrc' && (inputs.mode == 'mobile-replay' || inputs.mode == 'startup-profile')
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: ${{ inputs.mode == 'startup-profile' && 70 || 45 }}
     steps:
       - name: Checkout measurement harness
         working-directory: ${{ github.workspace }}
@@ -115,13 +115,17 @@ jobs:
           mkdir -p page/dist ci-logs
           tar -xzf ../preview/rubrc-startup-preview.tar.gz -C page/dist
           bun install --frozen-lockfile
-          node --test scripts/startup_measurement_support_test.mjs scripts/stdlib_cache_browser_support_test.mjs
+          node --test scripts/startup_measurement_support_test.mjs scripts/stdlib_cache_browser_support_test.mjs scripts/startup_runtime_profile_support_test.mjs
       - name: Measure the same preview without rebuilding WASM
+        if: inputs.mode == 'mobile-replay'
         run: bash scripts/ci/stdlib_cache.sh measure 2>&1 | tee ci-logs/measurement.log
+      - name: Profile CPU and memory on the hosted runner
+        if: inputs.mode == 'startup-profile'
+        run: bash scripts/ci/stdlib_cache.sh profile 2>&1 | tee ci-logs/runtime-profile.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: startup-replay-${{ github.run_attempt }}
+          name: ${{ inputs.mode == 'startup-profile' && 'startup-profile' || 'startup-replay' }}-${{ github.run_attempt }}
           path: rubrc/ci-logs
           retention-days: 1
           if-no-files-found: ignore

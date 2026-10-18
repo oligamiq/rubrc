@@ -53,8 +53,8 @@ Surviving job-log evidence:
   implicates the address-space cap but does not independently prove the signal or
   exact allocation failure.
 
-The current cgroup design removes that address-space confounder while retaining
-a finite working-set/swap budget. Its outcome still needs hosted verification.
+The cgroup design removes that address-space confounder while retaining
+a finite working-set/swap budget. Its hosted outcome is recorded below.
 Simply increasing RAM or swap while leaving a restrictive `ulimit -v` would not
 address this observed limitation.
 
@@ -62,3 +62,50 @@ Expired artifacts can coexist with retained job logs. If `gh run view --log`
 returns an empty file, retrieve the job log directly with
 `gh api repos/oligamiq/rubrc/actions/jobs/<job-id>/logs` and verify its byte length.
 The directly retrieved log for job `117148904406` was 1,048,434 bytes.
+
+## Cgroup verification outcome
+
+Run [39068855482](https://github.com/oligamiq/rubrc/actions/runs/39068855482), source
+`60310a0ddcd723a2b062a8c7e622d42b8c839734`, successfully provisioned dedicated swap,
+validated the transient-service controls, and ran beyond the 30-minute checkpoint.
+The optimizer then ended with **`oom-kill` after 36min 18.364s**. Systemd reported
+**memory peak 12.0G**, **memory swap peak 28.0G**, and **CPU time 1min 46.650s**.
+The `/usr/bin/time` file was empty after the cgroup kill; the systemd report in
+`build.log` is the surviving termination evidence. Its reported main-process
+signal was TERM; do not mistake that wrapper signal for successful optimization.
+
+Both cgroup budgets were reached. This establishes failure within the configured
+roughly 40 GiB accounted-memory-plus-swap envelope, rather than the previous
+virtual-address cap or the 30-minute guideline. It does not establish an exact
+unrestricted peak requirement. More swapping on the same standard runner is not
+the next recommended experiment; consider a higher-RAM execution host before
+another whole-core optimizer run.
+
+Regression checks, fallback-core build, preview packaging, normal/constrained
+desktop measurements, and dedicated-swap cleanup passed. The workflow remains
+failed because its requested optimization did not apply. The preview is usable
+for profiling, explicitly with actual optimization `none`:
+
+- Archive SHA-256: `0859b89fe4031446a300646010dce19cb052fdcf86476681844fef1e0a72678b`.
+- Core SHA-256: `b031c901476a2022ab4ce46ace2eea264c3d9c3e7aee6af335aa79c61e780d8d`.
+- Cache SHA-256: `bd7deb6ce560fda1287c351aa74a5a0fd51a84ca4ec445038cd3cfca443a52d9`.
+
+## Hosted profiling replay
+
+Dispatch `stdlib-cache-ci.yml` with `mode=startup-profile` and `preview_run` set to
+an available mobile-baseline run ID. The job downloads and verifies the existing
+archive, installs the locked measurement dependencies, and runs the normal-network
+cold/reload and editor checks twice: once with CPU sampling, once with process and
+linear-memory observation. No WASM rebuild is needed for this mode.
+
+The observer rejects local/remote-browser invocation outside hosted CI. CPU profiles
+are saved at each completed visit, capped at 64 MiB. Memory sampling records only
+the launched browser process tree and weak references to existing utility-worker
+memory. A 12 GiB summed browser-tree RSS limit stops an over-budget browser;
+shared pages can be counted more than once, so this is a conservative guard.
+Instrumentation errors and missing coverage make the profiling command fail.
+
+Each capture process has a 25-minute fallback deadline; the replay job allows
+70 minutes for two sequential captures and setup. Artifacts use the mode name and
+one-day retention. Profiled timings remain diagnostic, not baseline acceptance
+speed comparisons. CI verification of this new mode is pending.

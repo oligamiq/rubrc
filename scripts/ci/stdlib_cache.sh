@@ -21,7 +21,8 @@ case "${1:-}" in
     deno test --no-lock --allow-read --allow-env page/src/sysroot_transfer_timeout_test.ts page/src/sysroot_archive_test.ts page/src/sysroot_archive_store_test.ts
     deno test --no-lock lib/src/compressed_progress_test.ts lib/src/fetch_compressed_stream_test.ts
     node --test scripts/copy_vfs_bindings_test.mjs scripts/finalize_vfs_asset_test.mjs \
-      scripts/stdlib_cache_browser_support_test.mjs scripts/startup_measurement_support_test.mjs
+      scripts/stdlib_cache_browser_support_test.mjs scripts/startup_measurement_support_test.mjs \
+      scripts/startup_runtime_profile_support_test.mjs
     ;;
   tools)
     tools="$RUNNER_TEMP/stdlib-cache-tools"
@@ -165,8 +166,19 @@ case "${1:-}" in
     RUBRC_MEASURE_PROFILE=normal node scripts/measure_startup_device.mjs
     RUBRC_MEASURE_PROFILE=constrained node scripts/measure_startup_device.mjs
     ;;
+  profile)
+    [[ "${GITHUB_ACTIONS:-}" == true ]] || { printf 'Runtime profiling requires a hosted CI runner.\n' >&2; exit 2; }
+    bunx puppeteer browsers install chrome
+    status=0
+    for mode in cpu memory; do
+      RUBRC_RUNTIME_PROFILE="$mode" RUBRC_MEASURE_PROFILE=normal \
+        RUBRC_MEASURE_OUTPUT="$LOGS/profile-$mode" \
+        timeout --kill-after=30s 25m node scripts/measure_startup_device.mjs || status=1
+    done
+    exit "$status"
+    ;;
   *)
-    printf 'Usage: %s {checks|tools|build|browser|measure}\n' "$0" >&2
+    printf 'Usage: %s {checks|tools|build|browser|measure|profile}\n' "$0" >&2
     exit 2
     ;;
 esac
