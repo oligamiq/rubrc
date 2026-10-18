@@ -114,7 +114,15 @@ this condition. This task supersedes those two limits, not the swap allocation.
 - [x] Finish shell/workflow/static checks and inspect the intended diff. The
   restoration and existing measurement-support tests passed (18 tests); bash
   syntax, JavaScript syntax, actionlint and whitespace checks passed.
-- [ ] Commit/push the validation branch and dispatch `mode=optimizer-replay`,
+- [x] Commit/push the validation branch and dispatch `mode=optimizer-replay`,
   `preview_run=39068855482` while its artifacts are available.
-- [ ] Verify exact input SHA, effective limits, RAM/swap peaks, duration and exit
+- [x] Verify exact input SHA, effective limits, RAM/swap peaks, duration and exit
   reason. Record the observed result, including any failure.
+
+Run `39124621901` verified the exact reference SHA and effective infinite
+`MemoryHigh`, `MemoryMax` and `LimitAS`. It still ended with `oom-kill` after
+3min 40.381s, with service memory peak 15.1G and swap peak 28.0G. The standard
+runner reported 15,989 MiB RAM; swap setup and cleanup passed. This establishes
+failure without our artificial RAM cap, but with the intentionally unchanged
+28 GiB service swap budget. No optimized output or 64 GiB minimum requirement
+is claimed. Details are in `docs/ci-execution-environment.md`.

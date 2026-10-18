@@ -205,4 +205,53 @@ An optimized output must pass WASM validation. On success, its checksummed core
 archive is retained for one day, capped at 256 MiB compressed, so later acceptance
 testing need not repeat optimization. This replay verifies optimization/resource
 behavior only; it does not regenerate the Salsa cache or claim browser acceptance
-of the optimized output. Revalidation results are pending.
+of the optimized output.
+
+### Revalidation result: available runner RAM, identical input
+
+Run [39124621901](https://github.com/oligamiq/rubrc/actions/runs/39124621901), harness
+`1ef9bd234a900765eb362c93847fcf11df2f0f57`, restored the exact reference input:
+469,321,933 bytes, SHA-256
+`b031c901476a2022ab4ce46ace2eea264c3d9c3e7aee6af335aa79c61e780d8d`.
+The restoration record names original source
+`60310a0ddcd723a2b062a8c7e622d42b8c839734` and the unchanged analyzer revision.
+Archive verification, restoration tests, input WASM validation, swap setup and
+post-run swap cleanup succeeded. The whole workflow took approximately 4m 35s;
+no Rust/WASM/cache rebuild was performed.
+
+Periodic telemetry confirms the effective optimizer service properties:
+
+```text
+MemoryHigh=infinity
+MemoryMax=infinity
+MemorySwapMax=30064771072
+LimitAS=infinity
+```
+
+The runner reported 15,989 MiB total RAM (about 15.6 GiB). The optimizer still
+ended with **`oom-kill` / KILL**, with the following systemd accounting:
+
+| Observation | Result |
+| --- | ---: |
+| Service duration | 3min 40.381s |
+| CPU time consumed | 2min 4.981s |
+| Service memory peak | 15.1G |
+| Service swap peak | 28.0G |
+
+These are service-accounting peaks, not an exact minimum RAM requirement or a
+sum proving simultaneous unique allocation. The last 15-second sample reported
+186 MiB available system RAM and 7,701 MiB free system swap; the service's
+unchanged 28 GiB swap limit prevented it from using all remaining host swap.
+The `/usr/bin/time` report was empty because the service was killed; the systemd
+report and sampled limits are the termination evidence.
+
+The 11/12 GiB limits were therefore not the only obstacle: removing them on the
+same input did not produce optimized output. This was not a 30-minute timeout,
+and the much shorter time-to-OOM must not be presented as successful optimization
+or an application speed improvement. The workflow deliberately failed its
+optimization-outcome step; no optimized-core artifact was published.
+
+The conclusion is limited to **standard runner RAM with a 28 GiB service swap
+budget and this 469 MB core**. It does not prove that every possible standard
+runner/swap configuration is insufficient, nor establish that 64 GiB RAM is
+mandatory. No larger paid host was used.
