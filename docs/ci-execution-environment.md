@@ -14,8 +14,8 @@ allows the workload to exceed available physical RAM without a paid larger runne
 
 Current configuration:
 
-- A dedicated **32 GiB swap file**, alongside existing runner swap. Setup requires
-  at least 48 GiB free disk, leaving 16 GiB for builds, and fails before the heavy
+- A dedicated **64 GiB swap file**, alongside existing runner swap. Setup requires
+  at least 80 GiB free disk, leaving 16 GiB for builds, and fails before the heavy
   build if unavailable.
 - A transient systemd service running as the runner user, with
   **MemoryHigh=infinity**, **MemoryMax=infinity**, **MemorySwapMax=infinity**, and
@@ -24,8 +24,8 @@ Current configuration:
 - Available RAM is now governed by the host and any ancestor cgroup limits.
   `OOMScoreAdjust=500` preferentially makes the optimizer an OOM victim and
   `OOMPolicy=kill` stops its service as a unit. This is not guaranteed isolation
-  from global memory pressure. The dedicated swap allocation remains 32 GiB;
-  the follow-up removes the service's 28 GiB swap cap so it can use the host's
+  from global memory pressure. Following the 32 GiB swap experiments, the dedicated
+  allocation is now 64 GiB. The service swap cap is removed so it can use the host's
   available swap. This does not add RAM or make host capacity unlimited.
 - One Binaryen worker, no core dumps, a 30-minute logged progress checkpoint,
   a 90-minute emergency service deadline and a 150-minute whole-job deadline.
@@ -266,4 +266,28 @@ roughly 35 GiB total host swap (dedicated plus existing), rather than stopping
 at its own 28 GiB allowance. OOM victim preference, service cleanup and emergency
 deadline remain in place. Read-only overcommit settings and commit accounting
 are logged to distinguish address commitment from resident memory pressure.
-This experiment is pending; no successful optimization is claimed.
+
+Run [39146401043](https://github.com/oligamiq/rubrc/actions/runs/39146401043),
+harness `2cb73f1d8c3f570c78fbe3fb0b95d2302944f685`, verified the same reference
+SHA and all four effective limits (`MemoryHigh`, `MemoryMax`, `MemorySwapMax`,
+`LimitAS`) at infinity. The optimizer again ended with **oom-kill / KILL**:
+
+- Service runtime: **3min 42.196s**; CPU time: **3min 36.814s**.
+- Service memory peak: **15.0G**; service swap peak: **34.8G**.
+- Last sample: 35,140 MiB system swap used out of 35,839 MiB, leaving 699 MiB;
+  available system RAM was about 160 MiB (`free -m`).
+- Host policy: `vm.overcommit_memory=0`, `vm.overcommit_ratio=50`. The logged
+  `CommitLimit` is not a strict commitment cap under mode 0.
+
+Unlike the prior 28 GiB allowance, this attempt used almost all host swap.
+It establishes exhaustion of this configured standard-runner-plus-32-GiB-swap
+environment, not an exact unrestricted peak or minimum physical RAM requirement.
+No optimized output was produced.
+
+### Next capacity comparison: 64 GiB dedicated swap
+
+The host reported approximately 84 GiB free disk before swap allocation, so a
+64 GiB dedicated file with an 80 GiB preflight can be tested on the same standard
+runner without a paid host. The next replay changes only that allocation and
+disk preflight; input bytes, optimizer flags, infinite service limits, OOM victim
+preference and time bounds stay the same. Its outcome is pending.

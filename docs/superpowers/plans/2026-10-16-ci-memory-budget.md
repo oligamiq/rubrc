@@ -136,7 +136,22 @@ file at 32 GiB. Do not provision a different or paid runner.
 
 - [x] Set `MemorySwapMax=infinity` in preflight and the optimizer service, leaving
   RAM/address-space limits infinite. Record overcommit policy and commit usage.
-- [ ] Verify shell/workflow syntax and intended diff, then commit/push and dispatch
+- [x] Verify shell/workflow syntax and intended diff, then commit/push and dispatch
   one `optimizer-replay` with `preview_run=39068855482`.
-- [ ] Verify input identity, effective limits, memory/swap peaks and termination
+- [x] Verify input identity, effective limits, memory/swap peaks and termination
   reason; record the result without treating failed-run duration as speedup.
+
+Run `39146401043` used the same core and confirmed all limits infinite. It failed
+with `oom-kill` after 3min 42.196s, service memory peak 15.0G and swap peak 34.8G.
+The host's approximately 35 GiB total swap was nearly exhausted. This differs
+from reaching the earlier per-service cap and is recorded separately.
+
+### Task 5: Increase dedicated swap within existing runner disk capacity
+
+The replay uses no toolchain rebuild and the host has reported about 84 GiB free
+disk before swap creation. Try 64 GiB dedicated swap, requiring 80 GiB free disk
+up front. Keep the same core hash, flags, runner, OOM preference and deadlines.
+
+- [x] Update dedicated allocation to 64 GiB and free-disk check to 80 GiB.
+- [ ] Verify syntax/diff, commit and dispatch one optimizer replay.
+- [ ] Inspect input identity, capacity, memory/swap usage, duration and outcome.

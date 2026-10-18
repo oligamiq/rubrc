@@ -10,10 +10,10 @@ case "${1:-}" in
     sysctl vm.overcommit_memory vm.overcommit_ratio
     df -h "$RUNNER_TEMP"
     available_bytes=$(( $(stat -f -c %a "$RUNNER_TEMP") * $(stat -f -c %S "$RUNNER_TEMP") ))
-    test "$available_bytes" -ge 51539607552
+    test "$available_bytes" -ge 85899345920
     test ! -e "$swap_file"
     sudo install -m 600 /dev/null "$swap_file"
-    sudo fallocate -l 32G "$swap_file"
+    sudo fallocate -l 64G "$swap_file"
     sudo mkswap "$swap_file"
     sudo swapon "$swap_file"
     free -m
