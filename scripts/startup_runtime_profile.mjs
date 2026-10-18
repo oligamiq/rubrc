@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { withDeadline } from "./stdlib_cache_browser_support.mjs";
-import { installMemoryProbe, processTree } from "./startup_runtime_profile_support.mjs";
+import { processTree } from "./startup_runtime_profile_support.mjs";
 
 const exec = promisify(execFile);
 const MAX_PROFILE_BYTES = 64 * 1024 * 1024;
@@ -18,7 +18,7 @@ export async function startRuntimeProfile({ browser, page, origin, output, mode 
   const started = performance.now();
   const targets = new Map();
   const errors = [];
-  let stopped = false, busy = false, observedMemory = false, profileBytes = 0, profileCount = 0, wasiProfileCount = 0;
+  let stopped = false, busy = false, processSamples = 0, profileBytes = 0, profileCount = 0, wasiProfileCount = 0;
   let pendingSample = Promise.resolve();
   let writes = Promise.resolve();
   const record = data => {
@@ -31,25 +31,16 @@ export async function startRuntimeProfile({ browser, page, origin, output, mode 
     await record({ kind: "instrumentation-error", ...errors.at(-1) });
   };
   function attach(target) {
-    if (stopped || targets.has(target) || !target.url().startsWith(origin)) return;
-    const isUtility = target.url().startsWith(`${origin}/assets/util_cmd-`);
-    if (mode === "memory" && !isUtility) return;
-    const state = { id: targets.size, url: target.url(), isUtility, running: false };
+    if (mode !== "cpu" || stopped || targets.has(target) || !target.url().startsWith(origin)) return;
+    const state = { id: targets.size, url: target.url(), running: false };
     targets.set(target, state);
     state.pending = (async () => {
       state.session = await withDeadline(target.createCDPSession(), 5000, "attach runtime target");
       const send = (method, params) => withDeadline(state.session.send(method, params), 5000, method);
-      if (mode === "memory") {
-        const result = await send("Runtime.evaluate", {
-          expression: `(${installMemoryProbe.toString()})()`, returnByValue: true,
-        });
-        if (result.exceptionDetails) throw new Error("memory probe installation failed");
-      } else {
-        await send("Profiler.enable");
-        await send("Profiler.setSamplingInterval", { interval: 10000 });
-        await send("Profiler.start");
-        state.running = true;
-      }
+      await send("Profiler.enable");
+      await send("Profiler.setSamplingInterval", { interval: 10000 });
+      await send("Profiler.start");
+      state.running = true;
       await record({ kind: "attached", id: state.id, url: state.url });
     })().catch(error => report("attach", error));
   }
@@ -63,8 +54,10 @@ export async function startRuntimeProfile({ browser, page, origin, output, mode 
     try {
       const { stdout } = await exec("ps", ["-eo", "pid=,ppid=,rss=,args="], { timeout: 5000 });
       const processes = processTree(stdout, browser.process().pid);
+      if (!processes.length) throw new Error("browser process tree is no longer observable");
       const totalRssKiB = processes.reduce((sum, row) => sum + row.rssKiB, 0);
       await record({ kind: "process-memory", processes, totalRssKiB });
+      processSamples++;
       if (totalRssKiB > MAX_BROWSER_RSS_KIB) {
         await report("memory-budget", new Error(`browser tree exceeded ${MAX_BROWSER_RSS_KIB} KiB RSS`));
         stopped = true;
@@ -76,18 +69,6 @@ export async function startRuntimeProfile({ browser, page, origin, output, mode 
         phase: window.__rubrcLspTest?.startup?.phase, timeOrigin: performance.timeOrigin,
       })), 5000, "profile phase");
       await record({ kind: "phase", ...state });
-      if (mode === "memory") {
-        for (const target of targets.values()) {
-          if (!target.session || target.closed) continue;
-          const result = await withDeadline(target.session.send("Runtime.evaluate", {
-            expression: "globalThis.__rubrcMemoryProbe?.snapshot()", returnByValue: true,
-          }), 5000, "sample linear memory");
-          if (result.exceptionDetails) throw new Error("linear memory observation failed");
-          const memories = result.result.value ?? [];
-          observedMemory ||= memories.length > 0;
-          await record({ kind: "linear-memory", id: target.id, ...state, memories });
-        }
-      }
     } catch (error) {
       if (!/Target closed|Session closed|Execution context was destroyed|Cannot find context/.test(String(error))) {
         await report("sample", error);
@@ -141,14 +122,11 @@ export async function startRuntimeProfile({ browser, page, origin, output, mode 
       await Promise.all([...targets.values()].map(async target => {
         await target.pending;
         if (!target.session || target.closed) return;
-        if (mode === "memory") await withDeadline(target.session.send("Runtime.evaluate", {
-          expression: "globalThis.__rubrcMemoryProbe?.restore()",
-        }), 3000, "restore memory constructor").catch(error => report("restore", error));
         await withDeadline(target.session.detach(), 3000, "detach runtime target").catch(() => {});
       }));
-      if (mode === "memory" && !observedMemory) errors.push({ where: "coverage", error: "no linear memory observed" });
+      if (mode === "memory" && !processSamples) errors.push({ where: "coverage", error: "no process memory samples saved" });
       if (mode === "cpu" && !wasiProfileCount) errors.push({ where: "coverage", error: "no WASI worker CPU profiles saved" });
-      await record({ kind: "profile-outcome", errors, profileCount, wasiProfileCount, profileBytes, observedMemory });
+      await record({ kind: "profile-outcome", errors, profileCount, wasiProfileCount, profileBytes, processSamples });
       await writes;
       if (errors.length) process.exitCode = 1;
     },

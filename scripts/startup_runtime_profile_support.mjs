@@ -13,25 +13,3 @@ export function processTree(text, rootPid) {
   } while (previous !== ids.size);
   return rows.filter(row => ids.has(row.pid));
 }
-
-// Serialized into the utility Worker's realm. Observe its existing allocation;
-// do not allocate a second memory or keep an otherwise-dead memory alive.
-export function installMemoryProbe() {
-  const Original = WebAssembly.Memory;
-  const records = [];
-  const Wrapper = new Proxy(Original, {
-    construct(target, args, newTarget) {
-      const memory = Reflect.construct(target, args, newTarget);
-      records.push({ ref: new WeakRef(memory), initial: args[0].initial, maximum: args[0].maximum });
-      return memory;
-    },
-  });
-  globalThis.__rubrcMemoryProbe = {
-    snapshot: () => records.flatMap(({ ref, initial, maximum }) => {
-      const memory = ref.deref();
-      return memory ? [{ bytes: memory.buffer.byteLength, initial, maximum }] : [];
-    }),
-    restore: () => { if (WebAssembly.Memory === Wrapper) WebAssembly.Memory = Original; },
-  };
-  WebAssembly.Memory = Wrapper;
-}

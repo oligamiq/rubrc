@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move CPU and linear-memory profiling from the faulty local PC to an identifiable GitHub-hosted runtime.
+**Goal:** Move CPU and process-memory profiling from the faulty local PC to an identifiable GitHub-hosted runtime.
 
-**Architecture:** Reuse the existing preview-download/checksum path and startup measurement driver. An opt-in observer captures either CPU profiles or linear/process memory; each mode gets a fresh browser and runs sequentially on the same unchanged preview. Keep resource evidence and instrumentation failures in short-lived artifacts.
+**Architecture:** Reuse the existing preview-download/checksum path and startup measurement driver. An opt-in observer captures either CPU profiles or OS-side process memory; each mode gets a fresh browser and runs sequentially on the same unchanged preview. Keep resource evidence and instrumentation failures in short-lived artifacts.
 
 **Tech Stack:** Node 22.22.1, Bun 1.4.2, locked Puppeteer/Chrome, CDP, Ubuntu 24.04.
 
@@ -27,7 +27,7 @@
 - `scripts/startup_runtime_profile.mjs`
 - `scripts/measure_startup_device.mjs`
 
-**Interfaces:** `processTree(psText, rootPid)` returns only numeric process metrics and process kinds for browser descendants. `installMemoryProbe()` is serialized into the utility Worker and forwards existing memory construction, keeping weak references only. `startRuntimeProfile({browser,page,origin,output,mode})` returns `checkpoint(label)` and `dispose()`.
+**Interfaces:** `processTree(psText, rootPid)` returns only numeric process metrics and process kinds for browser descendants. `startRuntimeProfile({browser,page,origin,output,mode})` returns `checkpoint(label)` and `dispose()`.
 
 - [x] Observe failing tests for process-tree filtering and memory constructor observation.
 - [x] Implement filtering independent of row order, excluding unrelated process arguments and invalid metrics.
@@ -69,3 +69,15 @@ allows 60 seconds for bounded sampling, attachment, profile-stop and detach work
 
 Optimizer run `39068855482` has completed with a usable, explicitly unoptimized
 fallback preview. Use that run for the first hosted profiling replay.
+
+## First replay and observer simplification
+
+Run `39087573235` completed CPU capture with 45 profiles (34 WASI-worker profiles)
+and successful startup/editor checks. The memory-constructor observation pass
+timed out at VFS startup without a renderer crash. Its cause remains unconfirmed;
+the unit-level constructor checks did not establish browser-level compatibility.
+
+Remove the constructor observer and its now-inapplicable forwarding test; use
+OS process-tree RSS for the memory pass. This comparison preserves the application
+runtime and avoids claiming linear-memory coverage. Recheck the remaining helper
+and capture coverage tests, then replay the same preview once to verify this path.

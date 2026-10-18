@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import vm from "node:vm";
 import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { startRuntimeProfile } from "./startup_runtime_profile.mjs";
-import { installMemoryProbe, processTree } from "./startup_runtime_profile_support.mjs";
+import { processTree } from "./startup_runtime_profile_support.mjs";
 
 test("process samples include only the launched browser tree, regardless of row order", () => {
   const rows = processTree(`13 12 100 chrome --type=renderer
@@ -20,30 +19,6 @@ test("process samples include only the launched browser tree, regardless of row 
 
 test("invalid process metrics do not become resource measurements", () => {
   assert.deepEqual(processTree("10 1 NaN chrome\n10 1 -2 chrome\nmalformed", 10), []);
-});
-
-test("memory probe preserves construction, subclasses, growth observation, and restoration", () => {
-  class Memory {
-    constructor(descriptor) {
-      if (descriptor.initial < 0) throw new RangeError("invalid memory");
-      this.buffer = { byteLength: descriptor.initial * 65536 };
-    }
-  }
-  const context = vm.createContext({ WebAssembly: { Memory }, WeakRef });
-  vm.runInContext(`(${installMemoryProbe.toString()})()`, context);
-  const result = vm.runInContext(`(() => {
-    class Child extends WebAssembly.Memory {}
-    const memory = new Child({ initial: 1, maximum: 3, shared: true });
-    memory.buffer = { byteLength: 131072 };
-    let rejected = false;
-    try { new WebAssembly.Memory({ initial: -1 }); } catch { rejected = true; }
-    return { child: memory instanceof Child, rejected, samples: __rubrcMemoryProbe.snapshot() };
-  })()`, context);
-  assert.equal(result.child, true);
-  assert.equal(result.rejected, true);
-  assert.deepEqual(JSON.parse(JSON.stringify(result.samples)), [{ bytes: 131072, initial: 1, maximum: 3 }]);
-  vm.runInContext("__rubrcMemoryProbe.restore()", context);
-  assert.equal(context.WebAssembly.Memory, Memory);
 });
 
 test("a page-only CPU capture must not pass as WASI worker profiling", async () => {

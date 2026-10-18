@@ -95,17 +95,37 @@ for profiling, explicitly with actual optimization `none`:
 Dispatch `stdlib-cache-ci.yml` with `mode=startup-profile` and `preview_run` set to
 an available mobile-baseline run ID. The job downloads and verifies the existing
 archive, installs the locked measurement dependencies, and runs the normal-network
-cold/reload and editor checks twice: once with CPU sampling, once with process and
-linear-memory observation. No WASM rebuild is needed for this mode.
+cold/reload and editor checks twice: once with CPU sampling, once with OS-side
+process-memory observation. No WASM rebuild is needed for this mode.
 
 The observer rejects local/remote-browser invocation outside hosted CI. CPU profiles
 are saved at each completed visit, capped at 64 MiB. Memory sampling records only
-the launched browser process tree and weak references to existing utility-worker
-memory. A 12 GiB summed browser-tree RSS limit stops an over-budget browser;
+the launched browser process tree; it does not replace browser memory constructors
+or attach an observer to utility-worker memory. A 12 GiB summed browser-tree RSS limit stops an over-budget browser;
 shared pages can be counted more than once, so this is a conservative guard.
 Instrumentation errors and missing coverage make the profiling command fail.
 
 Each capture process has a 25-minute fallback deadline; the replay job allows
 70 minutes for two sequential captures and setup. Artifacts use the mode name and
 one-day retention. Profiled timings remain diagnostic, not baseline acceptance
-speed comparisons. CI verification of this new mode is pending.
+speed comparisons.
+
+### First hosted replay
+
+Run [39087573235](https://github.com/oligamiq/rubrc/actions/runs/39087573235) reused
+preview `39068855482` with harness `f468e227fa088557c5da7aac3b8c98df40735b86`.
+Its CPU pass reached ready on cold/reload, passed editor checks, and saved 45
+profiles including 34 WASI-worker profiles (11,071,856 bytes), with no recorded
+instrumentation error. Profiled startup was 134.227/119.881 seconds and
+post-sysroot time 98.123/100.156 seconds; these are instrumented observations.
+
+The original memory pass wrapped `WebAssembly.Memory` to observe linear-memory
+size. It stalled at `vfs-starting` until the 600-second startup deadline, with
+the observed memory remaining at its initial 64.25 MiB. It did not crash, load
+the Salsa cache, or reach ready. The cause was not established; the whole replay
+is correctly failed despite successful CPU capture.
+
+The next comparison removes constructor interception and uses OS-side RSS only.
+That reduces observer interference and is sufficient for hosted process-memory
+profiling, but does not provide per-guest allocation or linear-memory sizes.
+Verification of this simplified memory pass is pending.
