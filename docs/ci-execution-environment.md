@@ -176,13 +176,12 @@ the useful outcome here is a verified remote execution/measurement environment.
 The earlier constructor-observed hang remains unexplained, not silently reclassified
 as a confirmed application bug or fully attributed instrumentation defect.
 
-## Capacity still needed for whole-core optimization
+## Capacity investigation for whole-core optimization
 
-Hosted startup profiling is now verified. Whole-core `wasm-opt` is a separate,
-unresolved resource requirement: the 12 GiB memory plus 28 GiB swap service was
-killed at its limits. No further identical optimization run has been dispatched.
-There are currently no self-hosted runners registered for this repository
-(`actions/runners` returned `total_count: 0`). A higher-RAM machine was suggested,
+After hosted profiling was verified, whole-core `wasm-opt` remained a separate,
+unresolved resource requirement: the 12 GiB memory plus 28 GiB swap service had
+been killed at its limits. The repository runner query during that investigation
+returned `total_count: 0` self-hosted runners. A higher-RAM machine was suggested,
 but that recommendation preceded testing the standard runner without our artificial
 RAM limits. The user requested that revalidation first. No paid runner/VM has
 been provisioned.
@@ -290,4 +289,53 @@ The host reported approximately 84 GiB free disk before swap allocation, so a
 64 GiB dedicated file with an 80 GiB preflight can be tested on the same standard
 runner without a paid host. The next replay changes only that allocation and
 disk preflight; input bytes, optimizer flags, infinite service limits, OOM victim
-preference and time bounds stay the same. Its outcome is pending.
+preference and time bounds stay the same.
+
+### Verified success with 64 GiB dedicated swap
+
+Run [39147087133](https://github.com/oligamiq/rubrc/actions/runs/39147087133), harness
+`35942bb1e562061b1ea3e9fac6fabcec9447fbed`, **succeeded on the standard public
+Ubuntu runner**. It restored the same 469,321,933-byte input with SHA-256
+`b031c901476a2022ab4ce46ace2eea264c3d9c3e7aee6af335aa79c61e780d8d`.
+No Rust/WASM rebuild or paid larger runner was used.
+
+| Observation | Result |
+| --- | ---: |
+| Runner RAM | 15,989 MiB |
+| Total configured swap | 68,607 MiB (64 GiB dedicated plus existing swap) |
+| Optimizer exit | 0 / success |
+| Service runtime | 21min 55.862s |
+| Service CPU time | 15min 16.605s |
+| Service memory peak | 14.8G |
+| Service swap peak | 61.8G |
+| `/usr/bin/time` maximum RSS | 15,394,120 KiB (about 14.68 GiB) |
+| Input core size | 469,321,933 bytes |
+| Optimized core size | 442,865,430 bytes |
+
+The resulting core is approximately 5.6% smaller. The optimizer and subsequent
+`wasm-tools validate --features all` both passed; the actual optimization outcome
+was `O1`. The `/usr/bin/time` field `Swaps: 0` is not evidence of zero swap usage:
+systemd and the host telemetry recorded substantial swap consumption.
+
+The whole workflow took about 22min 53s, including setup, artifact preservation
+and successful dedicated-swap cleanup. The output was preserved in the one-day
+`optimized-core` artifact and downloaded locally before expiration:
+
+- Core SHA-256: `928339061cafd50e3496da332e1a60d76bd3372f6ead7aeff5e07583f0c36ba9`.
+- Archive SHA-256: `64eec81bb79a598a8cd11cb945d490953a745db242fc022a7258284950db136b`.
+- Compressed archive size: 90,834,817 bytes.
+- Local archive: `/tmp/opencode/optimized-core-39147087133/optimized-core.tar.gz`.
+
+Both the downloaded archive checksum and streamed extracted-core checksum matched
+CI. The original reference preview archive was also preserved locally at
+`/tmp/opencode/reference-preview-39068855482/rubrc-startup-preview.tar.gz` and its
+SHA-256 matched `0859b89fe4031446a300646010dce19cb052fdcf86476681844fef1e0a72678b`.
+
+This establishes that **the standard approximately 16 GiB RAM runner can complete
+this optimizer workload when enough swap is provided**. It does not mean the
+workload fits in 16 GiB total memory, or that a 64 GiB physical-RAM host is required.
+The earlier resource constraints were not an adequate basis for that recommendation.
+
+Browser startup, editor behavior and Pixel memory usage with this optimized core
+have not yet been measured. Regenerate/verify the cache and run acceptance tests
+with the exact optimized output before claiming application-level improvements.

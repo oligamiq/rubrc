@@ -153,5 +153,16 @@ disk before swap creation. Try 64 GiB dedicated swap, requiring 80 GiB free disk
 up front. Keep the same core hash, flags, runner, OOM preference and deadlines.
 
 - [x] Update dedicated allocation to 64 GiB and free-disk check to 80 GiB.
-- [ ] Verify syntax/diff, commit and dispatch one optimizer replay.
-- [ ] Inspect input identity, capacity, memory/swap usage, duration and outcome.
+- [x] Verify syntax/diff, commit and dispatch one optimizer replay.
+- [x] Inspect input identity, capacity, memory/swap usage, duration and outcome.
+
+Run `39147087133` succeeded on the standard runner with the same reference core.
+Optimization took 21min 55.862s, with systemd memory peak 14.8G and swap peak 61.8G.
+The resulting 442,865,430-byte core passed WASM validation. Output archive and
+streamed-core SHA-256 checks matched after local download; the original reference
+preview was also preserved and verified. Setup and swap cleanup passed.
+
+This completes the execution-environment verification: a paid larger host was
+not necessary for this workload with sufficient disk-backed swap. Application
+acceptance/cache regeneration using the optimized output remains a separate task;
+no browser or Pixel improvement is claimed from the optimizer result alone.
