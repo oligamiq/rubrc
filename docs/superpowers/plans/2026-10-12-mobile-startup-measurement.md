@@ -101,3 +101,33 @@ Remaining investigation: attribute runtime memory and initial semantic query
 cost before choosing a targeted optimization or runtime split. Do not repeat the
 same costly final-core optimization without new evidence, or mark mobile
 acceptance complete based on the successful desktop transfer test.
+
+## Resume application acceptance — 2026-10-19
+
+The execution-environment investigation is complete: optimizer replay
+`39147087133` passed on the standard runner using 64 GiB dedicated swap. Return
+to the original post-sysroot startup and physical-device acceptance goal.
+
+The standalone optimized core is not yet a browser-validated application build.
+Its generated JS adapter is coupled to its core imports/trampolines, and clean
+Git-tracked generated bindings are older than that artifact. Rebuilding only a
+page around arbitrary tracked bindings would not establish runtime compatibility.
+Use the existing full `mobile-baseline` / `core_opt=O1` pipeline once: it generates
+bindings and core together, optimizes that core, validates/copies it, executes the
+same optimized runtime to generate Salsa cache, and packages the resulting page.
+This repeats optimization but avoids introducing an unverified binding swap or
+claiming that the previous standalone core has already passed browser acceptance.
+
+- [ ] Dispatch one full coupled build on `ci/stdlib-cache-validation`, with the
+  fixed analyzer revision and current 64 GiB swap configuration.
+- [ ] Verify optimization applied, cache generation used the resulting core,
+  and desktop normal/constrained cold/reload/editor checks passed.
+- [ ] Download/verify the same preview and measure physical Pixel startup,
+  memory failure if any, completion and diagnostics. Preserve failed outcomes.
+- [ ] Compare post-sysroot phases with the prior observations without attributing
+  runner-to-runner noise to optimization. Select the next application change
+  from the remaining measured bottleneck, especially the demonstrated repeated
+  physical thread-margin reservation and generated memory-lock costs.
+
+Heavy generation/profiling remains hosted. The local PC serves only as controller,
+artifact verifier and physical-device test host. No site deployment is requested.
