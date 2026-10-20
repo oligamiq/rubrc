@@ -48,10 +48,12 @@ try {
   page.on("pageerror", error => console.error("PAGE ERROR", String(error)));
   const cacheReports = [];
   const sysrootReports = [];
+  const memoryReports = [];
   let cacheDownloaded = false;
   page.on("console", message => {
     if (message.text().startsWith("[stdlib-cache]")) { cacheReports.push(message.text()); console.log(message.text()); }
     if (message.text().startsWith("[startup-sysroot] ")) sysrootReports.push(JSON.parse(message.text().slice("[startup-sysroot] ".length)));
+    if (message.text().startsWith("[startup-memory] ")) memoryReports.push(JSON.parse(message.text().slice("[startup-memory] ".length)));
   });
   page.on("response", response => { if (/\.salsa\.part-\d+$/.test(response.url()) && response.ok()) cacheDownloaded = true; });
   network = await measureNetwork(browser, page, origin, profile);
@@ -79,6 +81,7 @@ try {
     for (const visit of ["cold", "reload"]) {
       cacheReports.length = 0;
       sysrootReports.length = 0;
+      memoryReports.length = 0;
       cacheDownloaded = false;
       network.clear();
       await network.disableHttpCache(visit === "cold");
@@ -111,6 +114,8 @@ try {
         const installedSysroots = Object.fromEntries(sysrootReports.filter(report => report.epochMs >= state.timeOrigin)
           .map(report => [report.kind, report.epochMs - state.timeOrigin]));
         const summary = summarizeStartup(state.measurements, installedSysroots);
+        const memorySnapshots = memoryReports.filter(report => report.workerTimeOrigin >= state.timeOrigin);
+        await writeFile(join(output, `${profile}-${visit}-memory.json`), JSON.stringify(memorySnapshots, null, 2));
         if (summary.postSysrootMs === undefined) throw new Error("missing individual sysroot timestamps");
         const net = network.snapshot();
         const assetRows = net.requests.filter(r => /\.br\.part-|\.salsa\.part-|rust-src\.sqfs|\.vfsbr/.test(r.url ?? ""));
@@ -122,12 +127,16 @@ try {
         await page.screenshot({ path: join(output, `${profile}-${visit}.png`) });
         await profiler?.checkpoint(visit);
         await record({ kind: "startup", profile, visit, elapsedMs, ...summary, ...state, installedSysroots,
-          cacheReports: [...cacheReports], networkRequests: net.requests.length,
+          cacheReports: [...cacheReports], memoryMeasurementCount: memorySnapshots.length,
+          lastMemorySnapshot: memorySnapshots.at(-1), networkRequests: net.requests.length,
           networkCalibration: calibration, missingAssets,
           assetRuleMetadataAvailable: assetRows.filter(r => net.ruleIds.includes(r.rule)).length,
           workerSetupErrors: net.errors });
         if (missingAssets.length) throw new Error(`missing cold asset network observations: ${missingAssets.join(", ")}`);
         if (net.errors.length) throw new Error("worker network instrumentation failed");
+        if (build.vfsMemoryTelemetry === 1 && !memorySnapshots.some(report => report.status === "ready")) {
+          throw new Error("missing valid VFS host-capacity measurements");
+        }
         if (visit === "reload") {
           const interactions = await renderer.race(measureEditorInteractions(page, join(output, profile)));
           await page.screenshot({ path: join(output, `${profile}-interactions.png`) });
@@ -138,8 +147,10 @@ try {
           startup: window.__rubrcLspTest?.startup, measurements: window.__rubrcLspTest?.startupMeasurements,
           events: window.__rubrcMeasureEvents, body: document.body.innerText.slice(-3000),
         })), 5000, "failure snapshot").catch(String);
+        await writeFile(join(output, `${profile}-${visit}-failure-memory.json`), JSON.stringify(memoryReports, null, 2));
         await record({ kind: "failure", profile, visit, elapsedMs: performance.now() - start,
-          error: String(error), rendererCrashed: Boolean(renderer.error), cacheReports: [...cacheReports], state });
+          error: String(error), rendererCrashed: Boolean(renderer.error), cacheReports: [...cacheReports],
+          memoryMeasurementCount: memoryReports.length, lastMemorySnapshot: memoryReports.at(-1), state });
         await writeFile(join(output, `${profile}-${visit}-failure-network.json`), JSON.stringify(network.snapshot(), null, 2));
         if (!renderer.error) await withDeadline(page.screenshot({ path: join(output, `${profile}-${visit}-failure.png`) }), 5000, "failure screenshot").catch(() => {});
         throw error;

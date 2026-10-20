@@ -63,6 +63,7 @@ export const custom_instantiate = async (
   call_unknown_fn: (idx: number, unknown: unknown) => unknown = (idx, unknown) => {
     console.warn("call_unknown_fn is not set", idx, unknown);
   },
+  onCoreExports?: (exports: WebAssembly.Exports) => void,
 ): Promise<VfsInstance> => {
   const debugTraceEnabled = import.meta.env?.VITE_RUBRC_LSP_TEST === "1";
   let hostCallId = 0;
@@ -246,6 +247,9 @@ export const custom_instantiate = async (
 	const coreExports = coreInstance.exports as WebAssembly.Exports & {
 		memory: WebAssembly.Memory;
 	};
+  // This observer runs after native instantiation has returned, not from a
+  // Rust-to-JS host callback. Diagnostic callers only retain the export handles.
+  onCoreExports?.(coreExports);
 
 	const fake = {
 		exports: {

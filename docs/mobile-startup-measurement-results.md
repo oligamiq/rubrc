@@ -272,3 +272,65 @@ now have three-day retention, and the next run will use a background controller 
 downloads the archive/logs and verifies the archive checksum upon completion.
 The measurement job also records CPU model, RAM and swap state for interpreting
 runner-to-runner variation. The next generated preview is the one to use for Pixel.
+
+## Same-build optimized desktop and Pixel acceptance — 2026-10-20
+
+Run [39382409899](https://github.com/oligamiq/rubrc/actions/runs/39382409899) passed
+the coupled O1 build, cache generation and desktop acceptance. The background
+controller downloaded the preview and logs successfully and checked the archive
+hash. The same preview was then tested on the physical Pixel.
+
+- Source: `d30db4876887d8adc52fb8b39fd58ef22208f5a6`.
+- Analyzer: `07e8d30e340e504655ebace245a8df17f7f91fbf`.
+- Actual optimization: `O1`.
+- Archive SHA-256: `34b980ca5fd9cf98969c1cdc5567d2341b5df953665202719d1372fac814b3a6`.
+- Core: 442,865,430 bytes, SHA-256
+  `99014fe74dce6787d9037d02725e34f403c0467e3d9e10e93c083dd0ef121cc4`.
+- Cache: 34,545,184 bytes, SHA-256
+  `fa02bfb9944aa1d8d98e7e16a391838d77ca10c3c602f7e4b1257b9f9d99c71d`.
+
+Streamed decompression/concatenation hashes matched the manifests and CI core/cache
+checksums. Local preview: `/tmp/opencode/optimized-device-preview-39382409899`.
+
+### Desktop
+
+Runner: AMD EPYC 7763 model, four exposed CPUs, about 16 GiB RAM. Before measurement
+it reported 14,753 MiB available RAM and 136 MiB used swap. Normal and shared
+5 Mbps / 150 ms constrained networking both passed cold/reload readiness, cache
+load/merge, asset coverage and editor checks.
+
+| Profile / visit | Total to ready | Post-sysroot | Project activation | Semantic warming |
+| --- | ---: | ---: | ---: | ---: |
+| Normal / cold | 125.608 s | 89.915 s | 26.179 s | 63.215 s |
+| Normal / reload | 114.019 s | 89.896 s | 14.299 s | 75.081 s |
+| Constrained / cold | 484.559 s | 89.942 s | 19.447 s | 69.957 s |
+| Constrained / reload | 131.214 s | 94.544 s | 19.358 s | 74.677 s |
+
+Completion/diagnostic observations took 7.035/0.434 seconds normally and
+5.318/0.419 seconds under the network limit. The earlier O1 run's 150–153-second
+post-sysroot measurements and these 90–95-second measurements demonstrate why
+different hosted runs must not be treated as a controlled optimization comparison.
+There is still a substantial wait, principally in semantic readiness.
+
+### Physical Pixel 6a
+
+Chrome 155.0.8059.79, reported CPU count 8, no CPU-count override. Shared two-Worker
+4 MiB calibration took 137.6 ms normally and 6.894 s with the 5 Mbps profile.
+
+| Profile | Time to renderer crash | Last cache evidence | Android outcome |
+| --- | ---: | --- | --- |
+| Normal | 61.461 s | Loaded; validation 1.456 s, decode 17.150 s | `LOW_MEMORY`, RSS about 2.9 GB |
+| Constrained | 347.017 s | Loaded; validation 1.327 s, decode 15.367 s | `LOW_MEMORY`, RSS about 2.8 GB |
+
+Neither case reached cache-merge confirmation, ready, reload, completion or
+diagnostic acceptance. These durations are time-to-crash, not startup completion.
+Both Android exits were foreground renderer low-memory kills. Failure JSONL and
+network records remain under `/tmp/opencode/pixel-optimized-39382409899`; raw
+device exit history remains local. Dedicated origins were cleared, test tabs
+closed, ports/forwarding removed, and the original stay-awake setting remained 15.
+
+O1 alone therefore did not establish mobile acceptance. Before reducing host
+reservation, measure its logical high-water and physical capacity explicitly:
+own-memory logical growth cannot expand physical capacity automatically, and
+filesystem storage shares the host heap with stacks. A test-only capacity observer
+is the next diagnostic change; no reservation reduction has been applied yet.

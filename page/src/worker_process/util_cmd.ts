@@ -25,6 +25,7 @@ import {
 } from "../runtime_worker_protocol.ts";
 import { createRustSrcFsEndpoint } from "../rust_src_vfs_rpc.ts";
 import { VFS_THREAD_INITIAL_CAPACITY } from "../runtime_parallelism.ts";
+import { readVfsMemorySnapshot } from "../vfs_memory_measurements.ts";
 
 import thread_spawn_path from "./vfs_bindings/thread_spawn.ts?worker&url";
 import worker_background_worker_url from "./vfs_bindings/worker_background_worker.ts?worker&url";
@@ -34,6 +35,7 @@ await set_fake_worker();
 import { dispatchSpecialInput, routeTerminalWrite } from "./lsp_dispatch.ts";
 
 const shared: SharedObject[] = [];
+let stopMemoryMeasurements: (() => void) | undefined;
 
 const utilityWorker = createUtilityWorkerStateMachine({
   prepareAnimal: prepareUtilityAnimal,
@@ -41,6 +43,8 @@ const utilityWorker = createUtilityWorkerStateMachine({
   startGuest: startUtilityGuest,
   postMessage: (message) => globalThis.postMessage(message),
   onFailure: () => {
+    stopMemoryMeasurements?.();
+    stopMemoryMeasurements = undefined;
     for (const object of shared.splice(0)) object.bc.close();
   },
 });
@@ -481,6 +485,7 @@ async function startUtilityGuest(
   };
   const sharedMemory = animal.get_share_memory();
   prebindWasiMemory(animal, sharedMemory.memory);
+  let diagnosticExports: WebAssembly.Exports | undefined;
   const vfs_root = await custom_instantiate(
     vfs_wasm,
     animal.wasiImport as any,
@@ -504,8 +509,29 @@ async function startUtilityGuest(
       }
       return animal.call_unknown_fn(idx, unknown);
     },
+    debugTraceEnabled ? (exports) => { diagnosticExports = exports; } : undefined,
   );
+  stopMemoryMeasurements?.();
+  stopMemoryMeasurements = undefined;
+  const reportMemory = (stage: string) => {
+    if (!diagnosticExports) return;
+    let snapshot: Record<string, unknown>;
+    try {
+      snapshot = readVfsMemorySnapshot(diagnosticExports, sharedMemory.memory);
+    } catch (error) {
+      snapshot = { status: "error", error: String(error) };
+    }
+    console.info(`[startup-memory] ${JSON.stringify({
+      stage, workerTimeOrigin: performance.timeOrigin,
+      epochMs: performance.timeOrigin + performance.now(), ...snapshot,
+    })}`);
+  };
   if (debugTraceEnabled) {
+    // Sample from independent JS boundaries/timers only, never host callbacks.
+    reportMemory("after-instantiation");
+    const timer = setInterval(() => reportMemory("poll"), 5000);
+    const end = setTimeout(() => stopMemoryMeasurements?.(), 10 * 60_000);
+    stopMemoryMeasurements = () => { clearInterval(timer); clearTimeout(end); };
     startVfsDebugTracePump({
       root: vfs_root,
       memory: sharedMemory.memory,
@@ -517,6 +543,7 @@ async function startUtilityGuest(
 
   // Initialize VFS component (runs its main function which sets up thread pool etc.)
   animal.start(vfs_root as any);
+  if (debugTraceEnabled) reportMemory("after-vfs-main");
 
   // Initialize main session
   vfs_root.dispatch(0, 3, 0, 0);

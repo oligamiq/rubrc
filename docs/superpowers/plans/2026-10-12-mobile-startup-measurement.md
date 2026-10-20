@@ -122,9 +122,9 @@ claiming that the previous standalone core has already passed browser acceptance
   fixed analyzer revision and current 64 GiB swap configuration.
 - [x] Verify optimization applied, cache generation used the resulting core,
   and desktop normal/constrained cold/reload/editor checks passed.
-- [ ] Download/verify the same preview and measure physical Pixel startup,
+- [x] Download/verify the same preview and measure physical Pixel startup,
   memory failure if any, completion and diagnostics. Preserve failed outcomes.
-- [ ] Compare post-sysroot phases with the prior observations without attributing
+- [x] Compare post-sysroot phases with the prior observations without attributing
   runner-to-runner noise to optimization. Select the next application change
   from the remaining measured bottleneck, especially the demonstrated repeated
   physical thread-margin reservation and generated memory-lock costs.
@@ -144,3 +144,12 @@ WVL own-memory logical growth cannot expand physical capacity automatically.
 Determine an adequate VFS host capacity budget before removing repeated reserves;
 filesystem data shares that host heap with thread stacks. See the clarification
 in `docs/startup-memory-root-cause.md`.
+
+Run `39382409899` regenerated and automatically preserved the coupled O1 preview.
+Its archive, decoded core and cache hashes were verified. Desktop post-sysroot
+time was 90–95 seconds with all acceptance checks passing. Physical Pixel normal
+and constrained runs still ended in foreground `LOW_MEMORY` at about 2.9/2.8 GB
+renderer RSS, before ready/editor acceptance. Device test resources were cleaned
+up. See `docs/mobile-startup-measurement-results.md` for complete identities and
+timings. Next: explicit host logical/physical capacity observation before changing
+reservation policy, described in `2026-10-20-vfs-capacity-observation.md`.

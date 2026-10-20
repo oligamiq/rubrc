@@ -193,7 +193,7 @@ jobs:
       - name: Package short-lived measurement preview
         if: inputs.mode == 'mobile-baseline'
         run: |
-          printf '{"sourceSha":"%s","analyzerSha":"%s","coreOptimizationRequested":"%s","coreOptimization":"%s"}\n' "$GITHUB_SHA" "$(<.github/stdlib-cache-analyzer-revision)" "$VFS_CORE_OPT_LEVEL" "$ACTUAL_VFS_CORE_OPT_LEVEL" > page/dist/__rubrc_measurement_build.json
+          printf '{"sourceSha":"%s","analyzerSha":"%s","coreOptimizationRequested":"%s","coreOptimization":"%s","vfsMemoryTelemetry":1}\n' "$GITHUB_SHA" "$(<.github/stdlib-cache-analyzer-revision)" "$VFS_CORE_OPT_LEVEL" "$ACTUAL_VFS_CORE_OPT_LEVEL" > page/dist/__rubrc_measurement_build.json
           tar -czf "$RUNNER_TEMP/rubrc-startup-preview.tar.gz" -C page/dist .
           size=$(stat -c %s "$RUNNER_TEMP/rubrc-startup-preview.tar.gz")
           test "$size" -lt 268435456

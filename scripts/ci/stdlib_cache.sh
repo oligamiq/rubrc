@@ -17,7 +17,7 @@ case "${1:-}" in
     deno test --no-lock --allow-read --allow-env \
       page/src/stdlib_cache_test.ts page/src/worker_process/lsp_dispatch_test.ts \
       page/src/startup_coordinator_test.ts page/src/workspace_sync_test.ts
-    deno test --no-lock --allow-read --allow-env page/src/startup_measurements_test.ts page/src/startup_sysroot_measurement_test.ts page/src/lsp_test_api_state_test.ts page/src/vfs_readiness_test.ts
+    deno test --no-lock --allow-read --allow-env page/src/startup_measurements_test.ts page/src/startup_sysroot_measurement_test.ts page/src/vfs_memory_measurements_test.ts page/src/lsp_test_api_state_test.ts page/src/vfs_readiness_test.ts
     deno test --no-lock --allow-read --allow-env page/src/sysroot_transfer_timeout_test.ts page/src/sysroot_archive_test.ts page/src/sysroot_archive_store_test.ts
     deno test --no-lock lib/src/compressed_progress_test.ts lib/src/fetch_compressed_stream_test.ts
     node --test scripts/copy_vfs_bindings_test.mjs scripts/finalize_vfs_asset_test.mjs \
