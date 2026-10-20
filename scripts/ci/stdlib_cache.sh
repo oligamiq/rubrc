@@ -175,6 +175,11 @@ case "${1:-}" in
       node scripts/stdlib_cache_browser_test.mjs
     ;;
   measure)
+    {
+      lscpu
+      free -m
+      swapon --show --bytes
+    } | tee "$LOGS/measurement-environment.txt"
     bunx puppeteer browsers install chrome
     RUBRC_MEASURE_PROFILE=normal node scripts/measure_startup_device.mjs
     RUBRC_MEASURE_PROFILE=constrained node scripts/measure_startup_device.mjs

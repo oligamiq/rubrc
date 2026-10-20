@@ -230,3 +230,45 @@ substantial generated memory-lock overhead. See
 [`startup-memory-root-cause.md`](startup-memory-root-cause.md) for the evidence,
 unsuccessful probes, and the proposed bounded reservation fix. Mobile acceptance
 remains incomplete.
+
+## Coupled O1 build: retained desktop results — 2026-10-20
+
+Run [39187476371](https://github.com/oligamiq/rubrc/actions/runs/39187476371)
+succeeded on source `c421e9e2ae81c2a52d33ec28579425dcabb7b873`, with analyzer
+`07e8d30e340e504655ebace245a8df17f7f91fbf`. Unlike the earlier standalone optimizer
+replay, this build generated matching JS bindings, applied O1, executed that core
+to create the cache, and ran browser acceptance on the packaged application.
+
+- Actual optimization was `O1`, with no optimization failure flag.
+- Core size: 469,321,933 → 442,865,430 bytes; optimizer elapsed 24min 34.93s.
+- Generated cache: 34,545,184 bytes; packaged SHA-256
+  `3e9a10a9c5bc5a686ad74627c163c8ab001635bda8bf358c8a8953f1d06b6174`.
+
+| Desktop profile / visit | Total to ready | Post-sysroot | Project activation | Semantic warming |
+| --- | ---: | ---: | ---: | ---: |
+| Normal / cold | 173.182 s | 151.551 s | 21.841 s | 129.116 s |
+| Normal / reload | 170.886 s | 152.571 s | 22.133 s | 129.872 s |
+| 5 Mbps / cold | 519.600 s | 150.685 s | 21.397 s | 128.689 s |
+| 5 Mbps / reload | 189.750 s | 153.013 s | 22.137 s | 130.284 s |
+
+Both network profiles passed actual completion/type-error checks. Completion
+observation took 7.193/7.996 seconds (normal/constrained); diagnostics took
+1.046/1.041 seconds. All four startup records reported `ready`, cache load and
+merge, empty missing-asset lists and no worker setup errors. The reported
+`moved_source_root_files=0` describes source-root relocation, not zero cache adoption.
+
+These measurements show that a substantial post-sysroot wait remains after O1.
+They are not a same-runner paired comparison against the earlier unoptimized
+results and do not prove an optimization speedup or regression.
+
+The one-day preview and diagnostic artifacts expired before physical-device
+testing. No Pixel result is claimed for this build. The retained job log for job
+`117853817085` was retrieved through the API (1,149,236 bytes); its structured
+records were parsed and checked for the outcomes above. Screenshots and the
+expired preview were not recovered from the log.
+
+To prevent another artifact-loss cycle, mobile preview and associated build logs
+now have three-day retention, and the next run will use a background controller that
+downloads the archive/logs and verifies the archive checksum upon completion.
+The measurement job also records CPU model, RAM and swap state for interpreting
+runner-to-runner variation. The next generated preview is the one to use for Pixel.

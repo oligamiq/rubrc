@@ -204,7 +204,7 @@ jobs:
           name: rubrc-startup-preview
           path: ${{ runner.temp }}/rubrc-startup-preview.tar.gz
           compression-level: 0
-          retention-days: 1
+          retention-days: 3
       - name: Matched browser trials
         if: inputs.mode != 'mobile-baseline'
         run: bash scripts/ci/stdlib_cache.sh browser 2>&1 | tee ci-logs/browser.log
@@ -224,5 +224,5 @@ jobs:
         with:
           name: stdlib-cache-wasm-browser-${{ github.run_attempt }}
           path: rubrc/ci-logs
-          retention-days: 1
+          retention-days: ${{ inputs.mode == 'mobile-baseline' && 3 || 1 }}
           if-no-files-found: ignore

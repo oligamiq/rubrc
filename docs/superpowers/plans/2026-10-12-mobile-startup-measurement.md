@@ -118,9 +118,9 @@ same optimized runtime to generate Salsa cache, and packages the resulting page.
 This repeats optimization but avoids introducing an unverified binding swap or
 claiming that the previous standalone core has already passed browser acceptance.
 
-- [ ] Dispatch one full coupled build on `ci/stdlib-cache-validation`, with the
+- [x] Dispatch one full coupled build on `ci/stdlib-cache-validation`, with the
   fixed analyzer revision and current 64 GiB swap configuration.
-- [ ] Verify optimization applied, cache generation used the resulting core,
+- [x] Verify optimization applied, cache generation used the resulting core,
   and desktop normal/constrained cold/reload/editor checks passed.
 - [ ] Download/verify the same preview and measure physical Pixel startup,
   memory failure if any, completion and diagnostics. Preserve failed outcomes.
@@ -131,3 +131,16 @@ claiming that the previous standalone core has already passed browser acceptance
 
 Heavy generation/profiling remains hosted. The local PC serves only as controller,
 artifact verifier and physical-device test host. No site deployment is requested.
+
+Run `39187476371` passed the coupled O1 build, cache generation and desktop
+normal/constrained acceptance. Post-sysroot time remained about 150–153 seconds,
+dominated by semantic warming. The preview expired after one day before Pixel
+testing; retained job-log records were recovered and verified. Regenerate with
+three-day preview/build-log retention and automatic post-completion download;
+include runner CPU/RAM/swap metadata. Physical-device acceptance remains pending.
+
+The proposed simple one-time 64 MiB reservation reduction also needs revision:
+WVL own-memory logical growth cannot expand physical capacity automatically.
+Determine an adequate VFS host capacity budget before removing repeated reserves;
+filesystem data shares that host heap with thread stacks. See the clarification
+in `docs/startup-memory-root-cause.md`.

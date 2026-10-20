@@ -37,11 +37,34 @@ calculation, not a measured reduction in renderer RSS. Allocator activity can
 also change logical size; the condition must not be modeled as increasing merely
 because physical reservation succeeded.
 
-The recommended bounded fix is to remember a successful thread-margin reservation
-under synchronization, preserving retry after allocation failure and normal guest
-memory growth. Tests should keep logical size unchanged after successful physical
-reservation and exercise repeated calls, concurrent callers, failure/retry, and
-already-sufficient logical size. This fix has **not yet been implemented**.
+An initial candidate was to remember a successful thread-margin reservation
+under synchronization, preserving retry after allocation failure and logical
+growth within the reserved capacity. Tests should keep logical size unchanged
+after successful physical reservation and exercise repeated calls, concurrent
+callers, failure/retry, and already-sufficient logical size. This fix has **not yet
+been implemented**.
+
+### Reservation-policy clarification — 2026-10-19
+
+Further source inspection shows that the simple one-time **64 MiB** proposal above
+is incomplete. In WVL 0.10 `--own-memory` lowering, ordinary `memory.grow` for
+`__self` only advances the logical size within its existing physical capacity;
+it returns `-1` when the requested logical size exceeds that capacity. It does
+not invoke physical growth automatically. Physical reservation is a separate
+operation that can shift other guest regions.
+
+The VFS host heap holds filesystem bytes and metadata as well as thread stacks,
+including the roughly 70 MiB target sysroot, Rust-source archive and cache-transfer
+buffers. Stack sizing alone therefore does not justify reducing host capacity to
+a single 64 MiB margin. The current repeated calls provide an implicit startup
+capacity budget on which other operations may rely.
+
+The logical-size check still explains repeated reservations, and guest-target
+reservation had a similar once-only fix in commit `7da1ecf9`. However, **448 MiB of
+repeated reservation is not proof that all 448 MiB can safely be removed**. Measure
+the initial/logical/physical host capacities and supported filesystem workloads,
+then define an adequate explicit reservation policy before changing the guard.
+The Pixel OOM has not been attributed solely to this reservation pattern.
 
 ## Physical Pixel: linear memory is a substantial part of the footprint
 
@@ -125,7 +148,8 @@ closed its test tab; forwarding and local test-port listeners were removed.
 
 ## Proposed order
 
-First fix the repeated thread-margin reservation and measure the same resulting
+First establish an adequate explicit host-capacity budget, then fix the repeated
+reservation without relying on automatic physical growth. Measure the resulting
 CI preview on desktop and Pixel. Then investigate WVL's per-access locking if
 semantic warming remains dominant. A separate LSP runtime is a larger alternative
 that may address both footprint and relocation overhead, but is not necessary to
