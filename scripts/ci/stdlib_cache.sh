@@ -10,6 +10,9 @@ case "${1:-}" in
   checks)
     rustc -Vv
     cargo -V
+    rustc --edition=2024 --test crates/vfs/build.rs -o "$RUNNER_TEMP/vfs-build-script-tests"
+    "$RUNNER_TEMP/vfs-build-script-tests"
+    rm "$RUNNER_TEMP/vfs-build-script-tests"
     cargo test --locked --manifest-path "$ANALYZER/Cargo.toml" -p parking_lot_core --lib
     cargo test --locked --manifest-path "$ANALYZER/Cargo.toml" -p ide-db -p rust-analyzer --lib semantic_cache
     cargo test --locked --manifest-path "$ANALYZER/Cargo.toml" -p ide-db --lib semantic_cache --features cache-item-trees,cache-codec-bench
@@ -48,6 +51,11 @@ case "${1:-}" in
     "$tools/wasm-tools/wasm-tools" --version
     "$tools/binaryen/bin/wasm-opt" --version
     if [[ "$1" == optimizer-tools ]]; then exit 0; fi
+    if [[ -n "${RUBRC_VFS_INITIAL_HEAP_BYTES:-}" ]]; then
+      linker="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld"
+      "$linker" -flavor wasm --help > "$LOGS/vfs-linker-help.txt"
+      grep -F -- '--initial-heap=' "$LOGS/vfs-linker-help.txt"
+    fi
     sudo apt-get update -qq
     sudo apt-get install -y --no-install-recommends squashfs-tools squashfs-tools-ng
     # Ubuntu 24.04's classic mksquashfs predates the reproducibility/mode flags
@@ -71,6 +79,7 @@ case "${1:-}" in
         wasm-tools --version
         wasm-opt --version
         printf 'VFS_CORE_OPT_LEVEL=%s\n' "${VFS_CORE_OPT_LEVEL:-none}"
+        printf 'RUBRC_VFS_INITIAL_HEAP_BYTES=%s\n' "${RUBRC_VFS_INITIAL_HEAP_BYTES:-0}"
         free -h
         df -h .
       } > "$LOGS/build-identity.txt"
@@ -180,6 +189,10 @@ case "${1:-}" in
       free -m
       swapon --show --bytes
     } | tee "$LOGS/measurement-environment.txt"
+    # Keep process RSS alongside capacity metadata for the initial-heap trial.
+    if [[ -n "${RUBRC_VFS_INITIAL_HEAP_BYTES:-}" ]]; then
+      export RUBRC_RUNTIME_PROFILE=memory
+    fi
     bunx puppeteer browsers install chrome
     RUBRC_MEASURE_PROFILE=normal node scripts/measure_startup_device.mjs
     RUBRC_MEASURE_PROFILE=constrained node scripts/measure_startup_device.mjs

@@ -18,6 +18,10 @@ on:
         type: choice
         options: [none, O1]
         default: none
+      initial_vfs_heap:
+        description: Experimental VFS-only 512 MiB linker-provisioned heap (full builds only)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -37,6 +41,7 @@ env:
   VFS_CORE_OPT_LEVEL: ${{ inputs.core_opt || 'none' }}
   ACTUAL_VFS_CORE_OPT_LEVEL: none
   CORE_OPT_FAILED: "0"
+  RUBRC_VFS_INITIAL_HEAP_BYTES: ${{ inputs.initial_vfs_heap && '536870912' || '' }}
 
 defaults:
   run:
@@ -193,7 +198,7 @@ jobs:
       - name: Package short-lived measurement preview
         if: inputs.mode == 'mobile-baseline'
         run: |
-          printf '{"sourceSha":"%s","analyzerSha":"%s","coreOptimizationRequested":"%s","coreOptimization":"%s","vfsMemoryTelemetry":1}\n' "$GITHUB_SHA" "$(<.github/stdlib-cache-analyzer-revision)" "$VFS_CORE_OPT_LEVEL" "$ACTUAL_VFS_CORE_OPT_LEVEL" > page/dist/__rubrc_measurement_build.json
+          printf '{"sourceSha":"%s","analyzerSha":"%s","coreOptimizationRequested":"%s","coreOptimization":"%s","vfsMemoryTelemetry":1,"vfsInitialHeapBytes":%s}\n' "$GITHUB_SHA" "$(<.github/stdlib-cache-analyzer-revision)" "$VFS_CORE_OPT_LEVEL" "$ACTUAL_VFS_CORE_OPT_LEVEL" "${RUBRC_VFS_INITIAL_HEAP_BYTES:-0}" > page/dist/__rubrc_measurement_build.json
           tar -czf "$RUNNER_TEMP/rubrc-startup-preview.tar.gz" -C page/dist .
           size=$(stat -c %s "$RUNNER_TEMP/rubrc-startup-preview.tar.gz")
           test "$size" -lt 268435456

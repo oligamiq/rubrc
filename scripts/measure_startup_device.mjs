@@ -4,7 +4,7 @@ import { resolve, join } from "node:path";
 import { startBrowserStaticServer, closeBrowserStaticServer } from "./lsp_browser_static_server.mjs";
 import { monitorRenderer, withDeadline, assertCacheOutcome } from "./stdlib_cache_browser_support.mjs";
 import { measureNetwork } from "./startup_network_measurement.mjs";
-import { installLspEventTiming, startupReachedTerminalState, summarizeStartup } from "./startup_measurement_support.mjs";
+import { assertVfsMemoryCoverage, installLspEventTiming, startupReachedTerminalState, summarizeStartup } from "./startup_measurement_support.mjs";
 import { measureEditorInteractions } from "./startup_interaction_measurement.mjs";
 import { startRuntimeProfile } from "./startup_runtime_profile.mjs";
 
@@ -44,7 +44,7 @@ try {
   await storage.send("Storage.clearDataForOrigin", { origin, storageTypes: "all" });
   await storage.detach();
   renderer = monitorRenderer(page);
-  if (runtimeProfile) profiler = await startRuntimeProfile({ browser, page, origin, output, mode: runtimeProfile });
+  if (runtimeProfile) profiler = await startRuntimeProfile({ browser, page, origin, output, mode: runtimeProfile, networkProfile: profile });
   page.on("pageerror", error => console.error("PAGE ERROR", String(error)));
   const cacheReports = [];
   const sysrootReports = [];
@@ -134,9 +134,7 @@ try {
           workerSetupErrors: net.errors });
         if (missingAssets.length) throw new Error(`missing cold asset network observations: ${missingAssets.join(", ")}`);
         if (net.errors.length) throw new Error("worker network instrumentation failed");
-        if (build.vfsMemoryTelemetry === 1 && !memorySnapshots.some(report => report.status === "ready")) {
-          throw new Error("missing valid VFS host-capacity measurements");
-        }
+        assertVfsMemoryCoverage(build, memorySnapshots);
         if (visit === "reload") {
           const interactions = await renderer.race(measureEditorInteractions(page, join(output, profile)));
           await page.screenshot({ path: join(output, `${profile}-interactions.png`) });

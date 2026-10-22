@@ -39,6 +39,18 @@
 - [x] Capture `[startup-memory]` reports and save full per-visit/failure snapshots separately from compact timing records.
 - [x] Mark new coupled previews with `vfsMemoryTelemetry: 1`; require valid coverage on successful visits while preserving old-preview replay compatibility.
 - [x] Include the collector tests in hosted checks.
-- [ ] Commit only intended source files after syntax/workflow checks, leaving local generated WASM/vfs.js/worker.ts changes untouched.
-- [ ] Dispatch a diagnostic `mobile-baseline` / `core_opt=none` build and start automatic artifact retrieval.
-- [ ] Confirm host-capacity observations on hosted desktop, then use the same verified preview on Pixel. Only select a reservation-policy change after reading the measured capacity and logical high-water values.
+- [x] Commit only intended source files after syntax/workflow checks, leaving local generated WASM/vfs.js/worker.ts changes untouched.
+- [x] Dispatch a diagnostic `mobile-baseline` / `core_opt=none` build and start automatic artifact retrieval.
+- [x] Confirm host-capacity observations on hosted desktop, then use the same verified preview on Pixel. Only select a reservation-policy change after reading the measured capacity and logical high-water values.
+
+Run `39502399591` passed with valid capacity snapshots in all four desktop visits.
+Host physical capacity was 1.125 MiB after instantiation and 513.125 MiB after
+VFS main; logical size after main was only 17.125 MiB. The desktop logical
+high-water was 161.75 MiB. The same hash-verified diagnostic preview on Pixel
+crashed after 57.928 s; its last valid snapshot reported 163 MiB logical size
+against 513.125 MiB physical capacity. Android recorded LOW_MEMORY at about
+2.9 GB RSS. These are unoptimized diagnostic results, not an O1 speed comparison.
+
+The next experiment preserves the added 512 MiB budget but supplies it through
+the VFS-only linker initial heap, testing whether this avoids eagerly touching
+unused reserved pages. See `2026-10-21-initial-vfs-heap.md`.

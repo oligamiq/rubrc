@@ -9,7 +9,7 @@ const exec = promisify(execFile);
 const MAX_PROFILE_BYTES = 64 * 1024 * 1024;
 const MAX_BROWSER_RSS_KIB = 12 * 1024 * 1024;
 
-export async function startRuntimeProfile({ browser, page, origin, output, mode }) {
+export async function startRuntimeProfile({ browser, page, origin, output, mode, networkProfile }) {
   if (process.env.GITHUB_ACTIONS !== "true" || !browser.process()) {
     throw new Error("runtime profiling requires a locally launched browser on the hosted CI runner");
   }
@@ -22,7 +22,7 @@ export async function startRuntimeProfile({ browser, page, origin, output, mode 
   let pendingSample = Promise.resolve();
   let writes = Promise.resolve();
   const record = data => {
-    const row = { elapsedMs: performance.now() - started, mode, ...data };
+    const row = { elapsedMs: performance.now() - started, mode, networkProfile, ...data };
     writes = writes.then(() => appendFile(join(output, "runtime-profile.jsonl"), `${JSON.stringify(row)}\n`));
     return writes;
   };

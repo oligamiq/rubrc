@@ -66,6 +66,21 @@ the initial/logical/physical host capacities and supported filesystem workloads,
 then define an adequate explicit reservation policy before changing the guard.
 The Pixel OOM has not been attributed solely to this reservation pattern.
 
+### Measured host capacity — 2026-10-21
+
+Diagnostic run `39502399591` used existing scalar core exports under the existing
+read lock. All desktop visits observed initial host physical/logical size
+1.125 MiB; after VFS main the physical capacity was 513.125 MiB and logical size
+17.125 MiB. The desktop startup/editing logical high-water was 161.75 MiB.
+Pixel's last snapshot before a low-memory crash showed 163 MiB logical size,
+513.125 MiB physical capacity, and 1,536.3125 MiB total combined memory.
+
+This confirms that the 512 MiB startup reservation is real and that a single
+64 MiB margin is insufficient. It does not make the capacity-minus-logical-size
+difference equivalent to live heap or RSS. An opt-in linker initial-heap experiment
+will preserve the 512 MiB budget while testing whether eager grow/copy/fill work
+can be avoided; its actual memory benefit and acceptance remain to be measured.
+
 ## Physical Pixel: linear memory is a substantial part of the footprint
 
 A temporary CDP probe attached to the utility worker before its memory constructor

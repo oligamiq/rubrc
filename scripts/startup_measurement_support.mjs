@@ -5,6 +5,22 @@ export const NETWORK_PROFILES = {
 
 export { startupReachedTerminalState } from "./stdlib_cache_browser_support.mjs";
 
+export function assertVfsMemoryCoverage(build, snapshots) {
+  const heap = build.vfsInitialHeapBytes ?? 0;
+  if (heap && build.vfsMemoryTelemetry !== 1) throw new Error("initial heap requires capacity telemetry");
+  if (build.vfsMemoryTelemetry !== 1) return;
+  const ready = snapshots.filter(snapshot => snapshot.status === "ready");
+  if (!ready.length) throw new Error("missing valid VFS host-capacity measurements");
+  if (!heap) return;
+  if (!Number.isSafeInteger(heap) || heap < 0) throw new Error("invalid initial heap metadata");
+  const initial = ready.find(snapshot => snapshot.stage === "after-instantiation");
+  const main = ready.find(snapshot => snapshot.stage === "after-vfs-main");
+  if (!initial || !main || !(initial.hostLogicalBytes >= heap) || !(initial.hostPhysicalBytes >= heap)) {
+    throw new Error("initial heap was not observed before VFS main");
+  }
+  if (main.hostPhysicalBytes !== initial.hostPhysicalBytes) throw new Error("unexpected startup reservation after initial heap");
+}
+
 export function validateWorkerTransfer(profile, bytes, elapsedMs, expectedBytes = 2 * 1024 * 1024) {
   if (bytes !== expectedBytes || bytes <= 0 || !Number.isFinite(elapsedMs) || elapsedMs <= 0) {
     throw new Error("invalid Worker network probe");

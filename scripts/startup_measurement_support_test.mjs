@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { installLspEventTiming, NETWORK_PROFILES, startupReachedTerminalState, summarizeStartup, validateWorkerTransfer } from "./startup_measurement_support.mjs";
+import { assertVfsMemoryCoverage, installLspEventTiming, NETWORK_PROFILES, startupReachedTerminalState, summarizeStartup, validateWorkerTransfer } from "./startup_measurement_support.mjs";
 
 test("network profile converts megabits to bytes per second", () => {
   assert.equal(NETWORK_PROFILES.constrained.downloadThroughput, 625000);
@@ -71,4 +71,27 @@ test("post-sysroot interval starts only after both distinct sysroots complete", 
   assert.equal(result.semanticWarmMs, 2900);
   assert.equal(summarizeStartup({ phases: { ready: 5000 }, completedTasks: { "rust-src": 1000 } }).postSysrootMs, undefined);
   assert.equal(summarizeStartup({ phases: { ready: 5000 }, completedTasks: { "rust-src": 1400, "target-sysroot": 1400 } }).postSysrootMs, undefined);
+});
+
+test("capacity coverage remains optional for older previews but required for new ones", () => {
+  assertVfsMemoryCoverage({}, []);
+  assert.throws(() => assertVfsMemoryCoverage({ vfsMemoryTelemetry: 1 }, []), /missing valid/);
+});
+
+test("initial-heap experiment verifies the heap exists before VFS main", () => {
+  const heap = 512 * 1024 * 1024;
+  const build = { vfsMemoryTelemetry: 1, vfsInitialHeapBytes: heap };
+  const initial = { status: "ready", stage: "after-instantiation", hostLogicalBytes: heap + 1179648, hostPhysicalBytes: heap + 1179648 };
+  const main = { ...initial, stage: "after-vfs-main" };
+  assertVfsMemoryCoverage(build, [initial, main]);
+  assert.throws(() => assertVfsMemoryCoverage(build, [{ ...initial, hostLogicalBytes: 1179648, hostPhysicalBytes: 1179648 }, main]), /initial heap was not observed/);
+  assert.throws(() => assertVfsMemoryCoverage(build, [main]), /initial heap was not observed/);
+});
+
+test("predeclared heap must not receive another startup reservation", () => {
+  const heap = 512 * 1024 * 1024;
+  const initial = { status: "ready", stage: "after-instantiation", hostLogicalBytes: heap + 1179648, hostPhysicalBytes: heap + 1179648 };
+  assert.throws(() => assertVfsMemoryCoverage({ vfsMemoryTelemetry: 1, vfsInitialHeapBytes: heap }, [
+    initial, { ...initial, stage: "after-vfs-main", hostPhysicalBytes: initial.hostPhysicalBytes + heap },
+  ]), /unexpected startup reservation/);
 });
