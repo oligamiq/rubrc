@@ -50,11 +50,40 @@ the link flag alone; RSS and real startup/editor behavior must be measured.
 - [x] Add pinned-linker preflight and OS-side process RSS capture for the experiment.
 - [x] Verify build-script/helper/startup tests (4 Rust, 21 Node, 5 Deno passed)
   and workflow syntax; inspect the diff for guest flag leakage and default changes.
-- [ ] Commit only intended source files, preserving existing local generated changes.
+- [x] Commit only intended source files, preserving existing local generated changes.
 
 ## Task 2: Hosted and physical acceptance
 
-- [ ] Dispatch one full `mobile-baseline`, `core_opt=none`, `initial_vfs_heap=true` run.
-- [ ] Start the artifact retrieval controller and verify cache generation, observed initial physical capacity, no repeated host reservation, desktop cold/reload/editor checks, and process RSS.
-- [ ] Download/hash-verify the same preview and test Pixel. Preserve failures; do not claim mobile success before ready/completion/diagnostic acceptance.
-- [ ] Decide whether to retain, revise or reject the experiment from actual behavior and memory evidence.
+- [x] Dispatch one full `mobile-baseline`, `core_opt=none`, `initial_vfs_heap=true` run.
+- [x] Start the artifact retrieval controller and verify cache generation, observed initial physical capacity, no repeated host reservation, desktop cold/reload/editor checks, and process RSS.
+- [x] Download/hash-verify the same preview and test Pixel. Preserve failures; do not claim mobile success before ready/completion/diagnostic acceptance.
+- [x] Decide whether to retain, revise or reject the experiment from actual behavior and memory evidence.
+
+## Outcome
+
+Run `39863026104` passed with 513.125 MiB host capacity both before and after VFS
+main; all desktop acceptance checks passed. The same preview on Pixel confirmed
+the mechanism but still ended in LOW_MEMORY: normal at 57.293 s (about 2.6 GB RSS),
+constrained at 351.329 s (about 2.7 GB RSS). The constrained trial reached cache
+merge confirmation, but neither reached ready or editor acceptance.
+
+Keep the option disabled by default and retain the result as an experiment,
+not a completed mobile fix. Detailed identities and timings are in
+`docs/mobile-startup-measurement-results.md`. The remaining work includes the
+compiler/workspace subprocesses and per-access runtime overhead; simply reducing
+or moving host reservation has not resolved the original problem.
+
+## Task 3: Check the combined candidate
+
+The allocation-policy trial used an unoptimized core to isolate the mechanism.
+Before rejecting the combined candidate, run one coupled build with both
+`initial_vfs_heap=true` and `core_opt=O1`. Use the same cache-generation and
+desktop/device acceptance checks; this is not another identical retry of the
+failed unoptimized trial. Keep the option off by default.
+
+- [ ] Dispatch the combined build and start automatic artifact retrieval.
+- [ ] Verify O1 applied, initial capacity assertions, cache adoption and desktop
+  acceptance, then test the same preview on Pixel.
+- [ ] Preserve failures and decide whether further reservation-only experiments
+  are justified. If mobile acceptance still fails, investigate the remaining
+  compiler/workspace loading architecture rather than declaring this a fix.

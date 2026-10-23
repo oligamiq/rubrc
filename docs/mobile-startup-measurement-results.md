@@ -334,3 +334,67 @@ reservation, measure its logical high-water and physical capacity explicitly:
 own-memory logical growth cannot expand physical capacity automatically, and
 filesystem storage shares the host heap with stacks. A test-only capacity observer
 is the next diagnostic change; no reservation reduction has been applied yet.
+
+## Initial VFS heap experiment — 2026-10-23
+
+Run [39863026104](https://github.com/oligamiq/rubrc/actions/runs/39863026104), source
+`9a02553089739737ad23830764b4d9e151fe3416`, enabled the opt-in VFS-only
+`--initial-heap=536870912` linker setting. This diagnostic build used
+`core_opt=none`; it is not an optimized-vs-unoptimized speed comparison.
+
+- Preview archive SHA-256: `bbff79b303c6ba85f5d35fb9dd92f701e93ff0abf6cb2c3f22d3e22b5a17e409`.
+- Core: 469,321,952 bytes, SHA-256
+  `89e5ee3a3641c584ea0ecc3cf0c8e6efb56ca187ee7b9908aa0d284e75f9df95`.
+- Cache: 34,545,183 bytes, SHA-256
+  `d1124c7a02cab178eaeb6df8a82f8e4412269b48977075b1155c0e56b094082c`.
+
+The archive and decoded core/cache hashes were verified after automatic retrieval.
+The same preview was used for desktop and physical-device measurements.
+
+### Mechanism and desktop acceptance
+
+Capacity observations confirmed **513.125 MiB host capacity immediately after
+instantiation, still 513.125 MiB after VFS main**. The previous 512 MiB of repeated
+startup growth no longer occurred. Logical size was also predeclared at
+513.125 MiB; that value is addressable size, not actual allocated/live heap or RSS.
+
+All desktop cold/reload, cache-adoption, completion and diagnostic checks passed.
+Process-memory observation reported no instrumentation errors.
+
+| Profile / visit | Total to ready | Post-sysroot | Semantic warming |
+| --- | ---: | ---: | ---: |
+| Normal / cold | 143.567 s | 95.460 s | 75.152 s |
+| Normal / reload | 117.100 s | 96.477 s | 79.556 s |
+| Constrained / cold | 461.856 s | 95.184 s | 78.233 s |
+| Constrained / reload | 151.305 s | 113.587 s | 95.554 s |
+
+Peak sampled renderer RSS across each whole session was 4,842,916 KiB normally
+and 4,707,224 KiB under the network limit. These are not a paired same-runner RSS
+comparison with earlier builds. Completion/diagnostic observation took
+6.532/0.509 seconds normally and 8.485/0.744 seconds constrained.
+
+### Pixel outcome
+
+Physical Pixel 6a / Chrome 155.0.8059.79, eight reported CPUs, no override.
+Concurrent 4 MiB calibration took 139.3 ms normally and 6.904 s at 5 Mbps.
+
+| Profile | Time to crash | Last cache stage | Android exit |
+| --- | ---: | --- | --- |
+| Normal | 57.293 s | Loaded, merge prepared | `LOW_MEMORY`, RSS about 2.6 GB |
+| Constrained | 351.329 s | Loaded and merged | `LOW_MEMORY`, RSS about 2.7 GB |
+
+Capacity reports also confirmed the predeclared heap on Pixel, with host physical
+capacity remaining 513.125 MiB. Last observed combined memory was
+1,536.3125 MiB. Neither trial reached ready/reload/editor acceptance. Lower
+reported RSS values than previous kills are not proof of a controlled reduction;
+device pressure and termination timing vary.
+
+Failure data and capacity snapshots remain in
+`/tmp/opencode/pixel-initial-heap-39863026104`. Raw Android exit history remains
+local. Dedicated test storage, tabs, ports and forwarding were cleaned up.
+
+**Decision:** retain the initial-heap mechanism as opt-in experimental code, not
+a default-on mobile fix. It eliminates repeated host growth while preserving
+capacity, but did not establish mobile acceptance or remove the post-sysroot wait.
+Further investigation must address the remaining runtime/workspace-loading costs,
+rather than assuming this host-only allocation change is sufficient.
