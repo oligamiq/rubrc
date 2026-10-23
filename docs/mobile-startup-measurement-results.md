@@ -468,3 +468,41 @@ fresh rustc cfg/data-layout checks. Native behavior, custom sysroot support and
 cache/source-root compatibility need explicit handling. No such bypass has been
 implemented or claimed correct yet; splitting the whole compiler/LSP runtime is
 a larger architectural alternative.
+
+### Follow-up source and saved-trace investigation — 2026-10-24
+
+The same run's cache-generation trace confirms that this is not merely an
+unsuccessful process-spawn attempt. `host_run_cargo` reaches `run_cargo`, reserves
+2,048 additional pages (128 MiB) for `cargo_opt`, and executes three nested rustc
+invocations before returning. The trace reports Cargo status 0, 45 stdout bytes
+and 147 stderr bytes. These are cache-generation observations, not a browser
+call-count measurement or an estimate of RSS savings.
+
+The exact metadata failure is still unresolved: `FetchMetadata::exec` adds a
+`Failed to run` context, while `Sysroot::load_workspace` prints only `{e}`. The
+saved error therefore omits its cause chain. Status 0 must not be described as a
+nonzero Cargo exit; malformed/missing metadata remains a possibility, not an
+established diagnosis. The `--no-deps` prefetch in `FetchMetadata::new` also uses
+`MetadataCommand::exec`, whereas the full WASI request uses `invoke_cargo`.
+
+Relevant code at analyzer revision
+`07e8d30e340e504655ebace245a8df17f7f91fbf`:
+
+- `crates/project-model/src/cargo_workspace.rs`: `FetchMetadata::new` and `exec`.
+- `crates/project-model/src/sysroot.rs`: `load_workspace` attempts Cargo, then
+  builds the stitched crates and ordered dependency lists on failure.
+- `crates/project-model/src/workspace.rs`: `load_inline` queries rustc target,
+  version, cfg and data layout independently of the sysroot Cargo attempt.
+  `sysroot_to_crate_graph` has distinct Json and Stitched branches, so supplying
+  a nested JSON sysroot is not automatically graph-equivalent.
+- `crates/rust-analyzer/src/semantic_cache.rs`: cache generation uses the same
+  project-loading path, so an experimental mode must agree between cache
+  generation and the running server.
+
+The scoped experiment would reuse the existing Stitched construction directly,
+retain fresh rustc queries, and verify graph/input/source-root equivalence before
+device acceptance. It could avoid Cargo's first-use reservation if no other
+startup path invokes Cargo; it cannot be assumed to remove Cargo's code/static
+memory from the coupled module. The current desktop results attribute about
+133 seconds to semantic warming after project activation, so eliminating the
+metadata attempt alone is not evidence that the dominant wait will disappear.
