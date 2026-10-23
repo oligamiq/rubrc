@@ -81,9 +81,17 @@ Before rejecting the combined candidate, run one coupled build with both
 desktop/device acceptance checks; this is not another identical retry of the
 failed unoptimized trial. Keep the option off by default.
 
-- [ ] Dispatch the combined build and start automatic artifact retrieval.
-- [ ] Verify O1 applied, initial capacity assertions, cache adoption and desktop
+- [x] Dispatch the combined build and start automatic artifact retrieval.
+- [x] Verify O1 applied, initial capacity assertions, cache adoption and desktop
   acceptance, then test the same preview on Pixel.
-- [ ] Preserve failures and decide whether further reservation-only experiments
+- [x] Preserve failures and decide whether further reservation-only experiments
   are justified. If mobile acceptance still fails, investigate the remaining
   compiler/workspace loading architecture rather than declaring this a fix.
+
+Run `39922942192` passed desktop checks and confirmed O1 plus the predeclared
+heap. Pixel still failed in both profiles with LOW_MEMORY at about 2.9 GB RSS
+(57.728 s normal; 342.087 s constrained). The combined candidate therefore does
+not justify default-on rollout or a mobile-fix claim. Stop further reservation-only
+tuning and use the workspace/sysroot-loading architecture as the next design
+checkpoint; full results and the proposed contained Cargo-metadata bypass scope
+are recorded in `docs/mobile-startup-measurement-results.md`.

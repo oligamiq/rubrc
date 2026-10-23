@@ -398,3 +398,73 @@ a default-on mobile fix. It eliminates repeated host growth while preserving
 capacity, but did not establish mobile acceptance or remove the post-sysroot wait.
 Further investigation must address the remaining runtime/workspace-loading costs,
 rather than assuming this host-only allocation change is sufficient.
+
+## Combined O1 and initial-heap acceptance — 2026-10-23
+
+Run [39922942192](https://github.com/oligamiq/rubrc/actions/runs/39922942192)
+passed the coupled build and desktop checks on source
+`1a26d22604ca850970af893657c647e9c286314a`, using actual `O1` optimization and the
+512 MiB initial-heap option. The standard runner exposed four CPUs with model
+Intel Xeon Platinum 8573C; this differs from the EPYC runner recorded earlier.
+
+- Archive SHA-256: `447afe5aaca6fe4ceffe633d0bd7339040b75561843579153ef8df62c66098ba`.
+- Core: 442,865,444 bytes, SHA-256
+  `c45fced3ae036c8a933a6a6d3c35d9313df6021dbf7ef37f5fff5e461887faa8`.
+- Cache: 34,545,179 bytes, SHA-256
+  `275deedd27b588dbe3ddfa4c6b04fdc076f7e98e6ddd00e87d884160592fe56f`.
+
+Automatic preview retrieval succeeded, but transient HTTP 502/503 errors prevented
+the initial diagnostic-log download. The logs were retrieved successfully on a
+later attempt. Archive and decoded core/cache checksums matched; the same preview
+was used on Pixel.
+
+### Desktop
+
+All four startup visits reached ready with cache adoption and no missing assets
+or worker setup errors. Initial and post-main host capacity remained 513.125 MiB;
+there was no duplicate startup reservation. Editor checks passed in both profiles.
+
+| Profile / visit | Total to ready | Post-sysroot | Semantic warming |
+| --- | ---: | ---: | ---: |
+| Normal / cold | 182.261 s | 155.860 s | 133.170 s |
+| Normal / reload | 174.461 s | 157.010 s | 133.961 s |
+| Constrained / cold | 528.056 s | 157.179 s | 133.586 s |
+| Constrained / reload | 192.480 s | 156.735 s | 133.276 s |
+
+Completion/diagnostic observation took 10.945/1.558 seconds normally and
+11.932/1.468 seconds constrained. Peak sampled renderer RSS across each entire
+session was 4,945,620 / 4,560,012 KiB. These are not controlled paired performance
+comparisons against the other runner models or earlier application builds.
+
+### Pixel
+
+Pixel 6a / Chrome 155.0.8059.79, eight reported CPUs, no override. Concurrent
+4 MiB calibration took 136.5 ms normally and 6.897 s with the 5 Mbps profile.
+
+| Profile | Time to crash | Cache stage reached | Android result |
+| --- | ---: | --- | --- |
+| Normal | 57.728 s | Loaded, merge prepared | foreground `LOW_MEMORY`, RSS about 2.9 GB |
+| Constrained | 342.087 s | Loaded | foreground `LOW_MEMORY`, RSS about 2.9 GB |
+
+Both failures retained valid capacity snapshots: host capacity 513.125 MiB and
+combined memory 1,536.3125 MiB. Neither reached ready, reload or editor acceptance.
+The snapshots' guest boundaries imply reserved Rustc and Cargo regions of
+280.9375 and 130.875 MiB respectively; those are capacities, not measured live
+heap or RSS. Raw test data is under `/tmp/opencode/pixel-combined-heap-39922942192`.
+Dedicated origins, tabs, ports and forwarding were cleaned up.
+
+### Decision and next design checkpoint
+
+The combined candidate did not resolve mobile startup or the post-sysroot delay.
+Keep initial-heap provisioning opt-in and stop reservation-only tuning as the
+next step. The normal-cold screenshot also shows sysroot `cargo metadata` failures
+followed by successful analysis. Source inspection of `ProjectWorkspace::load_inline`
+and `Sysroot::load_workspace` confirms rustc metadata queries and a Cargo-then-
+stitched-fallback sysroot path during initialization.
+
+The next contained design candidate is to avoid the unsuccessful **sysroot-only**
+Cargo metadata attempt while preserving the exact existing stitched graph and
+fresh rustc cfg/data-layout checks. Native behavior, custom sysroot support and
+cache/source-root compatibility need explicit handling. No such bypass has been
+implemented or claimed correct yet; splitting the whole compiler/LSP runtime is
+a larger architectural alternative.
