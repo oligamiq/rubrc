@@ -169,3 +169,12 @@ CI preview on desktop and Pixel. Then investigate WVL's per-access locking if
 semantic warming remains dominant. A separate LSP runtime is a larger alternative
 that may address both footprint and relocation overhead, but is not necessary to
 fix the demonstrated reservation bug.
+
+### Desktop-only follow-up — 2026-10-25
+
+Mobile work is now on hold at the user's request. The initial-heap and combined
+O1 trials are recorded in `mobile-startup-measurement-results.md`. Fresh hosted
+profiling of the optimized combined preview confirms that read acquire/release
+helpers remain prominent. See `desktop-startup-bottleneck.md` for the verified
+core-specific function mapping, sampling limits and proposed next optimization
+scope. That desktop investigation supersedes the mobile-first ordering above.
