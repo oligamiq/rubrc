@@ -2,8 +2,10 @@
 
 Date: 2026-10-25
 
-Status: optimization scope approved; concrete protocol/specification awaiting
-review. No lock implementation has changed.
+Status: specification approved by the user. The opt-in protocol and focused tests
+are implemented on the experimental branch. Existing non-threaded reset failures
+also reproduce on unchanged 0.10.0; the full gate remains failed pending a scope
+decision. See the implementation plan's execution record.
 
 ## Goal and evidence
 
@@ -70,7 +72,9 @@ Compile both variants against the same pinned experimental WVL library revision,
 using a CI-only dependency override. Keep the normal registry dependency intact
 outside the experimental checkout.
 
-Forward the opt-in feature through the VFS crate. Both experimental builds must
+Forward the opt-in feature through the VFS crate in the disposable CI checkout.
+Cargo validates the dependency-feature reference even when disabled, so this
+forwarder cannot be added to the normal registry-backed manifest. Both experimental builds must
 record `wvlRevision` (the exact 40-character commit) and `memoryLockMode`
 (`baseline` or `waiter-aware`), alongside the existing analyzer revision, core
 optimization and initial-heap metadata. Check Cargo feature resolution for the

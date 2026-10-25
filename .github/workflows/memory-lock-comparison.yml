@@ -1,0 +1,160 @@
+name: Paired desktop memory lock experiment
+on:
+  workflow_call:
+    inputs:
+      gate_run:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+env:
+  RA_TOOLCHAIN: nightly-2026-09-13
+  RUSTUP_TOOLCHAIN: nightly-2026-09-13
+  CARGO_BUILD_JOBS: "2"
+  CARGO_INCREMENTAL: "0"
+  BINARYEN_CORES: "1"
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+  VFS_CORE_OPT_LEVEL: O1
+  ACTUAL_VFS_CORE_OPT_LEVEL: none
+  CORE_OPT_FAILED: "0"
+  RUBRC_VFS_INITIAL_HEAP_BYTES: "536870912"
+defaults:
+  run:
+    shell: bash
+    working-directory: rubrc
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      wvl_revision: ${{ steps.gate.outputs.revision }}
+    steps:
+      - name: Checkout experiment harness
+        working-directory: ${{ github.workspace }}
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          git init rubrc
+          git -C rubrc remote add origin https://github.com/oligamiq/rubrc.git
+          git -C rubrc fetch --no-tags --depth=1 origin "$SOURCE_SHA"
+          git -C rubrc checkout --detach FETCH_HEAD
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.1
+      - name: Require matching successful WVL gate
+        id: gate
+        env:
+          GATE_RUN: ${{ inputs.gate_run }}
+        run: |
+          [[ "$GATE_RUN" =~ ^[1-9][0-9]{7,14}$ ]]
+          curl --fail --silent --show-error --location --retry 2 \
+            "https://api.github.com/repos/oligamiq/wasi_virt_layer/actions/runs/$GATE_RUN" > "$RUNNER_TEMP/wvl-gate.json"
+          node scripts/ci/wvl_experiment.mjs gate .github/stdlib-cache-wvl-revision "$RUNNER_TEMP/wvl-gate.json"
+          node --test scripts/ci/paired_startup_test.mjs scripts/ci/wvl_experiment_test.mjs
+          printf 'revision=%s\n' "$(<.github/stdlib-cache-wvl-revision)" >> "$GITHUB_OUTPUT"
+  build:
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        mode: [baseline, waiter-aware]
+    env:
+      RUBRC_MEMORY_LOCK_MODE: ${{ matrix.mode }}
+    steps:
+      - name: Checkout unchanged application source
+        working-directory: ${{ github.workspace }}
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          git init rubrc
+          git -C rubrc remote add origin https://github.com/oligamiq/rubrc.git
+          git -C rubrc fetch --no-tags --depth=1 origin "$SOURCE_SHA"
+          git -C rubrc checkout --detach FETCH_HEAD
+      - uses: ./rubrc/.github/actions/stdlib-cache-setup
+      - uses: actions/checkout@v4
+        with:
+          repository: oligamiq/wasi_virt_layer
+          ref: ${{ needs.gate.outputs.wvl_revision }}
+          path: wasi_virt_layer
+          persist-credentials: false
+      - name: Configure isolated dependency and verify resolved features
+        run: node scripts/ci/wvl_experiment.mjs configure ../wasi_virt_layer "$RUBRC_MEMORY_LOCK_MODE"
+      - name: Install pinned WASM tools
+        run: bash scripts/ci/stdlib_cache.sh tools 2>&1 | tee ci-logs/tools.log
+      - name: Prepare optimizer budget
+        run: bash scripts/ci/optimizer_memory.sh prepare 2>&1 | tee ci-logs/optimization-environment.log
+      - name: Build coherent core, bindings, cache and page
+        run: bash scripts/ci/stdlib_cache.sh build 2>&1 | tee ci-logs/build.log
+      - name: Verify optimization and package variant
+        run: |
+          [[ "$CORE_OPT_FAILED" == 0 && "$ACTUAL_VFS_CORE_OPT_LEVEL" == O1 ]]
+          node scripts/ci/wvl_experiment.mjs package "$RUBRC_MEMORY_LOCK_MODE"
+          mkdir -p "$RUNNER_TEMP/lock-preview"
+          tar -czf "$RUNNER_TEMP/lock-preview/preview.tar.gz" -C page/dist .
+          test "$(stat -c %s "$RUNNER_TEMP/lock-preview/preview.tar.gz")" -lt 268435456
+          sha256sum "$RUNNER_TEMP/lock-preview/preview.tar.gz" > "$RUNNER_TEMP/lock-preview/preview-sha256.txt"
+          cp ci-logs/artifact-sha256.txt "$RUNNER_TEMP/lock-preview/artifact-sha256.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lock-preview-${{ matrix.mode }}
+          path: ${{ runner.temp }}/lock-preview
+          compression-level: 0
+          retention-days: 3
+      - name: Release optimizer swap
+        if: always()
+        run: bash scripts/ci/optimizer_memory.sh cleanup
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lock-build-${{ matrix.mode }}
+          path: rubrc/ci-logs
+          retention-days: 3
+  paired-replay:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - name: Checkout measurement harness
+        working-directory: ${{ github.workspace }}
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          git init rubrc
+          git -C rubrc remote add origin https://github.com/oligamiq/rubrc.git
+          git -C rubrc fetch --no-tags --depth=1 origin "$SOURCE_SHA"
+          git -C rubrc checkout --detach FETCH_HEAD
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.1
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: lock-preview-baseline
+          path: preview-baseline
+      - uses: actions/download-artifact@v4
+        with:
+          name: lock-preview-waiter-aware
+          path: preview-waiter-aware
+      - name: Verify archives and prepare fresh previews
+        run: |
+          for mode in baseline waiter-aware; do
+            node scripts/ci/paired_startup.mjs verify-archive "../preview-$mode/preview.tar.gz" "../preview-$mode/preview-sha256.txt"
+            mkdir -p "../extracted-$mode"
+            tar -xzf "../preview-$mode/preview.tar.gz" -C "../extracted-$mode"
+          done
+          bun install --frozen-lockfile
+          bunx puppeteer browsers install chrome
+      - name: Sequential A-B-B-A desktop acceptance
+        run: node scripts/ci/paired_startup.mjs run ../extracted-baseline ../extracted-waiter-aware ../preview-baseline/artifact-sha256.txt ../preview-waiter-aware/artifact-sha256.txt ci-logs/paired
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lock-paired-desktop
+          path: rubrc/ci-logs
+          retention-days: 3

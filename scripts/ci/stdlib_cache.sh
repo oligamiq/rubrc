@@ -25,7 +25,8 @@ case "${1:-}" in
     deno test --no-lock lib/src/compressed_progress_test.ts lib/src/fetch_compressed_stream_test.ts
     node --test scripts/copy_vfs_bindings_test.mjs scripts/finalize_vfs_asset_test.mjs \
       scripts/stdlib_cache_browser_support_test.mjs scripts/startup_measurement_support_test.mjs \
-      scripts/startup_runtime_profile_support_test.mjs scripts/ci/restore_optimizer_input_test.mjs
+      scripts/startup_runtime_profile_support_test.mjs scripts/ci/restore_optimizer_input_test.mjs \
+      scripts/ci/paired_startup_test.mjs scripts/ci/wvl_experiment_test.mjs
     ;;
   tools|optimizer-tools)
     tools="$RUNNER_TEMP/stdlib-cache-tools"
@@ -84,7 +85,13 @@ case "${1:-}" in
         df -h .
       } > "$LOGS/build-identity.txt"
       RUSTFLAGS='-Copt-level=2 -Ccodegen-units=1' bun run lsp:build
-      wasi_virt_layer build -p vfs \
+      lock_features=()
+      if [[ -n "${RUBRC_MEMORY_LOCK_MODE:-}" ]]; then
+        # WVL assigns features by position; these belong before all guest paths.
+        node scripts/ci/wvl_experiment.mjs features "$RUBRC_MEMORY_LOCK_MODE" > "$LOGS/vfs-lock-features.txt"
+        mapfile -t lock_features < "$LOGS/vfs-lock-features.txt"
+      fi
+      wasi_virt_layer build -p vfs "${lock_features[@]}" \
         crates/vfs/llvm_opt.wasm crates/vfs/rustc_opt.wasm crates/vfs/lsp_opt.wasm \
         crates/vfs/cargo_opt.wasm vfs-shell \
         --features debug-log --dev --own-memory --vfs-unwind --validate

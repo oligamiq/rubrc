@@ -8,7 +8,7 @@ on:
       mode:
         description: Validation, preview build, or replay measurements/profiling/optimization
         type: choice
-        options: [validation, mobile-baseline, mobile-replay, startup-profile, optimizer-replay]
+        options: [validation, mobile-baseline, mobile-replay, startup-profile, optimizer-replay, memory-lock-comparison]
         default: validation
       preview_run:
         description: Existing mobile-baseline run ID for replay/profiling/optimization (first attempt)
@@ -22,6 +22,9 @@ on:
         description: Experimental VFS-only 512 MiB linker-provisioned heap (full builds only)
         type: boolean
         default: false
+      memory_lock_gate_run:
+        description: Successful WVL memory-lock gate run at the pinned experiment revision
+        type: string
 
 permissions:
   contents: read
@@ -49,8 +52,13 @@ defaults:
     working-directory: rubrc
 
 jobs:
+  memory-lock-comparison:
+    if: github.repository == 'oligamiq/rubrc' && inputs.mode == 'memory-lock-comparison'
+    uses: ./.github/workflows/memory-lock-comparison.yml
+    with:
+      gate_run: ${{ inputs.memory_lock_gate_run }}
   checks:
-    if: github.repository == 'oligamiq/rubrc' && inputs.mode != 'mobile-replay' && inputs.mode != 'startup-profile' && inputs.mode != 'optimizer-replay'
+    if: github.repository == 'oligamiq/rubrc' && inputs.mode != 'mobile-replay' && inputs.mode != 'startup-profile' && inputs.mode != 'optimizer-replay' && inputs.mode != 'memory-lock-comparison'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
