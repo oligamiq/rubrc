@@ -133,35 +133,36 @@ Experimental builds record `wvlRevision` and `memoryLockMode` (`baseline` or
 
 - [x] Test that paired replay rejects differing source tuples, optimization,
   heap settings, unexpected feature states, or failed checksum validation.
-- [ ] Add a CI-only dependency override to the exact successful WVL commit.
+- [x] Add a CI-only dependency override to the exact successful WVL commit.
   Verify Cargo resolves that revision and the intended feature state for VFS.
-- [ ] Build feature-off and feature-on core/bindings/cache/page sets sequentially,
+- [x] Build feature-off and feature-on core/bindings/cache/page sets sequentially,
   with the same existing O1 optimizer budget and initial heap. Generate each cache
   from its own distributed WASM. Keep normal builds unchanged.
-- [ ] The paired replay driver consumes two verified preview directories and
+- [x] The paired replay driver consumes two verified preview directories and
   invokes the existing measurement driver with fresh browsers, normal networking
   and separate output directories in baseline/candidate/candidate/baseline order.
   Set `RUBRC_MEASURE_ROOT` and `RUBRC_MEASURE_OUTPUT` per invocation; preserve all
   failure records and return nonzero if any session fails.
-- [ ] Capture runner CPU model, browser versions and worker counts. Do not enable
+- [x] Capture runner CPU model, browser versions and worker counts. Do not enable
   CPU sampling during the primary A–B–B–A timings. Each session includes cold,
   reload, completion and diagnostic checks with unchanged readiness criteria.
-- [ ] Require all four sessions to pass and both candidate session medians to be
+- [x] Require all four sessions to pass and both candidate session medians to be
   below both baseline session medians for semantic warming. Overlap is
   inconclusive. Report raw observations, median/range and peak RSS regardless of
   outcome; do not change the default feature based only on a successful build.
-- [ ] If timing warrants attribution, reuse the candidate preview in the existing
-  hosted `startup-profile` mode. Save artifacts immediately.
+- Optional follow-up, deferred: a separate candidate CPU attribution profile.
+  The paired acceptance criterion is met; no per-function on-CPU reduction is
+  claimed. Both previews and all comparison evidence are saved locally.
 
 ## Task 4: Final review and result record
 
 **Files:** `docs/desktop-startup-bottleneck.md`, this plan and the approved spec.
 
-- [ ] Review the final scoped diffs in both repositories, native results, actual
+- [x] Review the final scoped diffs in both repositories, native results, actual
   WASM coverage and paired measurements. Verify no skipped test is called passed.
-- [ ] Record exact commits, hashes, toolchain, feature states, failures and the
+- [x] Record exact commits, hashes, toolchain, feature states, failures and the
   measured decision. Keep the feature default off pending a separate rollout.
-- [ ] Commit/push intended files only, with `[skip ci]` where appropriate and AI
+- [x] Commit/push intended files only, with `[skip ci]` where appropriate and AI
   disclosure. Leave public deployment and existing local generated files alone.
 
 ## Execution checkpoint — implementation and gate blocker
@@ -218,3 +219,23 @@ both-mode physical relocation and generated-code checks, the threaded own-memory
 pool test and the atomic-wait-reset test remain blocking. The diagnostic outcomes
 are written explicitly to the job summary and artifact logs. A fresh successful
 gate at this revision is required before application comparison dispatch.
+
+## Accepted experiment — 2026-10-26
+
+Revised gate `40281888849` passed at WVL
+`5d47aaf436163ca6886fcc5b4ff3af1a52cb7298`. Its mandatory checks passed and the
+two excluded non-threaded failures remained explicitly recorded for both trees.
+
+Application run `40282800079`, source
+`35989beea2cee0ef724da1f1a8a396a256fb0c54`, passed both O1 coupled builds and the
+same-runner A–B–B–A experiment. Four visits per mode yielded post-sysroot means
+95.028 → 48.594 seconds (48.9% reduction) and semantic-warming means
+74.772 → 36.801 seconds (50.8% reduction). Candidate session medians were both
+below both baseline session medians. All eight ready/cache/capacity outcomes and
+four completion/diagnostic checks passed. Candidate RSS peaks were higher, so
+this is a latency result, not a memory-saving result.
+
+The raw records were independently rechecked and both archives verified after
+download. Full timings, identities, hashes and limitations are recorded in
+`docs/desktop-startup-bottleneck.md`. This closes implementation and experimental
+acceptance; default enablement/release remains a separate decision.

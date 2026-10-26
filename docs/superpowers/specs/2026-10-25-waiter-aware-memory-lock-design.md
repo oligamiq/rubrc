@@ -5,8 +5,9 @@ Date: 2026-10-25
 Status: specification approved by the user. The opt-in protocol and focused tests
 are implemented on the experimental branch. The user approved treating the two
 non-threaded reset failures, reproduced on unchanged 0.10.0, as non-blocking
-diagnostics. Native protocol and threaded WASM checks remain required. See the
-implementation plan's execution record.
+diagnostics. Native protocol and threaded WASM checks remain required. The revised
+gate and same-runner A–B–B–A experiment passed; the feature remains default off.
+See `docs/desktop-startup-bottleneck.md` and the implementation plan's execution record.
 
 ## Goal and evidence
 
