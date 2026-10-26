@@ -210,8 +210,11 @@ default offline metadata resolution passed that feature-selection check but coul
 not finish because `aho-corasick v1.1.5` was absent from the local download cache.
 No heavy build was run on the local host.
 
-**Decision required:** the approved spec requires the existing reset tests to
-pass. Either repair the pre-existing non-threaded runtime problem as a separate
-task, or explicitly narrow this experiment's gate to the affected threaded
-configuration while retaining the known-failure control as diagnostic evidence.
-Do not silently skip these failures or declare desktop acceleration proven.
+**Approved scope amendment:** the user approved narrowing the gate to the
+affected threaded configuration, retaining both known non-threaded failures and
+the untouched baseline control as non-blocking diagnostics. WVL commit
+`5d47aaf436163ca6886fcc5b4ff3af1a52cb7298` applies this change. Native tests,
+both-mode physical relocation and generated-code checks, the threaded own-memory
+pool test and the atomic-wait-reset test remain blocking. The diagnostic outcomes
+are written explicitly to the job summary and artifact logs. A fresh successful
+gate at this revision is required before application comparison dispatch.

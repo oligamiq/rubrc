@@ -3,9 +3,10 @@
 Date: 2026-10-25
 
 Status: specification approved by the user. The opt-in protocol and focused tests
-are implemented on the experimental branch. Existing non-threaded reset failures
-also reproduce on unchanged 0.10.0; the full gate remains failed pending a scope
-decision. See the implementation plan's execution record.
+are implemented on the experimental branch. The user approved treating the two
+non-threaded reset failures, reproduced on unchanged 0.10.0, as non-blocking
+diagnostics. Native protocol and threaded WASM checks remain required. See the
+implementation plan's execution record.
 
 ## Goal and evidence
 
@@ -236,8 +237,11 @@ The CI preflight must require its WASI targets; existing test helpers sometimes
 skip missing targets, and that must not count as acceptance.
 
 Inspect the final core to verify unchanged lock exports, a last-reader notify
-guarded by the marker, and no unexpected extra hot-path calls. Existing pool,
-own-memory reset and atomic-wait-reset tests must also pass.
+guarded by the marker, and no unexpected extra hot-path calls. The existing
+threaded own-memory pool and atomic-wait-reset tests must also pass. The two
+non-threaded own-memory reset cases remain visible diagnostic runs, alongside
+the untouched 0.10.0 control, under the explicit user-approved scope exception.
+They are not reported as passing and do not waive any threaded check.
 
 ## Coupled build and paired desktop acceptance
 
