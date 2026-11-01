@@ -36,7 +36,7 @@ export function validatePair(baseline, candidate) {
       assert.deepEqual(build.optimizationProfile, STRONG_PROFILE, 'strong optimization profile mismatch');
       assert.match(build.optimizationEvidenceSha256 ?? '', /^[a-f0-9]{64}$/, 'missing optimization evidence');
     }
-    const level = strong ? 'O4' : 'O1';
+    const level = strong ? STRONG_PROFILE.finalCore : 'O1';
     assert.equal(build.coreOptimization, level, `actual ${level} required`);
     assert.equal(build.coreOptimizationRequested, level, `requested ${level} required`);
     assert.equal(build.vfsInitialHeapBytes, 536870912, 'identical 512 MiB heap required');

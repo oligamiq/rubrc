@@ -13,11 +13,11 @@ const build = mode => ({sourceSha: 'a'.repeat(40), analyzerSha: 'b'.repeat(40),
   coreOptimizationRequested: 'O1', vfsInitialHeapBytes: 536870912, vfsMemoryTelemetry: 1});
 
 test('strong comparison rejects lower, missing or mixed optimization profiles', () => {
-  const strong = mode => ({...build(mode), coreOptimization: 'O4', coreOptimizationRequested: 'O4',
+  const strong = mode => ({...build(mode), coreOptimization: 'O3', coreOptimizationRequested: 'O3',
     optimizationProfile: STRONG_PROFILE, optimizationEvidenceSha256: 'e'.repeat(64)});
   assert.doesNotThrow(() => validatePair(strong('baseline'), strong('waiter-aware')));
   assert.throws(() => validatePair(strong('baseline'), build('waiter-aware')), /profile/);
-  assert.throws(() => validatePair(strong('baseline'), {...strong('waiter-aware'), coreOptimization: 'O1'}), /O4/);
+  assert.throws(() => validatePair(strong('baseline'), {...strong('waiter-aware'), coreOptimization: 'O1'}), /O3/);
   assert.throws(() => validatePair(strong('baseline'), {...strong('waiter-aware'), optimizationEvidenceSha256: undefined}), /evidence/);
   assert.throws(() => validatePair(strong('baseline'), {...strong('waiter-aware'), optimizationProfile:
     {...STRONG_PROFILE, rust: {...STRONG_PROFILE.rust, lto: 'thin'}}}), /profile/);

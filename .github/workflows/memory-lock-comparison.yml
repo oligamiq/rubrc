@@ -15,16 +15,16 @@ env:
   CARGO_INCREMENTAL: "0"
   BINARYEN_CORES: "1"
   PUPPETEER_SKIP_DOWNLOAD: "true"
-  VFS_CORE_OPT_LEVEL: O4
+  VFS_CORE_OPT_LEVEL: O3
   ACTUAL_VFS_CORE_OPT_LEVEL: none
   CORE_OPT_FAILED: "0"
   RUBRC_VFS_INITIAL_HEAP_BYTES: "536870912"
-  RUBRC_OPTIMIZATION_PROFILE: strong-speed-v1
+  RUBRC_OPTIMIZATION_PROFILE: strong-compatible-v1
   CARGO_PROFILE_RELEASE_OPT_LEVEL: "3"
   CARGO_PROFILE_RELEASE_LTO: fat
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
-  WVL_OPTIMIZATION_PROFILE: speed-o4
-  RA_WASM_OPT_LEVEL: O4
+  WVL_OPTIMIZATION_PROFILE: max-compatible
+  RA_WASM_OPT_LEVEL: O3
 defaults:
   run:
     shell: bash
@@ -119,7 +119,7 @@ jobs:
           bash scripts/ci/stdlib_cache.sh build 2>&1 | tee ci-logs/build.log
       - name: Verify optimization and package variant
         run: |
-          [[ "$CORE_OPT_FAILED" == 0 && "$ACTUAL_VFS_CORE_OPT_LEVEL" == O4 ]]
+          [[ "$CORE_OPT_FAILED" == 0 && "$ACTUAL_VFS_CORE_OPT_LEVEL" == O3 ]]
           node scripts/ci/strong_optimization.mjs verify
           node scripts/ci/wvl_experiment.mjs package "$RUBRC_MEMORY_LOCK_MODE"
           mkdir -p "$RUNNER_TEMP/lock-preview"

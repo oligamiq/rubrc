@@ -81,7 +81,7 @@ async function packageMetadata(mode) {
   };
   for (const key of ['sourceSha', 'analyzerSha']) assert.match(metadata[key] ?? '', /^[a-f0-9]{40}$/);
   const strong = process.env.RUBRC_OPTIMIZATION_PROFILE === STRONG_PROFILE.name;
-  const level = strong ? 'O4' : 'O1';
+  const level = strong ? STRONG_PROFILE.finalCore : 'O1';
   assert.equal(metadata.coreOptimizationRequested, level);
   assert.equal(metadata.coreOptimization, level, `refusing a comparison preview without actual ${level}`);
   assert.equal(metadata.vfsInitialHeapBytes, 536870912);

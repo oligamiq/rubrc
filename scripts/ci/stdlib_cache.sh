@@ -86,10 +86,10 @@ case "${1:-}" in
       } > "$LOGS/build-identity.txt"
       assembly_flags=(--dev)
       shell_features=(--features debug-log)
-      if [[ "${RUBRC_OPTIMIZATION_PROFILE:-}" == strong-speed-v1 ]]; then
+      if [[ "${RUBRC_OPTIMIZATION_PROFILE:-}" == strong-compatible-v1 ]]; then
         export RUSTFLAGS='-Copt-level=3 -Ccodegen-units=1'
-        export RA_WASM_OPT_LEVEL=O4
-        export WVL_OPTIMIZATION_PROFILE=speed-o4
+        export RA_WASM_OPT_LEVEL=O3
+        export WVL_OPTIMIZATION_PROFILE=max-compatible
         RUBRC_OPT_STAGE=analyzer bun run lsp:build
         assembly_flags=()
         shell_features=()
@@ -116,14 +116,14 @@ case "${1:-}" in
     fi
     case "${VFS_CORE_OPT_LEVEL:-none}" in
       none) ;;
-      O1|O4)
+      O1|O3|O4)
         optimization_failed=false
         # One bounded trial on the final core: its export ABI remains unchanged,
         # and cache generation below runs this exact optimized module.
         stat -c 'before: %s bytes' dist/vfs.core.wasm > "$LOGS/core-optimization.txt"
         optimizer_unit="rubrc-wasm-opt-${GITHUB_RUN_ID:-$$}-${GITHUB_RUN_ATTEMPT:-1}.service"
         optimizer_deadline=90min
-        if [[ "${RUBRC_OPTIMIZATION_PROFILE:-}" == strong-speed-v1 ]]; then optimizer_deadline=180min; fi
+        if [[ "${RUBRC_OPTIMIZATION_PROFILE:-}" == strong-compatible-v1 ]]; then optimizer_deadline=180min; fi
         (
           monitor_started=$SECONDS
           checkpoint_logged=false
@@ -183,8 +183,8 @@ case "${1:-}" in
         if [[ -f "$LOGS/core-optimization-time.txt" ]]; then
           cat "$LOGS/core-optimization-time.txt"
         fi
-        if [[ "${RUBRC_OPTIMIZATION_PROFILE:-}" == strong-speed-v1 && "$optimization_failed" == true ]]; then
-          printf 'Strong comparison requires successful final O4; stopping before cache generation.\n' >&2
+        if [[ "${RUBRC_OPTIMIZATION_PROFILE:-}" == strong-compatible-v1 && "$optimization_failed" == true ]]; then
+          printf 'Strong comparison requires successful final optimization; stopping before cache generation.\n' >&2
           exit 1
         fi
         ;;

@@ -24,7 +24,7 @@ on hosted CI. Mobile work and public deployment remain outside the task.
 The earlier 48.9% post-sysroot reduction remains an **O1-configuration result**.
 It is not evidence of the same gain under the strongest ordinary presets.
 
-## Concrete profile: `strong-speed-v1`
+## Initial attempted profile: `strong-speed-v1` (rejected)
 
 - Rebuilt analyzer, VFS and shell: Cargo release opt-level **3**, LTO **fat**,
   codegen-units **1**, with the existing target/unwind semantics.
@@ -77,6 +77,48 @@ prebuilt-source compiler settings.
 - [ ] Run fresh-browser A–B–B–A on one runner with unchanged startup/editor checks.
 - [ ] Independently verify raw results, profile evidence and artifacts. Report
   the strong-profile result separately, including inconclusive/regressed results.
+
+## Measured tool limitation and compatible ceiling
+
+Run `41336108089`, source `8b89871425cfe300877a58a9af21e050ca9ad11c`, did not
+produce a measurement. Actual analyzer rustc arguments confirm O3, fat LTO and
+one CGU, and compilation succeeded in 6m49s. Binaryen 131 then aborted during
+standalone analyzer O4 after about 9.9 seconds:
+
+```text
+unexpected expr type
+UNREACHABLE executed at /src/src/passes/Flatten.cpp:231!
+```
+
+This is not an optimizer-memory failure. Flatten explicitly lacks TryTable
+support, which is needed for the analyzer's new-EH unwinding. Latest release 133
+has the exact same `src/passes/Flatten.cpp` Git blob as 131:
+`10c791f609eb0c9b6f38a4999b6aefc04f4c6e18`.
+
+The revised explicit profile is **`strong-compatible-v1`**:
+
+- Rust O3/fat LTO/one CGU stays unchanged.
+- Standalone analyzer and final combined core use O3 because they require new EH.
+- WVL inspects each input module **before execution**. Inputs with TryTable use
+  O3; inputs without it use O4. The selected level and `hasTryTable` are recorded.
+- There is no error-triggered downgrade. A failure of the selected level fails
+  the build; O1 is never substituted.
+- The audit matches actual WVL optimizer argument lists to accepted-output
+  records and rejects an unnecessary O3 selection for a module without TryTable.
+- Add a minimal imported-call/exported-tag EH fixture: forced O4 must reproduce
+  the pinned tool limitation, while the compatible O3 result must validate.
+
+WVL revision `f5825e94cea867cef8305bf7aea4e8d9c9f49d66` implements this policy.
+Gate `41361615856` passed, including the real EH fixture: forced O4 reproduced
+the failure, selected O3 validated, and the accepted-output record explicitly
+reported `hasTryTable=true`. The native policy tests and threaded relocation/
+reset checks also passed under the revised policy.
+The previously failed uniform-O4 attempt remains recorded and must not be
+described as a successful all-O4 build. Logs are saved under
+`/tmp/opencode/strong-build-baseline-41336108089/`.
+
+Sources: <https://github.com/WebAssembly/binaryen/blob/version_131/src/passes/Flatten.cpp>
+and <https://github.com/WebAssembly/binaryen/blob/version_133/src/passes/Flatten.cpp>.
 
 Configuration provenance references: Cargo profile documentation
 <https://doc.rust-lang.org/cargo/reference/profiles.html>, Binaryen's optimizer

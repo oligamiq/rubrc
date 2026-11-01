@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 
 export const STRONG_PROFILE = Object.freeze({
-  name: 'strong-speed-v1',
+  name: 'strong-compatible-v1',
   rust: Object.freeze({optLevel: 3, lto: 'fat', codegenUnits: 1}),
-  analyzerWasm: 'O4', wvlStages: 'O4', finalCore: 'O4',
+  analyzerWasm: 'O3', wvlStages: 'O4-with-O3-for-try-table', finalCore: 'O3',
+  exceptionCeiling: 'Binaryen-131-Flatten-does-not-support-TryTable',
   wvlSizeRollback: false,
   shellDebugLog: false,
-  prebuiltGuests: 'fixed-inputs-reoptimized-by-wvl-o4',
+  prebuiltGuests: 'fixed-inputs-reoptimized-at-compatible-ceiling',
   unsafeOptimizationAssumptions: false,
 });
 
@@ -56,18 +57,24 @@ export function validateStrongEvidence({invocations, wvl}) {
     }
   }
   const optimized = invocations.filter(row => row.tool === 'wasm-opt');
-  for (const {args} of optimized) {
-    assert.deepEqual(args.filter(arg => /^-O(?:[0-4sz])?$/.test(arg)), ['-O4'], 'all optimizer calls must use O4');
+  for (const {args, stage} of optimized) {
+    assert.ok(['analyzer', 'wvl', 'final-core'].includes(stage), 'unclassified optimizer stage');
+    const levels = args.filter(arg => /^-O(?:[0-4sz])?$/.test(arg));
+    if (stage !== 'wvl') assert.deepEqual(levels, ['-O3'], `${stage} must use the EH-compatible O3 ceiling`);
+    else assert.ok(levels.length === 1 && ['-O3', '-O4'].includes(levels[0]), 'WVL requires O3/O4 compatibility policy');
     assert.ok(!args.some(arg => ['--fast-math', '-ffm', '--ignore-implicit-traps', '--traps-never-happen', '--low-memory-unused', '--zero-filled-memory', '--closed-world', '--all-features', '--enable-gc'].includes(arg)), 'unsupported optimization assumption/feature');
   }
-  assert.ok(optimized.some(row => row.stage === 'analyzer'), 'missing analyzer O4 stage');
-  assert.ok(optimized.some(row => row.stage === 'final-core'), 'missing final core O4 stage');
-  assert.ok(optimized.filter(row => row.stage === 'wvl').length >= 7, 'missing WVL module/merge optimizations');
+  assert.ok(optimized.some(row => row.stage === 'analyzer'), 'missing analyzer O3 stage');
+  assert.ok(optimized.some(row => row.stage === 'final-core'), 'missing final core O3 stage');
+  const wvlCalls = optimized.filter(row => row.stage === 'wvl');
+  assert.ok(wvlCalls.length >= 7, 'missing WVL module/merge optimizations');
   assert.ok(Array.isArray(wvl) && wvl.length >= 7, 'missing WVL accepted-output records');
+  assert.deepEqual(wvlCalls.map(row => row.args), wvl.map(row => row.args), 'WVL execution/accepted-output evidence mismatch');
   for (const row of wvl) {
-    assert.equal(row.profile, 'speed-o4');
+    assert.equal(row.profile, 'max-compatible');
+    assert.equal(typeof row.hasTryTable, 'boolean');
     assert.equal(row.accepted, true, 'WVL output was not accepted');
     assert.ok(row.beforeBytes > 0 && row.afterBytes > 0);
-    assert.ok(row.args.includes('-O4'));
+    assert.deepEqual(row.args.filter(arg => /^-O(?:[0-4sz])?$/.test(arg)), [row.hasTryTable ? '-O3' : '-O4'], 'WVL compatibility ceiling mismatch');
   }
 }
