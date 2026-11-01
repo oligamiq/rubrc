@@ -11,10 +11,11 @@ import {Readable, Writable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {createBrotliDecompress} from 'node:zlib';
 import {assertVfsMemoryCoverage} from '../startup_measurement_support.mjs';
+import {STRONG_PROFILE} from './optimization_settings.mjs';
 
 const ORDER = ['baseline', 'waiter-aware', 'waiter-aware', 'baseline'];
 const IDENTITY = ['sourceSha', 'analyzerSha', 'wvlRevision', 'memoryLockMode',
-  'coreOptimization', 'coreOptimizationRequested', 'vfsInitialHeapBytes', 'vfsMemoryTelemetry'];
+  'coreOptimization', 'coreOptimizationRequested', 'vfsInitialHeapBytes', 'vfsMemoryTelemetry', 'optimizationEvidenceSha256'];
 const median = values => {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
@@ -29,9 +30,15 @@ export function validatePair(baseline, candidate) {
     assert.match(candidate[field] ?? '', /^[a-f0-9]{40}$/, `invalid ${field} revision`);
     assert.equal(baseline[field], candidate[field], `${field} mismatch`);
   }
+  const strong = baseline.optimizationProfile !== undefined || candidate.optimizationProfile !== undefined;
   for (const build of [baseline, candidate]) {
-    assert.equal(build.coreOptimization, 'O1', 'actual O1 required');
-    assert.equal(build.coreOptimizationRequested, 'O1', 'requested O1 required');
+    if (strong) {
+      assert.deepEqual(build.optimizationProfile, STRONG_PROFILE, 'strong optimization profile mismatch');
+      assert.match(build.optimizationEvidenceSha256 ?? '', /^[a-f0-9]{64}$/, 'missing optimization evidence');
+    }
+    const level = strong ? 'O4' : 'O1';
+    assert.equal(build.coreOptimization, level, `actual ${level} required`);
+    assert.equal(build.coreOptimizationRequested, level, `requested ${level} required`);
     assert.equal(build.vfsInitialHeapBytes, 536870912, 'identical 512 MiB heap required');
     assert.equal(build.vfsMemoryTelemetry, 1, 'capacity coverage required');
   }
@@ -94,7 +101,9 @@ export async function verifyPreviewArtifacts(root, checksumFile) {
   }
   await verifyParts(assets, core.parts, core.originalSize, coreSha, true);
   await verifyParts(root, cache.parts, cache.size, cacheSha, false);
-  return {coreSha, lspSha, cacheSha};
+  const guestInputs = Object.fromEntries(['llvm', 'rustc', 'cargo'].filter(name =>
+    checksums.has(`crates/vfs/${name}_opt.wasm`)).map(name => [name, checksums.get(`crates/vfs/${name}_opt.wasm`)]));
+  return {coreSha, lspSha, cacheSha, guestInputs};
 }
 
 export function summarizeSession(rows, expected) {
@@ -102,6 +111,7 @@ export function summarizeSession(rows, expected) {
   const builds = rows.filter(row => row.kind === 'build');
   assert.equal(builds.length, 1, 'one build identity required');
   for (const key of IDENTITY) assert.equal(builds[0][key], expected[key], `session identity ${key}`);
+  assert.deepEqual(builds[0].optimizationProfile, expected.optimizationProfile, 'session optimization profile identity');
   const visits = rows.filter(row => row.kind === 'startup');
   assert.deepEqual(visits.map(row => row.visit), ['cold', 'reload'], 'both startup visits required');
   for (const row of visits) {
@@ -158,12 +168,26 @@ async function runPair(baselineRoot, candidateRoot, baselineChecksums, candidate
   const builds = {};
   for (const mode of Object.keys(roots)) builds[mode] = JSON.parse(await readFile(join(roots[mode], '__rubrc_measurement_build.json'), 'utf8'));
   validatePair(builds.baseline, builds['waiter-aware']);
+  if (process.env.RUBRC_OPTIMIZATION_PROFILE === STRONG_PROFILE.name) {
+    for (const mode of Object.keys(roots)) {
+      assert.deepEqual(builds[mode].optimizationProfile, STRONG_PROFILE, 'strong replay requires strong previews');
+      const bytes = await readFile(join(roots[mode], '__rubrc_optimization_evidence.json'));
+      assert.equal(createHash('sha256').update(bytes).digest('hex'), builds[mode].optimizationEvidenceSha256, 'optimization evidence checksum mismatch');
+      const evidence = JSON.parse(bytes);
+      assert.deepEqual(evidence.profile, STRONG_PROFILE);
+      assert.ok(evidence.acceptedWvlOutputs >= 7 && evidence.optimizerCommands >= 9 && evidence.rustCommands >= 3);
+    }
+  }
   const artifacts = {
     baseline: await verifyPreviewArtifacts(roots.baseline, baselineChecksums),
     'waiter-aware': await verifyPreviewArtifacts(roots['waiter-aware'], candidateChecksums),
   };
   assert.equal(artifacts.baseline.lspSha, artifacts['waiter-aware'].lspSha, 'analyzer binary mismatch');
   assert.notEqual(artifacts.baseline.coreSha, artifacts['waiter-aware'].coreSha, 'candidate core did not change');
+  assert.deepEqual(artifacts.baseline.guestInputs, artifacts['waiter-aware'].guestInputs, 'prebuilt guest input mismatch');
+  if (builds.baseline.optimizationProfile) {
+    for (const name of ['llvm', 'rustc', 'cargo']) assert.match(artifacts.baseline.guestInputs[name] ?? '', /^[a-f0-9]{64}$/, `missing ${name} input provenance`);
+  }
   await mkdir(output, {recursive: true});
   const {stdout} = await promisify(execFile)('lscpu', [], {timeout: 5000});
   await writeFile(join(output, 'runner-cpu.txt'), stdout);

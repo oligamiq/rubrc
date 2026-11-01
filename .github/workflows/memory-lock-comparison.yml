@@ -15,10 +15,16 @@ env:
   CARGO_INCREMENTAL: "0"
   BINARYEN_CORES: "1"
   PUPPETEER_SKIP_DOWNLOAD: "true"
-  VFS_CORE_OPT_LEVEL: O1
+  VFS_CORE_OPT_LEVEL: O4
   ACTUAL_VFS_CORE_OPT_LEVEL: none
   CORE_OPT_FAILED: "0"
   RUBRC_VFS_INITIAL_HEAP_BYTES: "536870912"
+  RUBRC_OPTIMIZATION_PROFILE: strong-speed-v1
+  CARGO_PROFILE_RELEASE_OPT_LEVEL: "3"
+  CARGO_PROFILE_RELEASE_LTO: fat
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
+  WVL_OPTIMIZATION_PROFILE: speed-o4
+  RA_WASM_OPT_LEVEL: O4
 defaults:
   run:
     shell: bash
@@ -51,12 +57,12 @@ jobs:
           curl --fail --silent --show-error --location --retry 2 \
             "https://api.github.com/repos/oligamiq/wasi_virt_layer/actions/runs/$GATE_RUN" > "$RUNNER_TEMP/wvl-gate.json"
           node scripts/ci/wvl_experiment.mjs gate .github/stdlib-cache-wvl-revision "$RUNNER_TEMP/wvl-gate.json"
-          node --test scripts/ci/paired_startup_test.mjs scripts/ci/wvl_experiment_test.mjs
+          node --test scripts/ci/paired_startup_test.mjs scripts/ci/wvl_experiment_test.mjs scripts/ci/optimization_settings_test.mjs
           printf 'revision=%s\n' "$(<.github/stdlib-cache-wvl-revision)" >> "$GITHUB_OUTPUT"
   build:
     needs: gate
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 330
     strategy:
       max-parallel: 1
       fail-fast: true
@@ -85,13 +91,36 @@ jobs:
         run: node scripts/ci/wvl_experiment.mjs configure ../wasi_virt_layer "$RUBRC_MEMORY_LOCK_MODE"
       - name: Install pinned WASM tools
         run: bash scripts/ci/stdlib_cache.sh tools 2>&1 | tee ci-logs/tools.log
+      - name: Build the pinned CLI with explicit speed policy support
+        env:
+          # These settings build the native tool, not a delivered WASM module.
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+        run: |
+          cargo build --locked --release --manifest-path ../wasi_virt_layer/Cargo.toml -p wasi_virt_layer-cli
+          printf '%s\n' "$GITHUB_WORKSPACE/wasi_virt_layer/target/release" >> "$GITHUB_PATH"
       - name: Prepare optimizer budget
         run: bash scripts/ci/optimizer_memory.sh prepare 2>&1 | tee ci-logs/optimization-environment.log
+      - name: Observe actual compiler and optimizer arguments
+        run: node scripts/ci/strong_optimization.mjs install ../wasi_virt_layer
       - name: Build coherent core, bindings, cache and page
-        run: bash scripts/ci/stdlib_cache.sh build 2>&1 | tee ci-logs/build.log
+        run: |
+          (
+            while true; do
+              date -u +%FT%TZ
+              free -m
+              df -h .
+              ps -C rustc,wasm-opt,wasi_virt_layer -o pid,rss,vsz,pcpu,etime || true
+              sleep 30
+            done
+          ) > ci-logs/strong-resource-monitor.log 2>&1 &
+          monitor=$!
+          trap 'kill "$monitor" 2>/dev/null || true' EXIT
+          bash scripts/ci/stdlib_cache.sh build 2>&1 | tee ci-logs/build.log
       - name: Verify optimization and package variant
         run: |
-          [[ "$CORE_OPT_FAILED" == 0 && "$ACTUAL_VFS_CORE_OPT_LEVEL" == O1 ]]
+          [[ "$CORE_OPT_FAILED" == 0 && "$ACTUAL_VFS_CORE_OPT_LEVEL" == O4 ]]
+          node scripts/ci/strong_optimization.mjs verify
           node scripts/ci/wvl_experiment.mjs package "$RUBRC_MEMORY_LOCK_MODE"
           mkdir -p "$RUNNER_TEMP/lock-preview"
           tar -czf "$RUNNER_TEMP/lock-preview/preview.tar.gz" -C page/dist .

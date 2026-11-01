@@ -1,9 +1,11 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { analyzerOptLevel } from "./ci/optimization_settings.mjs";
 
 const root = new URL("../", import.meta.url);
 const analyzer = new URL("../../rust-analyzer/", import.meta.url);
 const toolchain = Deno.env.get("RA_TOOLCHAIN") ?? "nightly";
+const wasmOptLevel = analyzerOptLevel(Deno.env.get("RA_WASM_OPT_LEVEL"));
 const targetDir = resolve(fileURLToPath(analyzer), Deno.env.get("CARGO_TARGET_DIR") ?? "target");
 const input = resolve(targetDir, "wasm32-wasip1-threads/release/rust-analyzer.wasm");
 const output = fileURLToPath(new URL("crates/vfs/lsp_opt.wasm", root));
@@ -53,7 +55,7 @@ async function validate(path: string): Promise<void> {
 await validate(input);
 const optimized = await new Deno.Command("wasm-opt", {
   args: [
-    "-O3",
+    `-${wasmOptLevel}`,
     // Use the features declared by rustc. --all-features lets Binaryen emit
     // GC/reference instructions that the VFS translator does not support.
     input,

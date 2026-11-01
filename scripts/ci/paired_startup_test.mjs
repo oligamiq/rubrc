@@ -6,10 +6,22 @@ import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
 import {brotliCompressSync} from 'node:zlib';
 import {validatePair, summarizeSession, compareSessions, verifyArchive, verifyPreviewArtifacts} from './paired_startup.mjs';
+import {STRONG_PROFILE} from './optimization_settings.mjs';
 
 const build = mode => ({sourceSha: 'a'.repeat(40), analyzerSha: 'b'.repeat(40),
   wvlRevision: 'c'.repeat(40), memoryLockMode: mode, coreOptimization: 'O1',
   coreOptimizationRequested: 'O1', vfsInitialHeapBytes: 536870912, vfsMemoryTelemetry: 1});
+
+test('strong comparison rejects lower, missing or mixed optimization profiles', () => {
+  const strong = mode => ({...build(mode), coreOptimization: 'O4', coreOptimizationRequested: 'O4',
+    optimizationProfile: STRONG_PROFILE, optimizationEvidenceSha256: 'e'.repeat(64)});
+  assert.doesNotThrow(() => validatePair(strong('baseline'), strong('waiter-aware')));
+  assert.throws(() => validatePair(strong('baseline'), build('waiter-aware')), /profile/);
+  assert.throws(() => validatePair(strong('baseline'), {...strong('waiter-aware'), coreOptimization: 'O1'}), /O4/);
+  assert.throws(() => validatePair(strong('baseline'), {...strong('waiter-aware'), optimizationEvidenceSha256: undefined}), /evidence/);
+  assert.throws(() => validatePair(strong('baseline'), {...strong('waiter-aware'), optimizationProfile:
+    {...STRONG_PROFILE, rust: {...STRONG_PROFILE.rust, lto: 'thin'}}}), /profile/);
+});
 const rows = (mode, semantic = [100, 110]) => [
   {kind: 'build', ...build(mode)},
   ...['cold', 'reload'].map((visit, index) => ({kind: 'startup', visit,

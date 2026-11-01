@@ -26,7 +26,7 @@ case "${1:-}" in
     node --test scripts/copy_vfs_bindings_test.mjs scripts/finalize_vfs_asset_test.mjs \
       scripts/stdlib_cache_browser_support_test.mjs scripts/startup_measurement_support_test.mjs \
       scripts/startup_runtime_profile_support_test.mjs scripts/ci/restore_optimizer_input_test.mjs \
-      scripts/ci/paired_startup_test.mjs scripts/ci/wvl_experiment_test.mjs
+      scripts/ci/paired_startup_test.mjs scripts/ci/wvl_experiment_test.mjs scripts/ci/optimization_settings_test.mjs
     ;;
   tools|optimizer-tools)
     tools="$RUNNER_TEMP/stdlib-cache-tools"
@@ -84,17 +84,28 @@ case "${1:-}" in
         free -h
         df -h .
       } > "$LOGS/build-identity.txt"
-      RUSTFLAGS='-Copt-level=2 -Ccodegen-units=1' bun run lsp:build
+      assembly_flags=(--dev)
+      shell_features=(--features debug-log)
+      if [[ "${RUBRC_OPTIMIZATION_PROFILE:-}" == strong-speed-v1 ]]; then
+        export RUSTFLAGS='-Copt-level=3 -Ccodegen-units=1'
+        export RA_WASM_OPT_LEVEL=O4
+        export WVL_OPTIMIZATION_PROFILE=speed-o4
+        RUBRC_OPT_STAGE=analyzer bun run lsp:build
+        assembly_flags=()
+        shell_features=()
+      else
+        RUSTFLAGS='-Copt-level=2 -Ccodegen-units=1' bun run lsp:build
+      fi
       lock_features=()
       if [[ -n "${RUBRC_MEMORY_LOCK_MODE:-}" ]]; then
         # WVL assigns features by position; these belong before all guest paths.
         node scripts/ci/wvl_experiment.mjs features "$RUBRC_MEMORY_LOCK_MODE" > "$LOGS/vfs-lock-features.txt"
         mapfile -t lock_features < "$LOGS/vfs-lock-features.txt"
       fi
-      wasi_virt_layer build -p vfs "${lock_features[@]}" \
+      RUBRC_OPT_STAGE=wvl wasi_virt_layer build -p vfs "${lock_features[@]}" \
         crates/vfs/llvm_opt.wasm crates/vfs/rustc_opt.wasm crates/vfs/lsp_opt.wasm \
         crates/vfs/cargo_opt.wasm vfs-shell \
-        --features debug-log --dev --own-memory --vfs-unwind --validate
+        "${shell_features[@]}" "${assembly_flags[@]}" --own-memory --vfs-unwind --validate
     else
       [[ "${VFS_CORE_OPT_LEVEL:-}" == O1 ]] || { printf 'Optimizer replay requires O1.\n' >&2; exit 2; }
       { git rev-parse HEAD; wasm-opt --version; wasm-tools --version; free -m; } > "$LOGS/build-identity.txt"
@@ -105,11 +116,14 @@ case "${1:-}" in
     fi
     case "${VFS_CORE_OPT_LEVEL:-none}" in
       none) ;;
-      O1)
+      O1|O4)
+        optimization_failed=false
         # One bounded trial on the final core: its export ABI remains unchanged,
         # and cache generation below runs this exact optimized module.
         stat -c 'before: %s bytes' dist/vfs.core.wasm > "$LOGS/core-optimization.txt"
         optimizer_unit="rubrc-wasm-opt-${GITHUB_RUN_ID:-$$}-${GITHUB_RUN_ATTEMPT:-1}.service"
+        optimizer_deadline=90min
+        if [[ "${RUBRC_OPTIMIZATION_PROFILE:-}" == strong-speed-v1 ]]; then optimizer_deadline=180min; fi
         (
           monitor_started=$SECONDS
           checkpoint_logged=false
@@ -124,7 +138,7 @@ case "${1:-}" in
             systemctl show "$optimizer_unit" --no-pager \
               -p MemoryHigh -p MemoryMax -p MemorySwapMax -p LimitAS 2>/dev/null || true
             if (( SECONDS - monitor_started >= 1800 )) && [[ "$checkpoint_logged" == false ]]; then
-              printf 'Optimizer passed the 30-minute progress checkpoint; continuing within the 90-minute emergency deadline.\n'
+              printf 'Optimizer passed the 30-minute progress checkpoint; continuing within the %s emergency deadline.\n' "$optimizer_deadline"
               checkpoint_logged=true
             fi
             sleep 15
@@ -137,14 +151,14 @@ case "${1:-}" in
         # Use the host's existing swap as well, and prefer the optimizer if global OOM occurs.
         if sudo systemd-run --unit="$optimizer_unit" --wait --pipe --collect \
             --uid="$(id -u)" --gid="$(id -g)" --working-directory="$ROOT" \
-            --setenv="PATH=$PATH" --setenv=BINARYEN_CORES=1 \
+            --setenv="PATH=$PATH" --setenv=BINARYEN_CORES=1 --setenv=RUBRC_OPT_STAGE=final-core \
             --property=MemoryAccounting=yes --property=MemoryHigh=infinity \
             --property=MemoryMax=infinity --property=MemorySwapMax=infinity \
             --property=LimitAS=infinity --property=LimitCORE=0 \
             --property=OOMScoreAdjust=500 --property=OOMPolicy=kill \
-            --property=RuntimeMaxSec=90min --property=TimeoutStopSec=30s \
+            --property="RuntimeMaxSec=$optimizer_deadline" --property=TimeoutStopSec=30s \
             /usr/bin/time -v -o "$LOGS/core-optimization-time.txt" \
-            wasm-opt -O1 --enable-threads --enable-bulk-memory \
+            wasm-opt "-${VFS_CORE_OPT_LEVEL}" --enable-threads --enable-bulk-memory \
             --enable-reference-types --enable-exception-handling --enable-simd \
             --enable-multivalue --enable-mutable-globals --enable-sign-ext \
             --enable-nontrapping-float-to-int --enable-extended-const \
@@ -152,8 +166,9 @@ case "${1:-}" in
             && wasm-tools validate --features all dist/vfs.core.optimized.wasm; then
           mv dist/vfs.core.optimized.wasm dist/vfs.core.wasm
           printf 'optimization applied\n' >> "$LOGS/core-optimization.txt"
-          if [[ -n "${GITHUB_ENV:-}" ]]; then printf 'ACTUAL_VFS_CORE_OPT_LEVEL=O1\n' >> "$GITHUB_ENV"; fi
+          if [[ -n "${GITHUB_ENV:-}" ]]; then printf 'ACTUAL_VFS_CORE_OPT_LEVEL=%s\n' "$VFS_CORE_OPT_LEVEL" >> "$GITHUB_ENV"; fi
         else
+          optimization_failed=true
           rm -f dist/vfs.core.optimized.wasm
           printf 'optimization failed; original validated core retained\n' >> "$LOGS/core-optimization.txt"
           if [[ -n "${GITHUB_ENV:-}" ]]; then printf 'CORE_OPT_FAILED=1\n' >> "$GITHUB_ENV"; fi
@@ -168,6 +183,10 @@ case "${1:-}" in
         if [[ -f "$LOGS/core-optimization-time.txt" ]]; then
           cat "$LOGS/core-optimization-time.txt"
         fi
+        if [[ "${RUBRC_OPTIMIZATION_PROFILE:-}" == strong-speed-v1 && "$optimization_failed" == true ]]; then
+          printf 'Strong comparison requires successful final O4; stopping before cache generation.\n' >&2
+          exit 1
+        fi
         ;;
       *) printf 'Unsupported VFS_CORE_OPT_LEVEL\n' >&2; exit 2 ;;
     esac
@@ -178,6 +197,7 @@ case "${1:-}" in
     cp page/src/worker_process/vfs_bindings/vfs.js "$LOGS/generated-vfs-bindings.txt"
     sha256sum crates/vfs/lsp_opt.wasm dist/vfs.core.wasm \
       page/src/worker_process/vfs_bindings/vfs.core.wasm > "$LOGS/artifact-sha256.txt"
+    sha256sum crates/vfs/llvm_opt.wasm crates/vfs/rustc_opt.wasm crates/vfs/cargo_opt.wasm >> "$LOGS/artifact-sha256.txt"
     bun run std-cache:generate target/std.salsa
     VITE_RUBRC_LSP_TEST=1 VITE_RUBRC_STD_CACHE_COMPARE=1 bun run --cwd page build
     VFS_BROTLI_QUALITY=1 bun run vfs:prepare:prod

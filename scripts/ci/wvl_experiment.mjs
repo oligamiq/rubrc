@@ -4,6 +4,8 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {resolve, join} from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {createHash} from 'node:crypto';
+import {STRONG_PROFILE} from './optimization_settings.mjs';
 
 const exec = promisify(execFile);
 export function experimentalVfsManifest(manifest) {
@@ -78,9 +80,20 @@ async function packageMetadata(mode) {
     vfsMemoryTelemetry: 1, vfsInitialHeapBytes: Number(process.env.RUBRC_VFS_INITIAL_HEAP_BYTES),
   };
   for (const key of ['sourceSha', 'analyzerSha']) assert.match(metadata[key] ?? '', /^[a-f0-9]{40}$/);
-  assert.equal(metadata.coreOptimizationRequested, 'O1');
-  assert.equal(metadata.coreOptimization, 'O1', 'refusing an unoptimized comparison preview');
+  const strong = process.env.RUBRC_OPTIMIZATION_PROFILE === STRONG_PROFILE.name;
+  const level = strong ? 'O4' : 'O1';
+  assert.equal(metadata.coreOptimizationRequested, level);
+  assert.equal(metadata.coreOptimization, level, `refusing a comparison preview without actual ${level}`);
   assert.equal(metadata.vfsInitialHeapBytes, 536870912);
+  if (strong) {
+    const bytes = await readFile('ci-logs/optimization-evidence.json');
+    const evidence = JSON.parse(bytes);
+    assert.deepEqual(evidence.profile, STRONG_PROFILE);
+    assert.ok(evidence.acceptedWvlOutputs >= 7 && evidence.optimizerCommands >= 9 && evidence.rustCommands >= 3);
+    metadata.optimizationProfile = STRONG_PROFILE;
+    metadata.optimizationEvidenceSha256 = createHash('sha256').update(bytes).digest('hex');
+    await writeFile('page/dist/__rubrc_optimization_evidence.json', bytes);
+  }
   await writeFile('page/dist/__rubrc_measurement_build.json', JSON.stringify(metadata));
 }
 
