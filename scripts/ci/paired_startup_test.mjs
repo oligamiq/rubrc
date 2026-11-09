@@ -5,7 +5,8 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
 import {brotliCompressSync} from 'node:zlib';
-import {validatePair, summarizeSession, compareSessions, verifyArchive, verifyPreviewArtifacts} from './paired_startup.mjs';
+import {validatePair, summarizeSession, compareSessions, verifyArchive, verifyPreviewArtifacts,
+  verifyBatchingPreview} from './paired_startup.mjs';
 import {STRONG_PROFILE} from './optimization_settings.mjs';
 
 const build = mode => ({sourceSha: 'a'.repeat(40), analyzerSha: 'b'.repeat(40),
@@ -68,6 +69,69 @@ test('comparison reports overlap as inconclusive and preserves session order', (
   sessions[2].semanticMedianMs = 140;
   assert.equal(compareSessions(sessions).decision, 'regressed');
   assert.throws(() => compareSessions(sessions.slice(1)), /order/);
+});
+
+const batchingBuild = setting => ({...build('waiter-aware'), memoryLockBatching: setting,
+  memoryLockBatchingEvidenceSha256: 'f'.repeat(64), coreOptimization: 'O3', coreOptimizationRequested: 'O3',
+  optimizationProfile: STRONG_PROFILE, optimizationEvidenceSha256: 'e'.repeat(64)});
+const batchingRows = (setting, semantic) => rows('waiter-aware', semantic).map(row =>
+  row.kind === 'build' ? {kind: 'build', ...batchingBuild(setting)} : row);
+
+test('batching pair requires the same waiter-aware library and opposite verified settings', () => {
+  const off = batchingBuild('off'), on = batchingBuild('on');
+  assert.doesNotThrow(() => validatePair(off, on, {requireBatching: true}));
+  assert.throws(() => validatePair(build('baseline'), build('waiter-aware'), {requireBatching: true}), /batching metadata/);
+  assert.throws(() => validatePair(off, {...on, memoryLockMode: 'baseline'}), /waiter-aware/);
+  assert.throws(() => validatePair({...off, memoryLockMode: 'baseline'}, on), /waiter-aware/);
+  assert.throws(() => validatePair(off, {...on, memoryLockBatching: 'off'}), /must be on/);
+  assert.throws(() => validatePair({...off, memoryLockBatching: 'on'}, on), /must be off/);
+  for (const missing of [undefined, null, 'auto']) {
+    assert.throws(() => validatePair(off, {...on, memoryLockBatching: missing}), /must be on/);
+  }
+  assert.throws(() => validatePair(off, {...on, memoryLockBatchingEvidenceSha256: undefined}), /batching evidence/);
+  assert.throws(() => validatePair(off, {...on, wvlRevision: 'd'.repeat(40)}), /mismatch/);
+  assert.throws(() => validatePair(off, {...on, optimizationProfile: undefined}), /profile/);
+  assert.throws(() => validatePair(off, {...on, coreOptimization: 'O1'}), /O3/);
+});
+
+test('batching sessions retain A-B-B-A order and bind setting plus evidence identity', () => {
+  const sessions = [
+    summarizeSession(batchingRows('off', [100, 120]), batchingBuild('off')),
+    summarizeSession(batchingRows('on', [70, 80]), batchingBuild('on')),
+    summarizeSession(batchingRows('on', [75, 85]), batchingBuild('on')),
+    summarizeSession(batchingRows('off', [110, 130]), batchingBuild('off')),
+  ];
+  assert.deepEqual(sessions.map(row => row.mode), ['batching-off', 'batching-on', 'batching-on', 'batching-off']);
+  assert.equal(compareSessions(sessions).decision, 'improved');
+  sessions[2].semanticMedianMs = 115;
+  assert.equal(compareSessions(sessions).decision, 'inconclusive');
+  sessions[1].semanticMedianMs = 130;
+  sessions[2].semanticMedianMs = 140;
+  assert.equal(compareSessions(sessions).decision, 'regressed');
+  assert.throws(() => compareSessions([sessions[1], sessions[0], ...sessions.slice(2)]), /order/);
+  assert.throws(() => summarizeSession(batchingRows('on'), batchingBuild('off')), /identity/);
+  assert.throws(() => summarizeSession(batchingRows('on'), {...batchingBuild('on'),
+    memoryLockBatchingEvidenceSha256: 'd'.repeat(64)}), /identity/);
+});
+
+test('batching preview verifies evidence digest, mode and actual elisions', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rubrc-batching-'));
+  try {
+    const evidence = {enabled: true, scalarAccesses: 10, acquires: 6, elidedAcquires: 4, maxBatchOperators: 64};
+    const bytes = JSON.stringify(evidence);
+    const metadata = {...batchingBuild('on'), memoryLockBatchingEvidenceSha256:
+      createHash('sha256').update(bytes).digest('hex')};
+    const path = join(root, '__rubrc_memory_lock_batching_evidence.json');
+    await writeFile(path, bytes);
+    assert.deepEqual(await verifyBatchingPreview(root, metadata), evidence);
+    await assert.rejects(verifyBatchingPreview(root, {...metadata, memoryLockBatching: 'off'}), /mode/);
+    await assert.rejects(verifyBatchingPreview(root, {...metadata, memoryLockBatchingEvidenceSha256: undefined}), /checksum/);
+    await writeFile(path, JSON.stringify({...evidence, acquires: 10, elidedAcquires: 0}));
+    await assert.rejects(verifyBatchingPreview(root, metadata), /checksum/);
+    const noElisions = JSON.stringify({...evidence, acquires: 10, elidedAcquires: 0});
+    await assert.rejects(verifyBatchingPreview(root, {...metadata, memoryLockBatchingEvidenceSha256:
+      createHash('sha256').update(noElisions).digest('hex')}), /elisions/);
+  } finally { await rm(root, {recursive: true, force: true}); }
 });
 
 test('decoded core and cache must match their manifests and independent build checksums', async () => {

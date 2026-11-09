@@ -101,6 +101,12 @@ case "${1:-}" in
         # WVL assigns features by position; these belong before all guest paths.
         node scripts/ci/wvl_experiment.mjs features "$RUBRC_MEMORY_LOCK_MODE" > "$LOGS/vfs-lock-features.txt"
         mapfile -t lock_features < "$LOGS/vfs-lock-features.txt"
+        batching=$(node scripts/ci/wvl_experiment.mjs batching "$RUBRC_MEMORY_LOCK_MODE")
+        if [[ -n "${WVL_MEMORY_LOCK_BATCHING:-}" && "$WVL_MEMORY_LOCK_BATCHING" != "$batching" ]]; then
+          printf 'Memory lock mode and lowering batching setting disagree.\n' >&2
+          exit 2
+        fi
+        export WVL_MEMORY_LOCK_BATCHING="$batching"
       fi
       RUBRC_OPT_STAGE=wvl wasi_virt_layer build -p vfs "${lock_features[@]}" \
         crates/vfs/llvm_opt.wasm crates/vfs/rustc_opt.wasm crates/vfs/lsp_opt.wasm \

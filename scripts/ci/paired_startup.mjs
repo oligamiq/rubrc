@@ -12,19 +12,33 @@ import {pipeline} from 'node:stream/promises';
 import {createBrotliDecompress} from 'node:zlib';
 import {assertVfsMemoryCoverage} from '../startup_measurement_support.mjs';
 import {STRONG_PROFILE} from './optimization_settings.mjs';
+import {validateBatchingEvidence} from './wvl_experiment.mjs';
 
 const ORDER = ['baseline', 'waiter-aware', 'waiter-aware', 'baseline'];
+const BATCHING_ORDER = ['batching-off', 'batching-on', 'batching-on', 'batching-off'];
+const isBatchingPair = (baseline, candidate) => baseline.memoryLockBatching !== undefined || candidate.memoryLockBatching !== undefined;
 const IDENTITY = ['sourceSha', 'analyzerSha', 'wvlRevision', 'memoryLockMode',
-  'coreOptimization', 'coreOptimizationRequested', 'vfsInitialHeapBytes', 'vfsMemoryTelemetry', 'optimizationEvidenceSha256'];
+  'coreOptimization', 'coreOptimizationRequested', 'vfsInitialHeapBytes', 'vfsMemoryTelemetry', 'optimizationEvidenceSha256',
+  'memoryLockBatching', 'memoryLockBatchingEvidenceSha256'];
 const median = values => {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
-export function validatePair(baseline, candidate) {
-  assert.equal(baseline.memoryLockMode, 'baseline', 'baseline mode required');
-  assert.equal(candidate.memoryLockMode, 'waiter-aware', 'candidate mode required');
+export function validatePair(baseline, candidate, {requireBatching = false} = {}) {
+  if (requireBatching) assert.ok(isBatchingPair(baseline, candidate), 'batching comparison requires batching metadata');
+  if (isBatchingPair(baseline, candidate)) {
+    assert.equal(baseline.memoryLockBatching, 'off', 'baseline batching must be off');
+    assert.equal(candidate.memoryLockBatching, 'on', 'candidate batching must be on');
+    for (const build of [baseline, candidate]) {
+      assert.equal(build.memoryLockMode, 'waiter-aware', 'both batching arms require waiter-aware mode');
+      assert.match(build.memoryLockBatchingEvidenceSha256 ?? '', /^[a-f0-9]{64}$/, 'missing batching evidence');
+    }
+  } else {
+    assert.equal(baseline.memoryLockMode, 'baseline', 'baseline mode required');
+    assert.equal(candidate.memoryLockMode, 'waiter-aware', 'candidate mode required');
+  }
   for (const field of ['sourceSha', 'analyzerSha', 'wvlRevision']) {
     assert.match(baseline[field] ?? '', /^[a-f0-9]{40}$/, `invalid ${field} revision`);
     assert.match(candidate[field] ?? '', /^[a-f0-9]{40}$/, `invalid ${field} revision`);
@@ -42,6 +56,13 @@ export function validatePair(baseline, candidate) {
     assert.equal(build.vfsInitialHeapBytes, 536870912, 'identical 512 MiB heap required');
     assert.equal(build.vfsMemoryTelemetry, 1, 'capacity coverage required');
   }
+}
+
+export async function verifyBatchingPreview(root, build) {
+  const bytes = await readFile(join(root, '__rubrc_memory_lock_batching_evidence.json'));
+  assert.equal(createHash('sha256').update(bytes).digest('hex'), build.memoryLockBatchingEvidenceSha256,
+    'batching evidence checksum mismatch');
+  return validateBatchingEvidence(JSON.parse(bytes), build.memoryLockBatching);
 }
 
 export async function verifyArchive(archive, checksumFile) {
@@ -133,7 +154,7 @@ export function summarizeSession(rows, expected) {
   for (const key of ['completionMs', 'diagnosticMs']) assert.ok(Number.isFinite(editor[key]) && editor[key] >= 0);
   assert.equal(visits[0].parallelism, visits[1].parallelism, 'worker configuration changed');
   return {
-    mode: expected.memoryLockMode, build: expected,
+    mode: expected.memoryLockBatching === undefined ? expected.memoryLockMode : `batching-${expected.memoryLockBatching}`, build: expected,
     parallelism: visits[0].parallelism,
     semanticMedianMs: median(visits.map(row => row.semanticWarmMs)),
     visits: visits.map(row => ({visit: row.visit, elapsedMs: row.elapsedMs,
@@ -144,13 +165,14 @@ export function summarizeSession(rows, expected) {
 }
 
 export function compareSessions(sessions) {
-  assert.deepEqual(sessions.map(row => row.mode), ORDER, 'A-B-B-A session order required');
+  const order = sessions[0]?.mode === 'batching-off' ? BATCHING_ORDER : ORDER;
+  assert.deepEqual(sessions.map(row => row.mode), order, 'A-B-B-A session order required');
   for (const session of sessions) {
     assert.equal(session.parallelism, sessions[0].parallelism, 'paired worker count mismatch');
     assert.equal(session.calibration?.browser, sessions[0].calibration?.browser, 'paired browser mismatch');
   }
-  const baseline = sessions.filter(row => row.mode === 'baseline').map(row => row.semanticMedianMs);
-  const candidate = sessions.filter(row => row.mode === 'waiter-aware').map(row => row.semanticMedianMs);
+  const baseline = sessions.filter(row => row.mode === order[0]).map(row => row.semanticMedianMs);
+  const candidate = sessions.filter(row => row.mode === order[1]).map(row => row.semanticMedianMs);
   const distribution = values => ({medianMs: median(values), minMs: Math.min(...values), maxMs: Math.max(...values)});
   const decision = Math.max(...candidate) < Math.min(...baseline) ? 'improved'
     : Math.min(...candidate) > Math.max(...baseline) ? 'regressed' : 'inconclusive';
@@ -164,10 +186,20 @@ async function runPair(baselineRoot, candidateRoot, baselineChecksums, candidate
   if (process.env.GITHUB_ACTIONS !== 'true' || process.env.RUBRC_MEASURE_CDP) {
     throw new Error('paired browser measurement requires hosted CI and local runner browsers');
   }
-  const roots = {baseline: resolve(baselineRoot), 'waiter-aware': resolve(candidateRoot)};
-  const builds = {};
-  for (const mode of Object.keys(roots)) builds[mode] = JSON.parse(await readFile(join(roots[mode], '__rubrc_measurement_build.json'), 'utf8'));
-  validatePair(builds.baseline, builds['waiter-aware']);
+  const baselineBuild = JSON.parse(await readFile(join(baselineRoot, '__rubrc_measurement_build.json'), 'utf8'));
+  const candidateBuild = JSON.parse(await readFile(join(candidateRoot, '__rubrc_measurement_build.json'), 'utf8'));
+  validatePair(baselineBuild, candidateBuild, {requireBatching: process.env.RUBRC_MEMORY_LOCK_EXPERIMENT === 'batching'});
+  const batching = isBatchingPair(baselineBuild, candidateBuild);
+  const order = batching ? BATCHING_ORDER : ORDER;
+  const [baselineMode, candidateMode] = order;
+  const roots = {[baselineMode]: resolve(baselineRoot), [candidateMode]: resolve(candidateRoot)};
+  const builds = {[baselineMode]: baselineBuild, [candidateMode]: candidateBuild};
+  const batchingEvidence = {};
+  if (batching) {
+    for (const mode of Object.keys(roots)) batchingEvidence[mode] = await verifyBatchingPreview(roots[mode], builds[mode]);
+    assert.equal(batchingEvidence[baselineMode].scalarAccesses, batchingEvidence[candidateMode].scalarAccesses,
+      'paired scalar lowering input mismatch');
+  }
   if (process.env.RUBRC_OPTIMIZATION_PROFILE === STRONG_PROFILE.name) {
     for (const mode of Object.keys(roots)) {
       assert.deepEqual(builds[mode].optimizationProfile, STRONG_PROFILE, 'strong replay requires strong previews');
@@ -179,20 +211,20 @@ async function runPair(baselineRoot, candidateRoot, baselineChecksums, candidate
     }
   }
   const artifacts = {
-    baseline: await verifyPreviewArtifacts(roots.baseline, baselineChecksums),
-    'waiter-aware': await verifyPreviewArtifacts(roots['waiter-aware'], candidateChecksums),
+    [baselineMode]: await verifyPreviewArtifacts(roots[baselineMode], baselineChecksums),
+    [candidateMode]: await verifyPreviewArtifacts(roots[candidateMode], candidateChecksums),
   };
-  assert.equal(artifacts.baseline.lspSha, artifacts['waiter-aware'].lspSha, 'analyzer binary mismatch');
-  assert.notEqual(artifacts.baseline.coreSha, artifacts['waiter-aware'].coreSha, 'candidate core did not change');
-  assert.deepEqual(artifacts.baseline.guestInputs, artifacts['waiter-aware'].guestInputs, 'prebuilt guest input mismatch');
-  if (builds.baseline.optimizationProfile) {
-    for (const name of ['llvm', 'rustc', 'cargo']) assert.match(artifacts.baseline.guestInputs[name] ?? '', /^[a-f0-9]{64}$/, `missing ${name} input provenance`);
+  assert.equal(artifacts[baselineMode].lspSha, artifacts[candidateMode].lspSha, 'analyzer binary mismatch');
+  assert.notEqual(artifacts[baselineMode].coreSha, artifacts[candidateMode].coreSha, 'candidate core did not change');
+  assert.deepEqual(artifacts[baselineMode].guestInputs, artifacts[candidateMode].guestInputs, 'prebuilt guest input mismatch');
+  if (baselineBuild.optimizationProfile) {
+    for (const name of ['llvm', 'rustc', 'cargo']) assert.match(artifacts[baselineMode].guestInputs[name] ?? '', /^[a-f0-9]{64}$/, `missing ${name} input provenance`);
   }
   await mkdir(output, {recursive: true});
   const {stdout} = await promisify(execFile)('lscpu', [], {timeout: 5000});
   await writeFile(join(output, 'runner-cpu.txt'), stdout);
   const sessions = [];
-  for (const [index, mode] of ORDER.entries()) {
+  for (const [index, mode] of order.entries()) {
     const directory = resolve(output, `${index + 1}-${mode}`);
     const env = {...process.env, RUBRC_MEASURE_ROOT: roots[mode], RUBRC_MEASURE_OUTPUT: directory,
       RUBRC_MEASURE_PROFILE: 'normal', RUBRC_RUNTIME_PROFILE: 'memory'};
@@ -218,6 +250,7 @@ async function runPair(baselineRoot, candidateRoot, baselineChecksums, candidate
   }
   const comparison = compareSessions(sessions);
   comparison.artifacts = artifacts;
+  if (batching) comparison.batchingEvidence = batchingEvidence;
   await writeFile(join(output, 'comparison.json'), JSON.stringify(comparison, null, 2));
   console.log(JSON.stringify(comparison));
   return comparison;

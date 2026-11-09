@@ -1,4 +1,4 @@
-name: Paired desktop memory lock experiment
+name: Paired desktop memory lock batching experiment
 on:
   workflow_call:
     inputs:
@@ -25,6 +25,9 @@ env:
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
   WVL_OPTIMIZATION_PROFILE: max-compatible
   RA_WASM_OPT_LEVEL: O3
+  # Equal bounded headroom for both arms; not a claimed fix for the prior timeout.
+  STD_CACHE_TIMEOUT_MS: "1800000"
+  RUBRC_MEMORY_LOCK_EXPERIMENT: batching
 defaults:
   run:
     shell: bash
@@ -67,9 +70,10 @@ jobs:
       max-parallel: 1
       fail-fast: true
       matrix:
-        mode: [baseline, waiter-aware]
+        mode: [batching-off, batching-on]
     env:
       RUBRC_MEMORY_LOCK_MODE: ${{ matrix.mode }}
+      WVL_MEMORY_LOCK_BATCHING: ${{ matrix.mode == 'batching-on' && 'on' || 'off' }}
     steps:
       - name: Checkout unchanged application source
         working-directory: ${{ github.workspace }}
@@ -110,7 +114,7 @@ jobs:
               date -u +%FT%TZ
               free -m
               df -h .
-              ps -C rustc,wasm-opt,wasi_virt_layer -o pid,rss,vsz,pcpu,etime || true
+              ps -C rustc,wasm-opt,wasi_virt_layer,deno -o pid,rss,vsz,pcpu,etime || true
               sleep 30
             done
           ) > ci-logs/strong-resource-monitor.log 2>&1 &
@@ -164,15 +168,15 @@ jobs:
           bun-version: 1.4.2
       - uses: actions/download-artifact@v4
         with:
-          name: lock-preview-baseline
-          path: preview-baseline
+          name: lock-preview-batching-off
+          path: preview-batching-off
       - uses: actions/download-artifact@v4
         with:
-          name: lock-preview-waiter-aware
-          path: preview-waiter-aware
+          name: lock-preview-batching-on
+          path: preview-batching-on
       - name: Verify archives and prepare fresh previews
         run: |
-          for mode in baseline waiter-aware; do
+          for mode in batching-off batching-on; do
             node scripts/ci/paired_startup.mjs verify-archive "../preview-$mode/preview.tar.gz" "../preview-$mode/preview-sha256.txt"
             mkdir -p "../extracted-$mode"
             tar -xzf "../preview-$mode/preview.tar.gz" -C "../extracted-$mode"
@@ -180,7 +184,7 @@ jobs:
           bun install --frozen-lockfile
           bunx puppeteer browsers install chrome
       - name: Sequential A-B-B-A desktop acceptance
-        run: node scripts/ci/paired_startup.mjs run ../extracted-baseline ../extracted-waiter-aware ../preview-baseline/artifact-sha256.txt ../preview-waiter-aware/artifact-sha256.txt ci-logs/paired
+        run: node scripts/ci/paired_startup.mjs run ../extracted-batching-off ../extracted-batching-on ../preview-batching-off/artifact-sha256.txt ../preview-batching-on/artifact-sha256.txt ci-logs/paired
       - uses: actions/upload-artifact@v4
         if: always()
         with:

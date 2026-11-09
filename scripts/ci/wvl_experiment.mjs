@@ -16,8 +16,36 @@ export function experimentalVfsManifest(manifest) {
 }
 
 export function vfsFeatures(mode) {
-  assert.ok(['baseline', 'waiter-aware'].includes(mode), 'invalid memory lock mode');
-  return mode === 'waiter-aware' ? ['--features', 'waiter-aware-memory-lock'] : [];
+  assert.ok(['baseline', 'waiter-aware', 'batching-off', 'batching-on'].includes(mode), 'invalid memory lock mode');
+  return mode === 'baseline' ? [] : ['--features', 'waiter-aware-memory-lock'];
+}
+
+export function batchingSetting(mode) {
+  vfsFeatures(mode);
+  return mode === 'batching-on' ? 'on' : 'off';
+}
+
+export function validateBatchingEvidence(evidence, setting) {
+  assert.ok(['off', 'on'].includes(setting), 'invalid batching setting');
+  assert.equal(evidence.enabled, setting === 'on', 'observed batching mode mismatch');
+  for (const key of ['scalarAccesses', 'acquires', 'elidedAcquires']) {
+    assert.ok(Number.isSafeInteger(evidence[key]) && evidence[key] >= 0, `invalid batching counter ${key}`);
+  }
+  assert.ok(evidence.scalarAccesses > 0 && evidence.acquires > 0, 'missing scalar lowering evidence');
+  assert.equal(evidence.acquires + evidence.elidedAcquires, evidence.scalarAccesses, 'batching counter mismatch');
+  assert.equal(evidence.maxBatchOperators, 64, 'batching operator budget mismatch');
+  if (setting === 'on') assert.ok(evidence.elidedAcquires > 0, 'batching enabled without actual elisions');
+  else assert.equal(evidence.elidedAcquires, 0, 'disabled batching must not elide acquires');
+  return evidence;
+}
+
+export function parseBatchingEvidence(text, setting) {
+  const marker = '[wvl-memory-lock-batching] ';
+  const records = text.split('\n').filter(line => line.includes(marker)).map(line => {
+    return JSON.parse(line.slice(line.indexOf(marker) + marker.length).trim());
+  });
+  assert.equal(records.length, 1, 'exactly one actual lowering evidence record required');
+  return validateBatchingEvidence(records[0], setting);
 }
 
 export function validateGate(revision, run) {
@@ -39,7 +67,7 @@ export function validateResolution(metadata, wvlRoot, mode) {
   assert.equal(library?.manifest_path, join(resolve(wvlRoot), 'wasi_virt_layer/Cargo.toml'), 'wrong WVL checkout');
   const features = metadata.resolve.nodes.find(node => node.id === library.id)?.features;
   assert.ok(features?.includes('threads') && features.includes('own-memory'), 'required VFS features missing');
-  assert.equal(features.includes('waiter-aware-memory-lock'), mode === 'waiter-aware', 'resolved lock feature mismatch');
+  assert.equal(features.includes('waiter-aware-memory-lock'), mode !== 'baseline', 'resolved lock feature mismatch');
 }
 
 async function configure(wvlRoot, mode) {
@@ -74,7 +102,7 @@ async function packageMetadata(mode) {
   const metadata = {
     sourceSha: process.env.GITHUB_SHA,
     analyzerSha: (await readFile('.github/stdlib-cache-analyzer-revision', 'utf8')).trim(),
-    wvlRevision: revision, memoryLockMode: mode,
+    wvlRevision: revision, memoryLockMode: mode.startsWith('batching-') ? 'waiter-aware' : mode,
     coreOptimizationRequested: process.env.VFS_CORE_OPT_LEVEL,
     coreOptimization: process.env.ACTUAL_VFS_CORE_OPT_LEVEL,
     vfsMemoryTelemetry: 1, vfsInitialHeapBytes: Number(process.env.RUBRC_VFS_INITIAL_HEAP_BYTES),
@@ -94,6 +122,16 @@ async function packageMetadata(mode) {
     metadata.optimizationEvidenceSha256 = createHash('sha256').update(bytes).digest('hex');
     await writeFile('page/dist/__rubrc_optimization_evidence.json', bytes);
   }
+  if (mode.startsWith('batching-')) {
+    const setting = batchingSetting(mode);
+    assert.equal(process.env.WVL_MEMORY_LOCK_BATCHING, setting, 'requested batching environment mismatch');
+    const evidence = parseBatchingEvidence(await readFile('ci-logs/build.log', 'utf8'), setting);
+    const bytes = Buffer.from(JSON.stringify(evidence));
+    metadata.memoryLockBatching = setting;
+    metadata.memoryLockBatchingEvidenceSha256 = createHash('sha256').update(bytes).digest('hex');
+    await writeFile('ci-logs/memory-lock-batching-evidence.json', bytes);
+    await writeFile('page/dist/__rubrc_memory_lock_batching_evidence.json', bytes);
+  }
   await writeFile('page/dist/__rubrc_measurement_build.json', JSON.stringify(metadata));
 }
 
@@ -101,6 +139,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
   const [action, ...args] = process.argv.slice(2);
   if (action === 'features' && args.length === 1) {
     for (const value of vfsFeatures(args[0])) console.log(value);
+  } else if (action === 'batching' && args.length === 1) {
+    console.log(batchingSetting(args[0]));
   } else if (action === 'gate' && args.length === 2) {
     validateGate((await readFile(args[0], 'utf8')).trim(), JSON.parse(await readFile(args[1], 'utf8')));
   } else if (action === 'configure' && args.length === 2) await configure(...args);
