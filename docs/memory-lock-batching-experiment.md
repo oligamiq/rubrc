@@ -10,8 +10,23 @@ and measurement; public deployment and default enablement are not included.
   `perf/memory-lock-batching`, based on `f5825e94cea867cef8305bf7aea4e8d9c9f49d66`.
 - Initial implementation: `02c3b23b914e203530cd14cd453ef3632069fe90`.
 - Initial required gate: <https://github.com/oligamiq/wasi_virt_layer/actions/runs/42640993597>.
-- Gate is not yet accepted; application comparison has not yet run. No speedup
-  claim follows from the implementation or static lock counts alone.
+- Initial gate failed in benchmark-log parsing, not during guest execution:
+  the WASI host prefixes samples with `[WASI stdout]`, but the test expected
+  the measurement marker at column zero. In both batching modes the first
+  library variant completed 32 relocations and nine samples; the assertion
+  then prevented the waiter-aware variant from running. The 12 new structural/
+  executable-equivalence tests and existing threaded pool/reset checks passed.
+  The full gate did NOT pass, and these incomplete numbers are not accepted.
+- Corrected WVL revision: `456a69aa9223e2e1b90cf260c573f31782987238`.
+  This adds a strict prefix parser with two native regression tests and preserves
+  actual lowering proof from successful CLI builds (previously discarded by the
+  test helper). No lowering/runtime code changed in this correction.
+- Corrected gate: <https://github.com/oligamiq/wasi_virt_layer/actions/runs/43724563178>.
+  It must pass at exactly the pinned revision before application builds launch.
+- Application comparison has not yet run. No speedup claim follows from the
+  implementation or static lock counts alone. The isolated Rubrc experiment
+  branch is `perf/memory-lock-batching`; a managed job can dispatch its existing
+  comparison workflow after validating the corrected gate.
 
 ## Implementation
 
@@ -51,6 +66,11 @@ Lightweight local checks completed before the initial gate:
 - Native original lock protocol: 9 passed.
 - Native waiter-aware lock protocol: 11 passed.
 - Rubrc comparison, metadata and optimization policy tests: 20 passed.
+- After the parser correction: two native prefix tests and four new microbenchmark
+  summarizer tests passed; the full local JS harness suite now has 24 passes.
+  `scripts/ci/summarize_lock_batching_micro.mjs` validates both actual lowering
+  proof and all nine samples for each library/batching combination before
+  reporting exploratory medians/ranges.
 - Scoped Rust syntax/format checks, shell syntax and diff whitespace checks.
 
 These do not substitute for the hosted Wasm tests.
