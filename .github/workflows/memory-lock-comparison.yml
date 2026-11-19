@@ -60,94 +60,67 @@ jobs:
           curl --fail --silent --show-error --location --retry 2 \
             "https://api.github.com/repos/oligamiq/wasi_virt_layer/actions/runs/$GATE_RUN" > "$RUNNER_TEMP/wvl-gate.json"
           node scripts/ci/wvl_experiment.mjs gate .github/stdlib-cache-wvl-revision "$RUNNER_TEMP/wvl-gate.json"
-          node --test scripts/ci/paired_startup_test.mjs scripts/ci/wvl_experiment_test.mjs scripts/ci/optimization_settings_test.mjs
+          node --test scripts/ci/paired_startup_test.mjs scripts/ci/wvl_experiment_test.mjs scripts/ci/optimization_settings_test.mjs scripts/ci/optimizer_checkpoint_test.mjs scripts/ci/strong_optimization_test.mjs scripts/ci/summarize_lock_batching_micro_test.mjs
           printf 'revision=%s\n' "$(<.github/stdlib-cache-wvl-revision)" >> "$GITHUB_OUTPUT"
-  build:
+  # Optimizer misses are successful, newly cached operations. Each phase replays
+  # the identical build; verified hits retain the exact strong optimization policy.
+  seed:
     needs: gate
-    runs-on: ubuntu-24.04
-    timeout-minutes: 330
     strategy:
       max-parallel: 1
       fail-fast: true
       matrix:
         mode: [batching-off, batching-on]
-    env:
-      RUBRC_MEMORY_LOCK_MODE: ${{ matrix.mode }}
-      WVL_MEMORY_LOCK_BATCHING: ${{ matrix.mode == 'batching-on' && 'on' || 'off' }}
-    steps:
-      - name: Checkout unchanged application source
-        working-directory: ${{ github.workspace }}
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-        run: |
-          git init rubrc
-          git -C rubrc remote add origin https://github.com/oligamiq/rubrc.git
-          git -C rubrc fetch --no-tags --depth=1 origin "$SOURCE_SHA"
-          git -C rubrc checkout --detach FETCH_HEAD
-      - uses: ./rubrc/.github/actions/stdlib-cache-setup
-      - uses: actions/checkout@v4
-        with:
-          repository: oligamiq/wasi_virt_layer
-          ref: ${{ needs.gate.outputs.wvl_revision }}
-          path: wasi_virt_layer
-          persist-credentials: false
-      - name: Configure isolated dependency and verify resolved features
-        run: node scripts/ci/wvl_experiment.mjs configure ../wasi_virt_layer "$RUBRC_MEMORY_LOCK_MODE"
-      - name: Install pinned WASM tools
-        run: bash scripts/ci/stdlib_cache.sh tools 2>&1 | tee ci-logs/tools.log
-      - name: Build the pinned CLI with explicit speed policy support
-        env:
-          # These settings build the native tool, not a delivered WASM module.
-          CARGO_PROFILE_RELEASE_LTO: "false"
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-        run: |
-          cargo build --locked --release --manifest-path ../wasi_virt_layer/Cargo.toml -p wasi_virt_layer-cli
-          printf '%s\n' "$GITHUB_WORKSPACE/wasi_virt_layer/target/release" >> "$GITHUB_PATH"
-      - name: Prepare optimizer budget
-        run: bash scripts/ci/optimizer_memory.sh prepare 2>&1 | tee ci-logs/optimization-environment.log
-      - name: Observe actual compiler and optimizer arguments
-        run: node scripts/ci/strong_optimization.mjs install ../wasi_virt_layer
-      - name: Build coherent core, bindings, cache and page
-        run: |
-          (
-            while true; do
-              date -u +%FT%TZ
-              free -m
-              df -h .
-              ps -C rustc,wasm-opt,wasi_virt_layer,deno -o pid,rss,vsz,pcpu,etime || true
-              sleep 30
-            done
-          ) > ci-logs/strong-resource-monitor.log 2>&1 &
-          monitor=$!
-          trap 'kill "$monitor" 2>/dev/null || true' EXIT
-          bash scripts/ci/stdlib_cache.sh build 2>&1 | tee ci-logs/build.log
-      - name: Verify optimization and package variant
-        run: |
-          [[ "$CORE_OPT_FAILED" == 0 && "$ACTUAL_VFS_CORE_OPT_LEVEL" == O3 ]]
-          node scripts/ci/strong_optimization.mjs verify
-          node scripts/ci/wvl_experiment.mjs package "$RUBRC_MEMORY_LOCK_MODE"
-          mkdir -p "$RUNNER_TEMP/lock-preview"
-          tar -czf "$RUNNER_TEMP/lock-preview/preview.tar.gz" -C page/dist .
-          test "$(stat -c %s "$RUNNER_TEMP/lock-preview/preview.tar.gz")" -lt 268435456
-          sha256sum "$RUNNER_TEMP/lock-preview/preview.tar.gz" > "$RUNNER_TEMP/lock-preview/preview-sha256.txt"
-          cp ci-logs/artifact-sha256.txt "$RUNNER_TEMP/lock-preview/artifact-sha256.txt"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: lock-preview-${{ matrix.mode }}
-          path: ${{ runner.temp }}/lock-preview
-          compression-level: 0
-          retention-days: 3
-      - name: Release optimizer swap
-        if: always()
-        run: bash scripts/ci/optimizer_memory.sh cleanup
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: lock-build-${{ matrix.mode }}
-          path: rubrc/ci-logs
-          retention-days: 3
+    uses: ./.github/workflows/memory-lock-build.yml
+    with:
+      mode: ${{ matrix.mode }}
+      phase: seed
+      miss_budget: "8" # analyzer + six individual modules + merge
+      wvl_revision: ${{ needs.gate.outputs.wvl_revision }}
+  lower:
+    needs: [gate, seed]
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        mode: [batching-off, batching-on]
+    uses: ./.github/workflows/memory-lock-build.yml
+    with:
+      mode: ${{ matrix.mode }}
+      phase: lower
+      restore_phase: seed
+      miss_budget: "1" # lowered O3 optimization (~192 minutes)
+      wvl_revision: ${{ needs.gate.outputs.wvl_revision }}
+  component:
+    needs: [gate, lower]
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        mode: [batching-off, batching-on]
+    uses: ./.github/workflows/memory-lock-build.yml
+    with:
+      mode: ${{ matrix.mode }}
+      phase: component
+      restore_phase: lower
+      miss_budget: "1" # next core O3 optimization (~58 minutes)
+      wvl_revision: ${{ needs.gate.outputs.wvl_revision }}
+  finish:
+    needs: [gate, component]
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        mode: [batching-off, batching-on]
+    uses: ./.github/workflows/memory-lock-build.yml
+    with:
+      mode: ${{ matrix.mode }}
+      phase: finish
+      restore_phase: component
+      miss_budget: unlimited # remaining core, external final O3, cache and page
+      wvl_revision: ${{ needs.gate.outputs.wvl_revision }}
   paired-replay:
-    needs: build
+    needs: finish
     runs-on: ubuntu-24.04
     timeout-minutes: 110
     steps:
@@ -190,4 +163,4 @@ jobs:
         with:
           name: lock-paired-desktop
           path: rubrc/ci-logs
-          retention-days: 3
+          retention-days: 7

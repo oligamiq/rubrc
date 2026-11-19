@@ -63,7 +63,7 @@ export function summarizeMicroLogs(offText, onText) {
   };
   return {
     schemaVersion: 1,
-    interpretation: 'Exploratory microbenchmark only: not A-B-B-A, not a statistical significance test, and not evidence of application performance. Speedup is batching-off median / batching-on median; values above 1 favor batching.',
+    interpretation: 'Exploratory microbenchmark only: not A-B-B-A, not a statistical significance test, and not evidence of application performance. Sample scalarAccesses is nominal source work (64 calls x 8192 iterations x 4 accesses), not a verified dynamic instruction count after optimization. Speedup is batching-off median / batching-on median; values above 1 favor batching.',
     primaryWaiterAware: compare(true),
     legacyLibrary: compare(false),
   };

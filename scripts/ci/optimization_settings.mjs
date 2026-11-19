@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {validateCacheProof} from './optimizer_checkpoint.mjs';
 
 export const STRONG_PROFILE = Object.freeze({
   name: 'strong-compatible-v1',
@@ -43,7 +44,13 @@ export function parseWvlRecords(text) {
 
 export function validateStrongEvidence({invocations, wvl}) {
   assert.ok(Array.isArray(invocations) && invocations.length, 'missing optimization invocations');
-  for (const row of invocations) assert.ok(row.status === 0 && !row.signal, 'recorded command failed');
+  for (const row of invocations) {
+    assert.ok(row.status === 0 && !row.signal && !row.checkpoint, 'recorded command failed');
+    if (row.cacheProof !== undefined) {
+      assert.equal(row.tool, 'wasm-opt', 'only optimizer outputs may be checkpointed');
+      validateCacheProof(row.cacheProof, {args: row.args, stage: row.stage, profile: STRONG_PROFILE.name});
+    }
+  }
   for (const [name, type] of [['rust_analyzer', 'bin'], ['vfs', 'cdylib'], ['vfs_shell', 'bin']]) {
     const calls = invocations.filter(row => row.tool === 'rustc'
       && row.args[row.args.indexOf('--crate-name') + 1] === name

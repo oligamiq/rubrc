@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {STRONG_PROFILE, validateStrongEvidence, rustSetting, analyzerOptLevel, parseWvlRecords} from './optimization_settings.mjs';
 
 test('WVL records tolerate log prefixes but reject damaged proof with a line number', () => {
@@ -50,4 +51,24 @@ test('actual successful commands are required for all rebuilt Rust binaries and 
   assert.throws(() => validateStrongEvidence(unnecessaryDowngrade), /compatibility/);
   unnecessaryDowngrade.wvl[0].hasTryTable = true;
   assert.doesNotThrow(() => validateStrongEvidence(unnecessaryDowngrade));
+});
+
+test('checkpoint reuse requires successful producer and exact command identity', () => {
+  const value = evidence();
+  const row = value.invocations[3];
+  const identity = {schemaVersion: 1, inputSha256: 'a'.repeat(64), programSha256: 'b'.repeat(64),
+    args: ['-O3', '$INPUT', '-o', '$OUTPUT'], sourceSha: 'c'.repeat(40), mode: 'batching-off',
+    profile: STRONG_PROFILE.name, binaryenCores: '1', stage: 'analyzer'};
+  row.cacheProof = {hit: true, key: createHash('sha256').update(JSON.stringify(identity)).digest('hex'),
+    identity, outputSha256: 'd'.repeat(64), producer: {status: 0, signal: null, elapsedMs: 1,
+      runId: '123', runAttempt: '1', phase: 'seed', stage: 'analyzer'}};
+  assert.doesNotThrow(() => validateStrongEvidence(value));
+  const failed = structuredClone(value); failed.invocations[3].cacheProof.producer.status = 1;
+  assert.throws(() => validateStrongEvidence(failed), /producer failed/);
+  const changed = structuredClone(value); changed.invocations[3].args[0] = '-O4';
+  assert.throws(() => validateStrongEvidence(changed), /args mismatch/);
+  const forged = structuredClone(value); forged.invocations[3].cacheProof.identity.sourceSha = 'e'.repeat(40);
+  assert.throws(() => validateStrongEvidence(forged), /identity\/key mismatch/);
+  const partial = structuredClone(value); partial.invocations[3].checkpoint = true;
+  assert.throws(() => validateStrongEvidence(partial), /recorded command failed/);
 });

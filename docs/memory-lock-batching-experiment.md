@@ -21,12 +21,15 @@ and measurement; public deployment and default enablement are not included.
   This adds a strict prefix parser with two native regression tests and preserves
   actual lowering proof from successful CLI builds (previously discarded by the
   test helper). No lowering/runtime code changed in this correction.
-- Corrected gate: <https://github.com/oligamiq/wasi_virt_layer/actions/runs/43724563178>.
-  It must pass at exactly the pinned revision before application builds launch.
-- Application comparison has not yet run. No speedup claim follows from the
-  implementation or static lock counts alone. The isolated Rubrc experiment
-  branch is `perf/memory-lock-batching`; a managed job can dispatch its existing
-  comparison workflow after validating the corrected gate.
+- Corrected gate: <https://github.com/oligamiq/wasi_virt_layer/actions/runs/43724563178>
+  **passed**, including both library modes with batching off/on. The pinned
+  revision remains default-off; no deployment/default change is included.
+- Application attempt: <https://github.com/oligamiq/rubrc/actions/runs/43725323860>
+  at Rubrc `02a624061898597a5c7e9c172076f2e3e37ce3cc` failed during builds;
+  browser replay never ran. The implementation's application-level effect
+  remains unmeasured. The isolated branch is `perf/memory-lock-batching`.
+- Checkpointed retry preparation preserves every optimizer level, flag, source
+  and validation requirement; it changes build scheduling, not runtime policy.
 
 ## Implementation
 
@@ -67,10 +70,14 @@ Lightweight local checks completed before the initial gate:
 - Native waiter-aware lock protocol: 11 passed.
 - Rubrc comparison, metadata and optimization policy tests: 20 passed.
 - After the parser correction: two native prefix tests and four new microbenchmark
-  summarizer tests passed; the full local JS harness suite now has 24 passes.
+  summarizer tests passed; that local JS harness suite had 24 passes.
   `scripts/ci/summarize_lock_batching_micro.mjs` validates both actual lowering
   proof and all nine samples for each library/batching combination before
   reporting exploratory medians/ranges.
+- Checkpoint integration: all 61 local JS tests passed, including byte/proof
+  integrity, budget/error cases, command identity checks, and an installed
+  wrapper invoked with a systemd-like clean environment. Both reusable workflows
+  passed duplicate-key, phase-dependency, common-environment and shell checks.
 - Scoped Rust syntax/format checks, shell syntax and diff whitespace checks.
 
 These do not substitute for the hosted Wasm tests.
@@ -92,9 +99,65 @@ both baseline session medians; otherwise report regressed/inconclusive honestly.
 Record total startup, post-sysroot, semantic warming, editor latency and RSS.
 
 The WVL relocation fixture additionally emits nine warmed production-lock
-microbenchmark samples, each exercising 2,097,152 scalar accesses. These are
-exploratory runtime measurements, not a replacement for application A–B–B–A.
-Synthetic no-op-lock tests are correctness-only and never performance evidence.
+microbenchmark samples, each requesting 64 guest calls. The `scalarAccesses`
+sample field is **nominal source work** (64 × 8192 iterations × four accesses =
+2,097,152), not a verified dynamic load/store count after optimization. The
+source writes loaded values back to invariant locations, so pre-lowering
+optimizers could remove/hoist accesses; do not compute actual ns/access from
+that nominal count without inspecting the generated code. Generation-time
+lowering counters are static sites, also not dynamic instruction counts.
+These are exploratory runtime measurements, not a replacement for application
+A–B–B–A. Synthetic no-op-lock tests are correctness-only and never performance
+evidence.
+
+## Measured exploratory result
+
+Gate run 43724563178, AMD EPYC 9V74 hosted runner, Deno 2.9.7 / V8
+15.0.245.2-rusty. Each measurement is a batch of 64 guest invocations after
+64 warmup invocations. Nine samples per variant, one process per variant:
+
+| Runtime library | Batching off median (range), ms | Batching on median (range), ms | Median ratio off/on |
+| --- | ---: | ---: | ---: |
+| waiter-aware (primary) | 11.075 (10.962–11.255) | 5.745 (5.699–5.896) | 1.928× |
+| original (secondary) | 22.720 (22.665–22.974) | 12.599 (12.431–12.735) | 1.803× |
+
+[All 36 samples, source identity and core hashes](memory-lock-batching-micro-43724563178.json)
+are retained separately. In all four generated final cores, inspection of
+function 358 confirms the 8192-trip loop still contains two guest loads and
+two guest stores, with four acquisitions/releases when off versus two when on.
+Thus the inspected Wasm did not collapse this workload. This does not establish
+native JIT instruction counts, statistical significance, writer latency, or an
+application speedup. These samples are sequential within one process, not nine
+independent process replicates; their fixed off/on order is not A–B–B–A.
+
+## Application build failure and exact-output checkpoints
+
+In run 43725323860, the off build hit its **330-minute job limit**. Its completed
+optimizer trace includes about 192 minutes for the post-lowering O3 pass and
+58 minutes for the next core O3 pass. It was cancelled during a further core
+optimization, before cache generation. The on runner lost communication with
+GitHub; its log/artifact was unavailable (log API returned 404). Resource
+exhaustion is plausible but not established by that runner-loss annotation.
+Neither event is a runtime regression measurement or a correctness failure.
+
+The retry splits each arm into seed (eight optimizer misses), lower (one),
+component (one), and finish (remaining work) jobs. Each stage reconstructs the
+same build. Reuse is allowed only for identical SHA256 input bytes, optimizer
+binary, ordered flags, source SHA, experiment mode, optimization profile,
+Binaryen core count and stage. Outputs are streamed, rehashed and atomically
+restored; a corrupted cache is a failure, not a fallback. Cache hits keep the
+original successful execution provenance and are distinguished from fresh
+optimizer executions. Final packaging revalidates all cached outputs and the
+unchanged strong-profile/lowering evidence.
+
+A nonfinal job is accepted only at its deliberate miss-budget boundary: one
+last status-75 checkpoint trace bound to the marker key, with every preceding
+observed command successful. Ordinary errors, signals, damaged evidence or
+unexpected successful completion cannot masquerade as a checkpoint. The final
+job must complete the real cache/page build without any checkpoint marker.
+This preserves all O3/O4 passes rather than skipping expensive optimization.
+Exact cross-run build determinism is verified by hits, not assumed; changed
+inputs miss the cache and cannot reuse an unrelated result.
 
 ## Previous strong-profile failure
 

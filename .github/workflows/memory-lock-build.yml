@@ -1,0 +1,234 @@
+name: Checkpointed strong memory lock build
+on:
+  workflow_call:
+    inputs:
+      mode:
+        type: string
+        required: true
+      phase:
+        type: string
+        required: true
+      restore_phase:
+        type: string
+        required: false
+        default: ""
+      miss_budget:
+        type: string
+        required: true
+      wvl_revision:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+env:
+  RA_TOOLCHAIN: nightly-2026-09-13
+  RUSTUP_TOOLCHAIN: nightly-2026-09-13
+  CARGO_BUILD_JOBS: "2"
+  CARGO_INCREMENTAL: "0"
+  BINARYEN_CORES: "1"
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+  VFS_CORE_OPT_LEVEL: O3
+  ACTUAL_VFS_CORE_OPT_LEVEL: none
+  CORE_OPT_FAILED: "0"
+  RUBRC_VFS_INITIAL_HEAP_BYTES: "536870912"
+  RUBRC_OPTIMIZATION_PROFILE: strong-compatible-v1
+  CARGO_PROFILE_RELEASE_OPT_LEVEL: "3"
+  CARGO_PROFILE_RELEASE_LTO: fat
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
+  WVL_OPTIMIZATION_PROFILE: max-compatible
+  RA_WASM_OPT_LEVEL: O3
+  # Equal bounded headroom for both arms; unchanged from the paired build.
+  STD_CACHE_TIMEOUT_MS: "1800000"
+  RUBRC_MEMORY_LOCK_EXPERIMENT: batching
+  RUBRC_MEMORY_LOCK_MODE: ${{ inputs.mode }}
+  WVL_MEMORY_LOCK_BATCHING: ${{ inputs.mode == 'batching-on' && 'on' || 'off' }}
+  RUBRC_OPTIMIZER_CACHE_DIR: ${{ github.workspace }}/.optimizer-checkpoints
+  RUBRC_OPTIMIZER_MISS_BUDGET: ${{ inputs.miss_budget }}
+  RUBRC_BUILD_PHASE: ${{ inputs.phase }}
+defaults:
+  run:
+    shell: bash
+    working-directory: rubrc
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - name: Checkout unchanged application source
+        working-directory: ${{ github.workspace }}
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          git init rubrc
+          git -C rubrc remote add origin https://github.com/oligamiq/rubrc.git
+          git -C rubrc fetch --no-tags --depth=1 origin "$SOURCE_SHA"
+          git -C rubrc checkout --detach FETCH_HEAD
+          mkdir -p rubrc/ci-logs
+      - name: Validate phase contract
+        env:
+          RESTORE_PHASE: ${{ inputs.restore_phase }}
+          WVL_REVISION: ${{ inputs.wvl_revision }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+          import {isAbsolute} from 'node:path';
+          const env = process.env;
+          assert.ok(['batching-off', 'batching-on'].includes(env.RUBRC_MEMORY_LOCK_MODE));
+          const phases = {
+            seed: ['', '8'],
+            lower: ['seed', '1'],
+            component: ['lower', '1'],
+            finish: ['component', 'unlimited'],
+          };
+          assert.ok(Object.hasOwn(phases, env.RUBRC_BUILD_PHASE), 'unknown build phase');
+          assert.deepEqual([env.RESTORE_PHASE, env.RUBRC_OPTIMIZER_MISS_BUDGET], phases[env.RUBRC_BUILD_PHASE]);
+          assert.ok(isAbsolute(env.RUBRC_OPTIMIZER_CACHE_DIR), 'optimizer cache path must be absolute');
+          assert.match(env.WVL_REVISION, /^[0-9a-f]{40}$/);
+          assert.equal(env.WVL_REVISION, readFileSync('.github/stdlib-cache-wvl-revision', 'utf8').trim());
+          NODE
+      - uses: ./rubrc/.github/actions/stdlib-cache-setup
+      - uses: actions/checkout@v4
+        with:
+          repository: oligamiq/wasi_virt_layer
+          ref: ${{ inputs.wvl_revision }}
+          path: wasi_virt_layer
+          persist-credentials: false
+      # Restore only optimizer outputs/proofs, never old build logs or compiler outputs.
+      # Each phase recompiles at the same paths; verified content-addressed hits must
+      # supply fresh invocation evidence for the unchanged final verifier.
+      - uses: actions/download-artifact@v4
+        if: inputs.restore_phase != ''
+        with:
+          name: checkpoint-${{ inputs.mode }}-${{ inputs.restore_phase }}
+          path: ${{ env.RUBRC_OPTIMIZER_CACHE_DIR }}
+      - name: Configure isolated dependency and verify resolved features
+        run: node scripts/ci/wvl_experiment.mjs configure ../wasi_virt_layer "$RUBRC_MEMORY_LOCK_MODE"
+      - name: Install pinned WASM tools
+        run: bash scripts/ci/stdlib_cache.sh tools 2>&1 | tee ci-logs/tools.log
+      - name: Build the pinned CLI with explicit speed policy support
+        env:
+          # These settings build the native tool, not a delivered WASM module.
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+        run: |
+          cargo build --locked --release --manifest-path ../wasi_virt_layer/Cargo.toml -p wasi_virt_layer-cli
+          printf '%s\n' "$GITHUB_WORKSPACE/wasi_virt_layer/target/release" >> "$GITHUB_PATH"
+      - name: Prepare optimizer budget
+        run: bash scripts/ci/optimizer_memory.sh prepare 2>&1 | tee ci-logs/optimization-environment.log
+      - name: Observe actual compiler and optimizer arguments
+        run: node scripts/ci/strong_optimization.mjs install ../wasi_virt_layer
+      - name: Build to verified checkpoint or complete final phase
+        run: |
+          # A stale marker must never turn an unrelated build failure into success.
+          test ! -e ci-logs/optimizer-checkpoint.json
+          (
+            while true; do
+              date -u +%FT%TZ
+              free -m
+              df -h .
+              ps -C rustc,wasm-opt,wvl,wasi_virt_layer,deno -o pid,rss,vsz,pcpu,etime || true
+              sleep 30
+            done
+          ) > ci-logs/strong-resource-monitor.log 2>&1 &
+          monitor=$!
+          trap 'kill "$monitor" 2>/dev/null || true' EXIT
+          set +e
+          bash scripts/ci/stdlib_cache.sh build 2>&1 | tee ci-logs/build.log
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          # Logging failure is not an intentional optimizer checkpoint.
+          test "${statuses[1]}" -eq 0
+          export BUILD_EXIT_STATUS="${statuses[0]}"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {existsSync, readFileSync, writeFileSync} from 'node:fs';
+          import {validateCacheProof} from './scripts/ci/optimizer_checkpoint.mjs';
+          const phase = process.env.RUBRC_BUILD_PHASE;
+          const status = Number(process.env.BUILD_EXIT_STATUS);
+          const marker = 'ci-logs/optimizer-checkpoint.json';
+          assert.ok(Number.isSafeInteger(status) && status >= 0 && status <= 255);
+          let checkpoint;
+          if (phase === 'finish') {
+            assert.equal(status, 0, 'final phase requires full build success');
+            assert.equal(existsSync(marker), false, 'final phase must not checkpoint');
+          } else {
+            // wasm-opt exits 75, but WVL/build may propagate it as 1. The marker,
+            // not a specific child exit code, proves the intended budget stop.
+            assert.notEqual(status, 0, 'nonfinal phase unexpectedly completed; refusing unverified phase boundaries');
+            checkpoint = JSON.parse(readFileSync(marker, 'utf8'));
+            const budget = Number(process.env.RUBRC_OPTIMIZER_MISS_BUDGET);
+            assert.ok(Number.isSafeInteger(budget) && budget > 0);
+            assert.equal(checkpoint.schemaVersion, 1);
+            assert.equal(checkpoint.phase, phase);
+            assert.equal(checkpoint.budget, budget);
+            assert.equal(checkpoint.misses, budget);
+            assert.match(checkpoint.nextKey, /^[0-9a-f]{64}$/);
+            // A budget marker cannot excuse an earlier native/compiler failure,
+            // even if a child catches that failure and invokes the wrapper again.
+            const invocations = readFileSync('ci-logs/optimization-invocations.jsonl', 'utf8')
+              .trim().split('\n').map(JSON.parse);
+            assert.equal(invocations.filter(row => row.checkpoint === true).length, 1,
+              'exactly one intentional optimizer checkpoint required');
+            const stopped = invocations.at(-1);
+            assert.equal(stopped.tool, 'wasm-opt');
+            assert.equal(stopped.status, 75);
+            assert.equal(stopped.signal, null);
+            assert.equal(stopped.checkpoint, true);
+            assert.equal(stopped.checkpointKey, checkpoint.nextKey);
+            assert.ok(!stopped.error, 'checkpoint wrapper error');
+            for (const row of invocations.slice(0, -1)) {
+              assert.equal(row.status, 0, 'command failed before checkpoint');
+              assert.ok(!row.signal && !row.checkpoint && !row.error,
+                'command failed before checkpoint');
+              assert.ok(['rustc', 'wasm-opt'].includes(row.tool), 'unknown observed command');
+              if (row.tool === 'wasm-opt') {
+                validateCacheProof(row.cacheProof, {args: row.args, stage: row.stage,
+                  sourceSha: process.env.GITHUB_SHA, mode: process.env.RUBRC_MEMORY_LOCK_MODE,
+                  profile: process.env.RUBRC_OPTIMIZATION_PROFILE, binaryenCores: process.env.BINARYEN_CORES});
+              }
+            }
+          }
+          const result = {phase, status, checkpoint};
+          writeFileSync('ci-logs/build-phase-result.json', JSON.stringify(result, null, 2));
+          console.log(JSON.stringify(result));
+          NODE
+      - name: Verify optimization and package variant
+        if: inputs.phase == 'finish'
+        run: |
+          [[ "$CORE_OPT_FAILED" == 0 && "$ACTUAL_VFS_CORE_OPT_LEVEL" == O3 ]]
+          test ! -e ci-logs/optimizer-checkpoint.json
+          node scripts/ci/strong_optimization.mjs verify
+          node scripts/ci/wvl_experiment.mjs package "$RUBRC_MEMORY_LOCK_MODE"
+          mkdir -p "$RUNNER_TEMP/lock-preview"
+          tar -czf "$RUNNER_TEMP/lock-preview/preview.tar.gz" -C page/dist .
+          test "$(stat -c %s "$RUNNER_TEMP/lock-preview/preview.tar.gz")" -lt 268435456
+          sha256sum "$RUNNER_TEMP/lock-preview/preview.tar.gz" > "$RUNNER_TEMP/lock-preview/preview-sha256.txt"
+          cp ci-logs/artifact-sha256.txt "$RUNNER_TEMP/lock-preview/artifact-sha256.txt"
+      - uses: actions/upload-artifact@v4
+        if: inputs.phase == 'finish'
+        with:
+          name: lock-preview-${{ inputs.mode }}
+          path: ${{ runner.temp }}/lock-preview
+          compression-level: 0
+          retention-days: 7
+      - name: Release optimizer swap
+        if: always()
+        run: bash scripts/ci/optimizer_memory.sh cleanup
+      - name: Preserve cumulative verified optimizer checkpoints
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint-${{ inputs.mode }}-${{ inputs.phase }}
+          path: ${{ env.RUBRC_OPTIMIZER_CACHE_DIR }}
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lock-build-${{ inputs.mode }}-${{ inputs.phase }}
+          path: rubrc/ci-logs
+          retention-days: 7

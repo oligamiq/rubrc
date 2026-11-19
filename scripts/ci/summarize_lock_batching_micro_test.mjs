@@ -32,6 +32,7 @@ test('prefixed records preserve all samples and compare each library separately'
     assert.equal(pair.batchingOn.samples.length, 9);
   }
   assert.match(result.interpretation, /not evidence of application performance/);
+  assert.match(result.interpretation, /nominal source work/);
 });
 
 test('rejects missing proof, incomplete groups, duplicates and mixed libraries', () => {

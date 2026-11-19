@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "runUrl": "https://github.com/oligamiq/wasi_virt_layer/actions/runs/43724563178",
+  "wvlRevision": "456a69aa9223e2e1b90cf260c573f31782987238",
+  "environment": {
+    "cpu": "AMD EPYC 9V74, hosted 4 logical CPUs",
+    "deno": "2.9.7",
+    "v8": "15.0.245.2-rusty",
+    "binaryen": 131
+  },
+  "guestCallsPerSample": 64,
+  "samplesPerVariant": 9,
+  "interpretation": "Exploratory microbenchmark only: not A-B-B-A, not a statistical significance test, and not evidence of application performance. Sample scalarAccesses is nominal source work (64 calls x 8192 iterations x 4 accesses), not a verified dynamic instruction count after optimization. Speedup is batching-off median / batching-on median; values above 1 favor batching.",
+  "wasmInspection": "Final core function 358 in all four artifacts retains the 8192-trip loop with two guest loads and two stores; lock acquire call 109 and matching releases occur four times (off) or twice (on) per loop. This is Wasm control-flow inspection, not native JIT instruction counting.",
+  "variants": [
+    {
+      "waiterAware": false,
+      "batching": "off",
+      "artifactDirectory": "03e7bec1-381a-48e9-a42e-bc87ec4e6542",
+      "coreSha256": "64d259633b9c545bc075cf1611df8f7d8de87acd86cfa6bedf5207703886df58",
+      "lowering": {
+        "acquires": 4,
+        "elidedAcquires": 0,
+        "enabled": false,
+        "maxBatchOperators": 64,
+        "scalarAccesses": 4
+      },
+      "elapsedNs": [
+        22864063,
+        22973958,
+        22719827,
+        22802370,
+        22902541,
+        22668199,
+        22709021,
+        22709902,
+        22664904
+      ],
+      "summary": {
+        "medianNs": 22719827,
+        "minNs": 22664904,
+        "maxNs": 22973958
+      }
+    },
+    {
+      "waiterAware": true,
+      "batching": "off",
+      "artifactDirectory": "c5bd6e52-c356-46b4-bc17-6ced7305443f",
+      "coreSha256": "abb6ab45c59770f4ae788a0e9af983b0e98650a6087d34ff19619a2e2ce99bd1",
+      "lowering": {
+        "acquires": 4,
+        "elidedAcquires": 0,
+        "enabled": false,
+        "maxBatchOperators": 64,
+        "scalarAccesses": 4
+      },
+      "elapsedNs": [
+        11207073,
+        11138671,
+        11059341,
+        11074735,
+        11254925,
+        10962456,
+        11088456,
+        11042386,
+        11033603
+      ],
+      "summary": {
+        "medianNs": 11074735,
+        "minNs": 10962456,
+        "maxNs": 11254925
+      }
+    },
+    {
+      "waiterAware": false,
+      "batching": "on",
+      "artifactDirectory": "ea9b5459-1f98-48e8-8629-24b44a587fe0",
+      "coreSha256": "46b76cbd02a0529c23b6f8dd8fe5d593e91c409cf6fa299a841a0f4305370bbc",
+      "lowering": {
+        "acquires": 2,
+        "elidedAcquires": 2,
+        "enabled": true,
+        "maxBatchOperators": 64,
+        "scalarAccesses": 4
+      },
+      "elapsedNs": [
+        12735190,
+        12698775,
+        12431103,
+        12599255,
+        12723442,
+        12470271,
+        12545815,
+        12607087,
+        12550953
+      ],
+      "summary": {
+        "medianNs": 12599255,
+        "minNs": 12431103,
+        "maxNs": 12735190
+      }
+    },
+    {
+      "waiterAware": true,
+      "batching": "on",
+      "artifactDirectory": "96c1581a-a6be-4e84-b692-8304f8b887c3",
+      "coreSha256": "8312890d52bf69c118421f39927ae279006148a78018fee532ed9546aacaf767",
+      "lowering": {
+        "acquires": 2,
+        "elidedAcquires": 2,
+        "enabled": true,
+        "maxBatchOperators": 64,
+        "scalarAccesses": 4
+      },
+      "elapsedNs": [
+        5874284,
+        5831860,
+        5731279,
+        5744718,
+        5896216,
+        5714012,
+        5751649,
+        5701113,
+        5699280
+      ],
+      "summary": {
+        "medianNs": 5744718,
+        "minNs": 5699280,
+        "maxNs": 5896216
+      }
+    }
+  ]
+}
