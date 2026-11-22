@@ -136,6 +136,20 @@ jobs:
           mkdir -p "$target/release"
           install -m 755 "$RUNNER_TEMP/wvl-checkpoint-cli" "$target/release/wasi_virt_layer"
           df -h .
+      - name: Free unused hosted SDKs before reserving optimizer swap
+        run: |
+          # This experiment uses Rust/Node/Deno, not .NET or Android. Delete only
+          # these fixed SDK roots on the disposable GitHub-hosted build runner.
+          [[ "$GITHUB_ACTIONS" == true && "$RUNNER_ENVIRONMENT" == github-hosted ]]
+          for sdk in /usr/share/dotnet /usr/local/lib/android; do
+            if [[ -d "$sdk" ]]; then
+              resolved=$(realpath -- "$sdk")
+              [[ "$resolved" == "$sdk" ]]
+              du -sh -- "$resolved"
+              sudo rm -rf -- "$resolved"
+            fi
+          done
+          df -B1 "$RUNNER_TEMP"
       - name: Prepare optimizer budget
         run: bash scripts/ci/optimizer_memory.sh prepare 2>&1 | tee ci-logs/optimization-environment.log
       - name: Observe actual compiler and optimizer arguments
