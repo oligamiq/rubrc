@@ -59,10 +59,10 @@ jobs:
         id: gate
         env:
           GATE_RUN: ${{ inputs.gate_run }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           [[ "$GATE_RUN" =~ ^[1-9][0-9]{7,14}$ ]]
-          curl --fail --silent --show-error --location --retry 2 \
-            "https://api.github.com/repos/oligamiq/wasi_virt_layer/actions/runs/$GATE_RUN" > "$RUNNER_TEMP/wvl-gate.json"
+          gh api "repos/oligamiq/wasi_virt_layer/actions/runs/$GATE_RUN" > "$RUNNER_TEMP/wvl-gate.json"
           node scripts/ci/wvl_experiment.mjs gate .github/stdlib-cache-wvl-revision "$RUNNER_TEMP/wvl-gate.json"
           node --test scripts/ci/paired_startup_test.mjs scripts/ci/wvl_experiment_test.mjs scripts/ci/optimization_settings_test.mjs scripts/ci/optimizer_checkpoint_test.mjs scripts/ci/strong_optimization_test.mjs scripts/ci/summarize_lock_batching_micro_test.mjs scripts/ci/checkpoint_resume_test.mjs
           printf 'revision=%s\n' "$(<.github/stdlib-cache-wvl-revision)" >> "$GITHUB_OUTPUT"
