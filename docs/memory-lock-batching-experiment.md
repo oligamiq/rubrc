@@ -40,6 +40,15 @@ and measurement; public deployment and default enablement are not included.
   exact application source (still `0673d0a0…`), not the newer workflow harness;
   both unexpired component checkpoints and every content/provenance check are
   required. Optimizer flags, runtime policy and correctness checks are unchanged.
+- Finish recovery 45031103834 showed native intermediates alone did not free
+  enough space. Recovery 45031840261 stopped at an anonymous GitHub API HTTP403
+  before building. The current recovery is
+  <https://github.com/oligamiq/rubrc/actions/runs/45032121283>, harness
+  `3f6b8557` with original application `0673d0a0…`. It passed the authenticated
+  exact-revision gate, restored the off component checkpoint, removed unused
+  .NET/Android SDKs only on the disposable hosted runner, and passed the original
+  disk/swap preflight. Final compilation/optimization is now running. No
+  application measurement has yet completed.
 
 ## Implementation
 
