@@ -5,6 +5,9 @@ on:
       gate_run:
         type: string
         required: true
+      checkpoint_run:
+        type: string
+        default: ""
 permissions:
   contents: read
   actions: read
@@ -38,6 +41,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       wvl_revision: ${{ steps.gate.outputs.revision }}
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - name: Checkout experiment harness
         working-directory: ${{ github.workspace }}
@@ -60,11 +64,26 @@ jobs:
           curl --fail --silent --show-error --location --retry 2 \
             "https://api.github.com/repos/oligamiq/wasi_virt_layer/actions/runs/$GATE_RUN" > "$RUNNER_TEMP/wvl-gate.json"
           node scripts/ci/wvl_experiment.mjs gate .github/stdlib-cache-wvl-revision "$RUNNER_TEMP/wvl-gate.json"
-          node --test scripts/ci/paired_startup_test.mjs scripts/ci/wvl_experiment_test.mjs scripts/ci/optimization_settings_test.mjs scripts/ci/optimizer_checkpoint_test.mjs scripts/ci/strong_optimization_test.mjs scripts/ci/summarize_lock_batching_micro_test.mjs
+          node --test scripts/ci/paired_startup_test.mjs scripts/ci/wvl_experiment_test.mjs scripts/ci/optimization_settings_test.mjs scripts/ci/optimizer_checkpoint_test.mjs scripts/ci/strong_optimization_test.mjs scripts/ci/summarize_lock_batching_micro_test.mjs scripts/ci/checkpoint_resume_test.mjs
           printf 'revision=%s\n' "$(<.github/stdlib-cache-wvl-revision)" >> "$GITHUB_OUTPUT"
+      - name: Resolve exact application source and resume checkpoints
+        id: source
+        env:
+          CHECKPOINT_RUN: ${{ inputs.checkpoint_run }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source_sha="$GITHUB_SHA"
+          if [[ -n "$CHECKPOINT_RUN" ]]; then
+            [[ "$CHECKPOINT_RUN" =~ ^[1-9][0-9]{7,14}$ ]]
+            gh api "repos/oligamiq/rubrc/actions/runs/$CHECKPOINT_RUN" > "$RUNNER_TEMP/resume-run.json"
+            gh api "repos/oligamiq/rubrc/actions/runs/$CHECKPOINT_RUN/artifacts?per_page=100" > "$RUNNER_TEMP/resume-artifacts.json"
+            source_sha=$(node scripts/ci/checkpoint_resume.mjs "$RUNNER_TEMP/resume-run.json" "$RUNNER_TEMP/resume-artifacts.json")
+          fi
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
   # Optimizer misses are successful, newly cached operations. Each phase replays
   # the identical build; verified hits retain the exact strong optimization policy.
   seed:
+    if: inputs.checkpoint_run == ''
     needs: gate
     strategy:
       max-parallel: 1
@@ -77,6 +96,7 @@ jobs:
       phase: seed
       miss_budget: "8" # analyzer + six individual modules + merge
       wvl_revision: ${{ needs.gate.outputs.wvl_revision }}
+      source_sha: ${{ needs.gate.outputs.source_sha }}
   lower:
     needs: [gate, seed]
     strategy:
@@ -91,6 +111,7 @@ jobs:
       restore_phase: seed
       miss_budget: "1" # lowered O3 optimization (~192 minutes)
       wvl_revision: ${{ needs.gate.outputs.wvl_revision }}
+      source_sha: ${{ needs.gate.outputs.source_sha }}
   component:
     needs: [gate, lower]
     strategy:
@@ -105,7 +126,9 @@ jobs:
       restore_phase: lower
       miss_budget: "1" # next core O3 optimization (~58 minutes)
       wvl_revision: ${{ needs.gate.outputs.wvl_revision }}
+      source_sha: ${{ needs.gate.outputs.source_sha }}
   finish:
+    if: always() && needs.gate.result == 'success' && (needs.component.result == 'success' || inputs.checkpoint_run != '')
     needs: [gate, component]
     strategy:
       max-parallel: 1
@@ -117,9 +140,12 @@ jobs:
       mode: ${{ matrix.mode }}
       phase: finish
       restore_phase: component
+      restore_run: ${{ inputs.checkpoint_run }}
       miss_budget: unlimited # remaining core, external final O3, cache and page
       wvl_revision: ${{ needs.gate.outputs.wvl_revision }}
+      source_sha: ${{ needs.gate.outputs.source_sha }}
   paired-replay:
+    if: always() && needs.finish.result == 'success'
     needs: finish
     runs-on: ubuntu-24.04
     timeout-minutes: 110

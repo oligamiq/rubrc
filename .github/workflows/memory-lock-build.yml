@@ -18,6 +18,12 @@ on:
       wvl_revision:
         type: string
         required: true
+      source_sha:
+        type: string
+        required: true
+      restore_run:
+        type: string
+        default: ""
 permissions:
   contents: read
   actions: read
@@ -46,6 +52,7 @@ env:
   RUBRC_OPTIMIZER_CACHE_DIR: ${{ github.workspace }}/.optimizer-checkpoints
   RUBRC_OPTIMIZER_MISS_BUDGET: ${{ inputs.miss_budget }}
   RUBRC_BUILD_PHASE: ${{ inputs.phase }}
+  RUBRC_BUILD_SOURCE_SHA: ${{ inputs.source_sha }}
 defaults:
   run:
     shell: bash
@@ -58,8 +65,9 @@ jobs:
       - name: Checkout unchanged application source
         working-directory: ${{ github.workspace }}
         env:
-          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
           git init rubrc
           git -C rubrc remote add origin https://github.com/oligamiq/rubrc.git
           git -C rubrc fetch --no-tags --depth=1 origin "$SOURCE_SHA"
@@ -103,6 +111,8 @@ jobs:
         with:
           name: checkpoint-${{ inputs.mode }}-${{ inputs.restore_phase }}
           path: ${{ env.RUBRC_OPTIMIZER_CACHE_DIR }}
+          run-id: ${{ inputs.restore_run || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Configure isolated dependency and verify resolved features
         run: node scripts/ci/wvl_experiment.mjs configure ../wasi_virt_layer "$RUBRC_MEMORY_LOCK_MODE"
       - name: Install pinned WASM tools
@@ -115,12 +125,24 @@ jobs:
         run: |
           cargo build --locked --release --manifest-path ../wasi_virt_layer/Cargo.toml -p wasi_virt_layer-cli
           printf '%s\n' "$GITHUB_WORKSPACE/wasi_virt_layer/target/release" >> "$GITHUB_PATH"
+      - name: Retain native CLI without disposable compilation intermediates
+        run: |
+          target=$(realpath ../wasi_virt_layer/target)
+          expected="$GITHUB_WORKSPACE/wasi_virt_layer/target"
+          [[ "$target" == "$expected" && -x "$target/release/wasi_virt_layer" ]]
+          install -m 755 "$target/release/wasi_virt_layer" "$RUNNER_TEMP/wvl-checkpoint-cli"
+          # This is the isolated fresh CI tool checkout, not the application target.
+          rm -rf -- "$target"
+          mkdir -p "$target/release"
+          install -m 755 "$RUNNER_TEMP/wvl-checkpoint-cli" "$target/release/wasi_virt_layer"
+          df -h .
       - name: Prepare optimizer budget
         run: bash scripts/ci/optimizer_memory.sh prepare 2>&1 | tee ci-logs/optimization-environment.log
       - name: Observe actual compiler and optimizer arguments
-        run: node scripts/ci/strong_optimization.mjs install ../wasi_virt_layer
+        run: GITHUB_SHA="$RUBRC_BUILD_SOURCE_SHA" node scripts/ci/strong_optimization.mjs install ../wasi_virt_layer
       - name: Build to verified checkpoint or complete final phase
         run: |
+          export GITHUB_SHA="$RUBRC_BUILD_SOURCE_SHA"
           # A stale marker must never turn an unrelated build failure into success.
           test ! -e ci-logs/optimizer-checkpoint.json
           (
@@ -197,6 +219,7 @@ jobs:
       - name: Verify optimization and package variant
         if: inputs.phase == 'finish'
         run: |
+          export GITHUB_SHA="$RUBRC_BUILD_SOURCE_SHA"
           [[ "$CORE_OPT_FAILED" == 0 && "$ACTUAL_VFS_CORE_OPT_LEVEL" == O3 ]]
           test ! -e ci-logs/optimizer-checkpoint.json
           node scripts/ci/strong_optimization.mjs verify

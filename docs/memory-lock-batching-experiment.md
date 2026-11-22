@@ -28,8 +28,18 @@ and measurement; public deployment and default enablement are not included.
   at Rubrc `02a624061898597a5c7e9c172076f2e3e37ce3cc` failed during builds;
   browser replay never ran. The implementation's application-level effect
   remains unmeasured. The isolated branch is `perf/memory-lock-batching`.
-- Checkpointed retry preparation preserves every optimizer level, flag, source
-  and validation requirement; it changes build scheduling, not runtime policy.
+- Checkpointed retry: <https://github.com/oligamiq/rubrc/actions/runs/44555795559>
+  at Rubrc `0673d0a0b2a2fa0499fc661ec5ce1f6029c035d6`. Both seed/lower jobs
+  passed and verified eight cache hits per lower job. A component runner lost
+  communication; attempt 2 completed both component jobs. Its off finish job
+  then stopped BEFORE building at the unchanged 80 GiB disk-headroom check.
+  No browser comparison ran.
+- Finish-only recovery now preserves the standalone native CLI while discarding
+  its disposable native compilation intermediates, keeping the full 64 GiB
+  swap and 80 GiB preflight requirement. Cross-run resume selects the producer's
+  exact application source (still `0673d0a0…`), not the newer workflow harness;
+  both unexpired component checkpoints and every content/provenance check are
+  required. Optimizer flags, runtime policy and correctness checks are unchanged.
 
 ## Implementation
 
@@ -129,6 +139,12 @@ Thus the inspected Wasm did not collapse this workload. This does not establish
 native JIT instruction counts, statistical significance, writer latency, or an
 application speedup. These samples are sequential within one process, not nine
 independent process replicates; their fixed off/on order is not A–B–B–A.
+
+Application lowering evidence from both successful seed/lower pairs has
+11,272,568 identical scalar-access sites. Batching changes acquisition sites
+from 11,272,568 to 4,478,591, eliding 6,793,977 (about 60.3%). These are static
+whole-program counts, NOT dynamic execution counts or a measured application
+speedup.
 
 ## Application build failure and exact-output checkpoints
 

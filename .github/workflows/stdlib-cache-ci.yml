@@ -25,6 +25,9 @@ on:
       memory_lock_gate_run:
         description: Successful WVL memory-lock gate run at the pinned experiment revision
         type: string
+      memory_lock_checkpoint_run:
+        description: Optional completed experiment run with both component checkpoints; resume its exact source
+        type: string
 
 permissions:
   contents: read
@@ -57,6 +60,7 @@ jobs:
     uses: ./.github/workflows/memory-lock-comparison.yml
     with:
       gate_run: ${{ inputs.memory_lock_gate_run }}
+      checkpoint_run: ${{ inputs.memory_lock_checkpoint_run }}
   checks:
     if: github.repository == 'oligamiq/rubrc' && inputs.mode != 'mobile-replay' && inputs.mode != 'startup-profile' && inputs.mode != 'optimizer-replay' && inputs.mode != 'memory-lock-comparison'
     runs-on: ubuntu-24.04

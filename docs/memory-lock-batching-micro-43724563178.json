@@ -12,6 +12,17 @@
   "samplesPerVariant": 9,
   "interpretation": "Exploratory microbenchmark only: not A-B-B-A, not a statistical significance test, and not evidence of application performance. Sample scalarAccesses is nominal source work (64 calls x 8192 iterations x 4 accesses), not a verified dynamic instruction count after optimization. Speedup is batching-off median / batching-on median; values above 1 favor batching.",
   "wasmInspection": "Final core function 358 in all four artifacts retains the 8192-trip loop with two guest loads and two stores; lock acquire call 109 and matching releases occur four times (off) or twice (on) per loop. This is Wasm control-flow inspection, not native JIT instruction counting.",
+  "preLoweringReproducibility": {
+    "interpretation": "In the independent off/on builds for each library mode, both merged and optimized pre-lowering Wasm bytes match exactly. This verifies these fixture inputs, not arbitrary cross-run application build determinism.",
+    "legacyLibrary": {
+      "mergedSha256": "5427ef781a8fe92715a231ff0b96a02f82611c98fc72bedb91f1116e9b09d747",
+      "optimizedMergedSha256": "63e4c76fa4cac47b021c77dbccc3d94931dbb5d6875d2a2406ba30ec3e018b78"
+    },
+    "waiterAwareLibrary": {
+      "mergedSha256": "db014a1a7781608661df46902d771e93c67b6336f650c03fb3bac0b454f83bfd",
+      "optimizedMergedSha256": "b0371fc6ac5939d7c0098677452b5678cd674a9bcce5e1bfa32bc61517ca7258"
+    }
+  },
   "variants": [
     {
       "waiterAware": false,
