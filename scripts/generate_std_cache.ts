@@ -23,6 +23,10 @@ import { dirname } from "node:path";
 import { createCacheTerminalCapture } from "./ci/cache_terminal_capture.mjs";
 
 const outputPath = Deno.args[0] ?? "target/std.salsa";
+const diagnosticCommand = Deno.env.get("STD_CACHE_DIAGNOSTIC_COMMAND");
+if (diagnosticCommand !== undefined && diagnosticCommand !== "version") {
+  throw new Error("unsupported STD_CACHE_DIAGNOSTIC_COMMAND");
+}
 const timeoutMs = Number(Deno.env.get("STD_CACHE_TIMEOUT_MS") ?? 15 * 60_000);
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
   throw new Error("invalid STD_CACHE_TIMEOUT_MS");
@@ -166,7 +170,7 @@ try {
           crates: [],
         }),
       }],
-      commands: [
+      commands: diagnosticCommand === "version" ? [["rust-analyzer", "--version"]] : [
         [
           "rust-analyzer",
           "generate-std-cache",
@@ -181,14 +185,19 @@ try {
     });
   });
   console.log(result.output);
-  if (!result.ok || !resultBytes?.length) {
-    throw new Error(result.error ?? "WASM analyzer did not produce a cache");
+  if (diagnosticCommand === "version") {
+    if (!result.ok) throw new Error(result.error ?? "WASM analyzer version probe failed");
+    console.log("[std-cache-diagnostic] version command returned; no cache was generated");
+  } else {
+    if (!result.ok || !resultBytes?.length) {
+      throw new Error(result.error ?? "WASM analyzer did not produce a cache");
+    }
+    await Deno.mkdir(dirname(outputPath), { recursive: true });
+    await Deno.writeFile(outputPath, resultBytes);
+    console.log(
+      `Generated ${outputPath} (${resultBytes.length} bytes) using the bundled WASM analyzer`,
+    );
   }
-  await Deno.mkdir(dirname(outputPath), { recursive: true });
-  await Deno.writeFile(outputPath, resultBytes);
-  console.log(
-    `Generated ${outputPath} (${resultBytes.length} bytes) using the bundled WASM analyzer`,
-  );
 } finally {
   // Spawned guest workers send terminalWrite directly to the farm, bypassing
   // the driver's terminal callback. Preserve their bounded output on failures

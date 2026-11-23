@@ -27,6 +27,7 @@ env:
   PUPPETEER_SKIP_DOWNLOAD: "true"
   # A bounded startup diagnostic, NOT cache-generation acceptance or a benchmark.
   STD_CACHE_TIMEOUT_MS: "300000"
+  STD_CACHE_DIAGNOSTIC_COMMAND: version
 jobs:
   diagnose:
     runs-on: ubuntu-24.04
