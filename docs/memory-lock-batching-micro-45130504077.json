@@ -1,0 +1,338 @@
+{
+  "gateRun": "https://github.com/oligamiq/wasi_virt_layer/actions/runs/45130504077",
+  "wvlRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+  "rawLogSha256": {
+    "off": "4b3d310cb4d08d3964574f4ed3a97020af7008156b55700321f77192831bc51d",
+    "on": "95210435793031ceb3b571a013ee8d91f5b12cced68f06bf447f8f76866d45d8"
+  },
+  "schemaVersion": 1,
+  "interpretation": "Exploratory microbenchmark only: not A-B-B-A, not a statistical significance test, and not evidence of application performance. Sample scalarAccesses is nominal source work (64 calls x 8192 iterations x 4 accesses), not a verified dynamic instruction count after optimization. Speedup is batching-off median / batching-on median; values above 1 favor batching.",
+  "primaryWaiterAware": {
+    "waiterAware": true,
+    "batchingOff": {
+      "lowering": {
+        "acquires": 4,
+        "elidedAcquires": 0,
+        "enabled": false,
+        "maxBatchOperators": 64,
+        "scalarAccesses": 4
+      },
+      "samples": [
+        {
+          "sample": 0,
+          "elapsedNs": 34423792,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 1,
+          "elapsedNs": 34375721,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 2,
+          "elapsedNs": 34274737,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 3,
+          "elapsedNs": 34323154,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 4,
+          "elapsedNs": 34406953,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 5,
+          "elapsedNs": 34248286,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 6,
+          "elapsedNs": 34264677,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 7,
+          "elapsedNs": 34286573,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 8,
+          "elapsedNs": 34262757,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        }
+      ],
+      "waiterAware": true,
+      "summary": {
+        "medianNs": 34286573,
+        "minNs": 34248286,
+        "maxNs": 34423792
+      }
+    },
+    "batchingOn": {
+      "lowering": {
+        "acquires": 2,
+        "elidedAcquires": 2,
+        "enabled": true,
+        "maxBatchOperators": 64,
+        "scalarAccesses": 4
+      },
+      "samples": [
+        {
+          "sample": 0,
+          "elapsedNs": 17356175,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 1,
+          "elapsedNs": 17325884,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 2,
+          "elapsedNs": 17203486,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 3,
+          "elapsedNs": 18290934,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 4,
+          "elapsedNs": 17633947,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 5,
+          "elapsedNs": 18422133,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 6,
+          "elapsedNs": 17476837,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 7,
+          "elapsedNs": 17807099,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        },
+        {
+          "sample": 8,
+          "elapsedNs": 20549690,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": true
+        }
+      ],
+      "waiterAware": true,
+      "summary": {
+        "medianNs": 17633947,
+        "minNs": 17203486,
+        "maxNs": 20549690
+      }
+    },
+    "speedup": 1.944350462207922
+  },
+  "legacyLibrary": {
+    "waiterAware": false,
+    "batchingOff": {
+      "lowering": {
+        "acquires": 4,
+        "elidedAcquires": 0,
+        "enabled": false,
+        "maxBatchOperators": 64,
+        "scalarAccesses": 4
+      },
+      "samples": [
+        {
+          "sample": 0,
+          "elapsedNs": 59325707,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 1,
+          "elapsedNs": 59376846,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 2,
+          "elapsedNs": 59138317,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 3,
+          "elapsedNs": 60498086,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 4,
+          "elapsedNs": 59231064,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 5,
+          "elapsedNs": 59164248,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 6,
+          "elapsedNs": 59119612,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 7,
+          "elapsedNs": 59278633,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 8,
+          "elapsedNs": 59188977,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        }
+      ],
+      "waiterAware": false,
+      "summary": {
+        "medianNs": 59231064,
+        "minNs": 59119612,
+        "maxNs": 60498086
+      }
+    },
+    "batchingOn": {
+      "lowering": {
+        "acquires": 2,
+        "elidedAcquires": 2,
+        "enabled": true,
+        "maxBatchOperators": 64,
+        "scalarAccesses": 4
+      },
+      "samples": [
+        {
+          "sample": 0,
+          "elapsedNs": 30213542,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 1,
+          "elapsedNs": 30242754,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 2,
+          "elapsedNs": 30142953,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 3,
+          "elapsedNs": 31356375,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 4,
+          "elapsedNs": 30202864,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 5,
+          "elapsedNs": 30063569,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 6,
+          "elapsedNs": 30029255,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 7,
+          "elapsedNs": 30080057,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        },
+        {
+          "sample": 8,
+          "elapsedNs": 30032435,
+          "guestCalls": 64,
+          "scalarAccesses": 2097152,
+          "waiterAware": false
+        }
+      ],
+      "waiterAware": false,
+      "summary": {
+        "medianNs": 30142953,
+        "minNs": 30029255,
+        "maxNs": 31356375
+      }
+    },
+    "speedup": 1.9650053529924556
+  }
+}
