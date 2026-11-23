@@ -124,7 +124,18 @@ and measurement; public deployment and default enablement are not included.
   against the real pass (including actual Binaryen120 O3/O4 negative controls),
   and a new required hosted regression runs with pinned Binaryen131 before the
   existing batching/relocation gate. The application pin now selects this fix;
-  full new-revision gate and application startup evidence remain pending.
+  required gate [45130504077](https://github.com/oligamiq/wasi_virt_layer/actions/runs/45130504077)
+  passed, including the Binaryen131 O3/O4 regression and batching/relocation tests.
+  Fresh paired application build [45131532216](https://github.com/oligamiq/rubrc/actions/runs/45131532216)
+  uses source `ff3e160d74cf2be990d0b0b39d764b306833e6bd` and no old checkpoint
+  producer. Application startup and browser measurements remain pending.
+- Corrected-revision exploratory microbenchmark (same gate): waiter-aware off
+  median34.286573ms (34.248286–34.423792), on17.633947ms
+  (17.203486–20.549690), ratio1.944350462; legacy off59.231064ms,
+  on30.142953ms, ratio1.965005353. Each median is nine timed batches of64 calls,
+  not independent process replicates. These are NOT application speedups.
+  Absolute times differ from the earlier hosted run and must not be compared
+  across runs as evidence of a regression or improvement.
 
 ## Implementation
 
