@@ -110,8 +110,21 @@ and measurement; public deployment and default enablement are not included.
   `32e175b2b5ded343a87c6300345a7c04148637c4f950cf2f92f3e55d765a5e0e`)
   was verified against its producer manifest and has only the two original
   mutable globals (stack and TLS), confirming this extra state was introduced
-  inside WVL. A small executable regression reproducer is being prepared before
-  changing the preprocessing order; do not patch arbitrary optimized globals.
+  inside WVL. A tiny executable shared-memory/passive-zero-segment fixture
+  reproduced this with Binaryen120 O3 and Node: stripping drops before optimization
+  allows repeated initialization (guard2); optimizing first and then stripping
+  literal drops traps at `unreachable` and leaves guard1. This is a reproducible
+  transformation-order bug, not a reason to patch arbitrary optimized globals.
+  The correction will retain target reset data before internal optimization,
+  retain the late defensive stripping, and keep strong optimization enabled.
+  Both benchmark arms must be rebuilt at the corrected common revision; existing
+  checkpoint proofs must NOT be relabeled as outputs of the new generator.
+- Fix revision `77f45543eb976e4e7843e78fcd67bd837acac6bd` introduces a first
+  target pre-pass retaining passive data. Four focused tests passed locally
+  against the real pass (including actual Binaryen120 O3/O4 negative controls),
+  and a new required hosted regression runs with pinned Binaryen131 before the
+  existing batching/relocation gate. The application pin now selects this fix;
+  full new-revision gate and application startup evidence remain pending.
 
 ## Implementation
 
