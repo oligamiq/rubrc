@@ -32,10 +32,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-        with:
-          path: harness
-          persist-credentials: false
+      - name: Checkout diagnostic harness without legacy submodule traversal
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          git init harness
+          git -C harness remote add origin https://github.com/oligamiq/rubrc.git
+          git -C harness fetch --no-tags --depth=1 origin "$SOURCE_SHA"
+          git -C harness checkout --detach FETCH_HEAD
       - name: Reject untested restoration tuples
         env:
           PRODUCER_RUN: ${{ inputs.producer_run || '45032121283' }}
@@ -46,11 +51,15 @@ jobs:
           import {validateTuple} from './harness/scripts/ci/restore_cache_diagnostic.mjs';
           validateTuple({producerRun: process.env.PRODUCER_RUN, sourceSha: process.env.SOURCE_SHA, wvlRevision: process.env.WVL_REVISION});
           NODE
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.source_sha || '0673d0a0b2a2fa0499fc661ec5ce1f6029c035d6' }}
-          path: rubrc
-          persist-credentials: false
+      - name: Checkout original application without legacy submodule traversal
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha || '0673d0a0b2a2fa0499fc661ec5ce1f6029c035d6' }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          git init rubrc
+          git -C rubrc remote add origin https://github.com/oligamiq/rubrc.git
+          git -C rubrc fetch --no-tags --depth=1 origin "$SOURCE_SHA"
+          git -C rubrc checkout --detach FETCH_HEAD
       - uses: actions/checkout@v4
         with:
           repository: oligamiq/wasi_virt_layer
