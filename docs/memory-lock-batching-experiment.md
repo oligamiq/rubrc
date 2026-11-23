@@ -85,9 +85,33 @@ and measurement; public deployment and default enablement are not included.
   CI success means bounded diagnostic collection completed, NOT LSP readiness.
   The analogous shell path lacks lifecycle markers, so its exact internal wait
   site is not proven merely by this editor-path observation.
+- Run [45115906635](https://github.com/oligamiq/rubrc/actions/runs/45115906635)
+  sampled exact-core shared-memory locations without acquiring guest locks.
+  Before dispatch: base595656704, logical pages45, relocation lock0, flesh-start
+  guard2. All six subsequent observations (roughly1–26s) had the same base and
+  pages, lock0, guard1, with no reset-return marker. This narrows the observed
+  plateau to incomplete initialization rather than a persistently held relocation
+  lock; it does not prove which instruction/thread owns the unfinished state.
+  Samples are not atomic snapshots, and equal base reads cannot exclude ABA.
 - Baseline batching is OFF in all these diagnostics. No browser application
   benchmark is available. Root cause inside reset is still under investigation;
-  neither a lock upgrade deadlock nor runtime initialization failure is yet proven.
+  a lock-upgrade deadlock is not established.
+- Selective disassembly then found a deterministic reset trap: final-core LSP
+  flesh-start function188441 tests mutable global13 before a zero-fill and traps
+  if set; its tail sets13=1 even when shared initialization was skipped. The
+  module start runs this function on each instance, but reset242310 does not
+  clear13. Reinitialization can therefore strand the shared once guard at1
+  after releasing the read lock, matching the observed lock0/guard1.
+  This is Binaryen MemoryPacking's synthetic passive-segment drop-state pattern:
+  [version131 source](https://raw.githubusercontent.com/WebAssembly/binaryen/version_131/src/passes/MemoryPacking.cpp).
+  WVL strips literal `data.drop` only after its target optimization, too late
+  for drops already encoded as synthetic global checks/sets. The exact cached
+  pre-WVL analyzer (SHA256
+  `32e175b2b5ded343a87c6300345a7c04148637c4f950cf2f92f3e55d765a5e0e`)
+  was verified against its producer manifest and has only the two original
+  mutable globals (stack and TLS), confirming this extra state was introduced
+  inside WVL. A small executable regression reproducer is being prepared before
+  changing the preprocessing order; do not patch arbitrary optimized globals.
 
 ## Implementation
 
