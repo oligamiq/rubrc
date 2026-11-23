@@ -8,6 +8,7 @@ import { isHttpBridgeMessage } from "../lib/src/http_bridge.ts";
 import { isChildProcessMessage } from "../lib/src/child_process_bridge.ts";
 import { waitForStartupSysroots } from "../page/src/vfs_readiness.ts";
 import { VFS_INITIAL_MEMORY_PAGES } from "../page/src/worker_process/vfs_bindings/memory_limits.ts";
+import { resetMemorySnapshot } from "./ci/reset_memory_snapshot.mjs";
 
 await set_fake_worker();
 
@@ -223,6 +224,12 @@ workerScope.onmessage = async (event) => {
     if (diagnosticLspStart) {
       // Diagnostic only: use the existing editor dispatch, whose compiled-in
       // lifecycle markers localize reset/start/main without changing the Wasm.
+      const coreSha = Deno.env.get("STD_CACHE_DIAGNOSTIC_CORE_SHA");
+      const snapshot = (phase: string) => {
+        if (coreSha) output += `[reset-memory-snapshot] ${JSON.stringify({phase,
+          ...resetMemorySnapshot(memory, coreSha)})}\n`;
+      };
+      snapshot("before-dispatch");
       const body = JSON.stringify({jsonrpc: "2.0", id: 1, method: "initialize",
         params: {processId: null, rootUri: null, capabilities: {}}});
       const payload = new TextEncoder().encode(body);
@@ -230,7 +237,12 @@ workerScope.onmessage = async (event) => {
         `Content-Length: ${payload.length}\r\n\r\n${body}`,
       ));
       const deadline = performance.now() + Math.min(timeoutMs, 30_000);
+      let nextSnapshot = performance.now() + 1_000;
       while (performance.now() < deadline) {
+        if (performance.now() >= nextSnapshot) {
+          snapshot("during-reset");
+          nextSnapshot = performance.now() + 5_000;
+        }
         output += drainOutput();
         await new Promise((resolve) => setTimeout(resolve, 25));
       }

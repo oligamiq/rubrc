@@ -28,6 +28,7 @@ env:
   # A bounded startup diagnostic, NOT cache-generation acceptance or a benchmark.
   STD_CACHE_TIMEOUT_MS: "300000"
   STD_CACHE_DIAGNOSTIC_COMMAND: lsp-start
+  STD_CACHE_DIAGNOSTIC_CORE_SHA: 375a07601afac782b81ffd7d49a0891bf7980cca395e5deabd918e569ea06502
 jobs:
   diagnose:
     runs-on: ubuntu-24.04
@@ -106,6 +107,7 @@ jobs:
           cp harness/scripts/generate_std_cache.ts rubrc/scripts/generate_std_cache.ts
           cp harness/scripts/vfs_debug_shell_worker.ts rubrc/scripts/vfs_debug_shell_worker.ts
           cp harness/scripts/ci/cache_terminal_capture.mjs rubrc/scripts/ci/cache_terminal_capture.mjs
+          cp harness/scripts/ci/reset_memory_snapshot.mjs rubrc/scripts/ci/reset_memory_snapshot.mjs
           git -C rubrc diff --stat > diagnostic-logs/application-overlay.txt
           sha256sum rubrc/page/src/worker_process/vfs_bindings/vfs.core.wasm > diagnostic-logs/restored-core-sha256.txt
       - name: Run bounded cache startup diagnostic on the existing core
