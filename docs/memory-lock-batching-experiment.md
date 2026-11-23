@@ -128,8 +128,10 @@ and measurement; public deployment and default enablement are not included.
   passed, including the Binaryen131 O3/O4 regression and batching/relocation tests.
   Fresh paired application build [45131532216](https://github.com/oligamiq/rubrc/actions/runs/45131532216)
   uses source `ff3e160d74cf2be990d0b0b39d764b306833e6bd` and no old checkpoint
-  producer. Both seed jobs passed; baseline lowering is now running. Application
-  startup and browser measurements remain pending. The local comparison,
+  producer. Both seed and lower jobs passed; component generation is underway.
+  All eight pre-lowering optimizer inputs, tools, arguments and output hashes
+  match across arms; preserved comparison: `target/lock-batching-evidence/45131532216/lower-comparability.json`.
+  Application startup and browser measurements remain pending. The local comparison,
   checkpoint/provenance and diagnostic harness suite was rerun: 71 passed,
   zero failed/skipped. Downloaded seed evidence independently validates eight
   successful exact-identity optimizer proofs per arm and a final intentional
