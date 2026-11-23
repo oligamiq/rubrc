@@ -24,7 +24,7 @@ import { createCacheTerminalCapture } from "./ci/cache_terminal_capture.mjs";
 
 const outputPath = Deno.args[0] ?? "target/std.salsa";
 const diagnosticCommand = Deno.env.get("STD_CACHE_DIAGNOSTIC_COMMAND");
-if (diagnosticCommand !== undefined && diagnosticCommand !== "version") {
+if (diagnosticCommand !== undefined && !["version", "lsp-start"].includes(diagnosticCommand)) {
   throw new Error("unsupported STD_CACHE_DIAGNOSTIC_COMMAND");
 }
 const timeoutMs = Number(Deno.env.get("STD_CACHE_TIMEOUT_MS") ?? 15 * 60_000);
@@ -162,6 +162,7 @@ try {
       threads: 8,
       timeoutMs,
       installStartupSysroots: true,
+      diagnosticLspStart: diagnosticCommand === "lsp-start",
       preloads: [{
         path: "/rust-project.json",
         content: JSON.stringify({
@@ -185,9 +186,9 @@ try {
     });
   });
   console.log(result.output);
-  if (diagnosticCommand === "version") {
-    if (!result.ok) throw new Error(result.error ?? "WASM analyzer version probe failed");
-    console.log("[std-cache-diagnostic] version command returned; no cache was generated");
+  if (diagnosticCommand !== undefined) {
+    if (!result.ok) throw new Error(result.error ?? "WASM analyzer diagnostic failed");
+    console.log(`[std-cache-diagnostic] ${diagnosticCommand} probe completed; no cache was generated`);
   } else {
     if (!result.ok || !resultBytes?.length) {
       throw new Error(result.error ?? "WASM analyzer did not produce a cache");

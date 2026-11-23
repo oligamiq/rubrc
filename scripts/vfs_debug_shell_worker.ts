@@ -40,6 +40,7 @@ type DebugShellStartMessage = {
   installStartupSysroots?: boolean;
   env?: string[];
   initialInput?: string;
+  diagnosticLspStart?: boolean;
 };
 
 type WorkerScope = {
@@ -61,6 +62,7 @@ workerScope.onmessage = async (event) => {
     installStartupSysroots = false,
     env = [],
     initialInput = "",
+    diagnosticLspStart = false,
   } = event.data;
   let output = "";
   let terminalOutput = "";
@@ -216,6 +218,24 @@ workerScope.onmessage = async (event) => {
       if (!output.includes(" $ ")) {
         throw new Error(`initial shell prompt timed out after ${timeoutMs}ms`);
       }
+    }
+
+    if (diagnosticLspStart) {
+      // Diagnostic only: use the existing editor dispatch, whose compiled-in
+      // lifecycle markers localize reset/start/main without changing the Wasm.
+      const body = JSON.stringify({jsonrpc: "2.0", id: 1, method: "initialize",
+        params: {processId: null, rootUri: null, capabilities: {}}});
+      const payload = new TextEncoder().encode(body);
+      dispatchBytes(0xffffffff, 6, new TextEncoder().encode(
+        `Content-Length: ${payload.length}\r\n\r\n${body}`,
+      ));
+      const deadline = performance.now() + Math.min(timeoutMs, 30_000);
+      while (performance.now() < deadline) {
+        output += drainOutput();
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      workerScope.postMessage({ok: true, output: output + drainOutput()});
+      return;
     }
 
     for (let index = 0; index < commands.length; index++) {
