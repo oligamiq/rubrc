@@ -20,6 +20,7 @@ import { takeExactSysrootChunk } from "../page/src/sysroot_protocol.ts";
 import { prepareReleasedRustSrcSquashfs } from "./rust_src_archive.ts";
 import { prepareCachedArchive } from "./sysroot_cache.ts";
 import { dirname } from "node:path";
+import { createCacheTerminalCapture } from "./ci/cache_terminal_capture.mjs";
 
 const outputPath = Deno.args[0] ?? "target/std.salsa";
 const timeoutMs = Number(Deno.env.get("STD_CACHE_TIMEOUT_MS") ?? 15 * 60_000);
@@ -36,6 +37,7 @@ const decompressed = await new Response(
   ),
 ).arrayBuffer();
 const http = createHttpBridge();
+const terminalCapture = createCacheTerminalCapture();
 let archive: Uint8Array | undefined;
 let download: Uint8Array[] | undefined;
 let resultBytes: Uint8Array | undefined;
@@ -68,6 +70,7 @@ farm = new WASIFarm(
           chunk_len?: number;
           name?: string;
           data?: number[];
+          session_id?: number;
         };
       };
       switch (message.name) {
@@ -120,6 +123,7 @@ farm = new WASIFarm(
           return {};
         }
         case "terminalWrite":
+          terminalCapture.push(message.args);
           return {};
         default:
           throw new Error(
@@ -186,5 +190,9 @@ try {
     `Generated ${outputPath} (${resultBytes.length} bytes) using the bundled WASM analyzer`,
   );
 } finally {
+  // Spawned guest workers send terminalWrite directly to the farm, bypassing
+  // the driver's terminal callback. Preserve their bounded output on failures
+  // as well as success, instead of silently discarding analyzer diagnostics.
+  console.log("[std-cache-host-terminal]", JSON.stringify(terminalCapture.snapshot()));
   worker.terminate();
 }

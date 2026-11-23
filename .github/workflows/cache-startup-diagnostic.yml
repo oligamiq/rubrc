@@ -1,0 +1,128 @@
+name: Existing core cache startup diagnostic
+on:
+  workflow_call: {}
+  workflow_dispatch:
+    inputs:
+      producer_run:
+        description: Tested final-core producer (only this tuple is supported)
+        type: string
+        default: "45032121283"
+        required: true
+      source_sha:
+        description: Original application source, not the diagnostic harness
+        type: string
+        default: "0673d0a0b2a2fa0499fc661ec5ce1f6029c035d6"
+        required: true
+      wvl_revision:
+        description: Exact WVL template revision
+        type: string
+        default: "456a69aa9223e2e1b90cf260c573f31782987238"
+        required: true
+permissions:
+  contents: read
+  actions: read
+env:
+  RA_TOOLCHAIN: nightly-2026-09-13
+  RUSTUP_TOOLCHAIN: nightly-2026-09-13
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+  # A bounded startup diagnostic, NOT cache-generation acceptance or a benchmark.
+  STD_CACHE_TIMEOUT_MS: "300000"
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - name: Reject untested restoration tuples
+        env:
+          PRODUCER_RUN: ${{ inputs.producer_run || '45032121283' }}
+          SOURCE_SHA: ${{ inputs.source_sha || '0673d0a0b2a2fa0499fc661ec5ce1f6029c035d6' }}
+          WVL_REVISION: ${{ inputs.wvl_revision || '456a69aa9223e2e1b90cf260c573f31782987238' }}
+        run: |
+          node --input-type=module <<'NODE'
+          import {validateTuple} from './harness/scripts/ci/restore_cache_diagnostic.mjs';
+          validateTuple({producerRun: process.env.PRODUCER_RUN, sourceSha: process.env.SOURCE_SHA, wvlRevision: process.env.WVL_REVISION});
+          NODE
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || '0673d0a0b2a2fa0499fc661ec5ce1f6029c035d6' }}
+          path: rubrc
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: oligamiq/wasi_virt_layer
+          ref: ${{ inputs.wvl_revision || '456a69aa9223e2e1b90cf260c573f31782987238' }}
+          path: wvl
+          persist-credentials: false
+      - uses: ./rubrc/.github/actions/stdlib-cache-setup
+      - name: Install archive utilities only (no compiler or optimizer build)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends squashfs-tools squashfs-tools-ng
+      - name: Download final optimizer checkpoints
+        uses: actions/download-artifact@v4
+        with:
+          name: checkpoint-batching-off-finish
+          path: diagnostic-checkpoints
+          run-id: ${{ inputs.producer_run || '45032121283' }}
+          github-token: ${{ github.token }}
+      - name: Download original runtime evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: lock-build-batching-off-finish
+          path: diagnostic-evidence
+          run-id: ${{ inputs.producer_run || '45032121283' }}
+          github-token: ${{ github.token }}
+      - name: Restore verified core and exact binding templates without rebuilding
+        env:
+          PRODUCER_RUN: ${{ inputs.producer_run || '45032121283' }}
+          SOURCE_SHA: ${{ inputs.source_sha || '0673d0a0b2a2fa0499fc661ec5ce1f6029c035d6' }}
+          WVL_REVISION: ${{ inputs.wvl_revision || '456a69aa9223e2e1b90cf260c573f31782987238' }}
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostic-logs
+          test "$(git -C rubrc rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C wvl rev-parse HEAD)" = "$WVL_REVISION"
+          node --input-type=module <<'NODE' | tee diagnostic-logs/restore.json
+          import {restore} from './harness/scripts/ci/restore_cache_diagnostic.mjs';
+          await restore({cacheDir: 'diagnostic-checkpoints', evidenceDir: 'diagnostic-evidence', wvlDir: 'wvl', outputDir: 'diagnostic-dist', producerRun: process.env.PRODUCER_RUN, sourceSha: process.env.SOURCE_SHA, wvlRevision: process.env.WVL_REVISION});
+          NODE
+          # The original copier preserves the ORIGINAL application-specific imports,
+          # adapters and package lock; generated generic inst.ts is intentionally absent.
+          VFS_BINDINGS_SOURCE_DIR="$GITHUB_WORKSPACE/diagnostic-dist" node rubrc/scripts/copy_vfs_bindings.mjs
+          cp harness/scripts/generate_std_cache.ts rubrc/scripts/generate_std_cache.ts
+          cp harness/scripts/ci/cache_terminal_capture.mjs rubrc/scripts/ci/cache_terminal_capture.mjs
+          git -C rubrc diff --stat > diagnostic-logs/application-overlay.txt
+          sha256sum rubrc/page/src/worker_process/vfs_bindings/vfs.core.wasm > diagnostic-logs/restored-core-sha256.txt
+      - name: Run bounded cache startup diagnostic on the existing core
+        working-directory: rubrc
+        run: |
+          set -euo pipefail
+          (
+            while true; do
+              date -u +%FT%TZ
+              free -m
+              ps -C deno -L -o pid,tid,rss,pcpu,time,etime,stat,wchan:32 || true
+              sleep 15
+            done
+          ) > ../diagnostic-logs/resources.log 2>&1 &
+          monitor=$!
+          trap 'kill "$monitor" 2>/dev/null || true' EXIT
+          set +e
+          deno run --no-lock -A scripts/generate_std_cache.ts target/diagnostic-std.salsa 2>&1 | tee ../diagnostic-logs/cache.log
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          printf '{"diagnosticOnly":true,"timeoutMs":300000,"exitStatus":%s,"logStatus":%s}\n' "${statuses[0]}" "${statuses[1]}" > ../diagnostic-logs/result.json
+          test "${statuses[1]}" -eq 0
+          exit "${statuses[0]}"
+      - name: Preserve diagnostic evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-startup-diagnostic-${{ github.run_id }}
+          path: diagnostic-logs/
+          if-no-files-found: warn
+          retention-days: 14

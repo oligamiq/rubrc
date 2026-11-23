@@ -47,8 +47,23 @@ and measurement; public deployment and default enablement are not included.
   `3f6b8557` with original application `0673d0a0…`. It passed the authenticated
   exact-revision gate, restored the off component checkpoint, removed unused
   .NET/Android SDKs only on the disposable hosted runner, and passed the original
-  disk/swap preflight. Final compilation/optimization is now running. No
-  application measurement has yet completed.
+  disk/swap preflight. Final O3 optimization succeeded (36m44s, peak RSS
+  15,581,040 KiB), but bundled `generate-std-cache` again timed out after
+  1,800,000 ms on command 1/2. No application measurement completed.
+- During that cache-generation plateau, Deno RSS stayed near 1.93 GB while
+  lifetime CPU utilization declined to 0.9%; host available RAM was about 13 GB.
+  Waiting/blocking is more plausible than sustained compute, but the exact wait
+  site remains unproven. The last reserve result `45` is the prior logical page
+  count returned after a successful reserve, not an allocation-failure code.
+- A definite observability defect was found: spawned-worker `terminalWrite`
+  callbacks go directly to the farm, where cache generation discarded them.
+  A bounded per-session UTF-8 tail now records those messages in a final JSON
+  diagnostic without changing guest acknowledgements. Three focused tests pass.
+  An exact-final-core diagnostic replay is being prepared; it is not a timing
+  acceptance run. Final off and component on optimizer archives were preserved
+  locally before expiry (ZIP SHA256 respectively
+  `a1a5ba966c2c4f5f21217345cb9cdd8b84e84c243238d542fafb96738d17a091`
+  and `8db2b8f2448b8efb9832be8376155d5226d28b8f334e9296bf2f4eaf466ad4ea`).
 
 ## Implementation
 
