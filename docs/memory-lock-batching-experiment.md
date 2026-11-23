@@ -128,7 +128,15 @@ and measurement; public deployment and default enablement are not included.
   passed, including the Binaryen131 O3/O4 regression and batching/relocation tests.
   Fresh paired application build [45131532216](https://github.com/oligamiq/rubrc/actions/runs/45131532216)
   uses source `ff3e160d74cf2be990d0b0b39d764b306833e6bd` and no old checkpoint
-  producer. Application startup and browser measurements remain pending.
+  producer. Both seed jobs passed; baseline lowering is now running. Application
+  startup and browser measurements remain pending. The local comparison,
+  checkpoint/provenance and diagnostic harness suite was rerun: 71 passed,
+  zero failed/skipped. Downloaded seed evidence independently validates eight
+  successful exact-identity optimizer proofs per arm and a final intentional
+  status75 checkpoint (not a failed optimizer). Corrected generation still
+  reports11,272,568 scalar sites in each arm, with acquisition sites reduced
+  from11,272,568 to4,478,591 (6,793,977 elided) when batching is enabled.
+  These static counts are not dynamic runtime measurements.
 - Corrected-revision exploratory microbenchmark (same gate): waiter-aware off
   median34.286573ms (34.248286–34.423792), on17.633947ms
   (17.203486–20.549690), ratio1.944350462; legacy off59.231064ms,
