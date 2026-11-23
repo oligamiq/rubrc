@@ -59,11 +59,35 @@ and measurement; public deployment and default enablement are not included.
   callbacks go directly to the farm, where cache generation discarded them.
   A bounded per-session UTF-8 tail now records those messages in a final JSON
   diagnostic without changing guest acknowledgements. Three focused tests pass.
-  An exact-final-core diagnostic replay is being prepared; it is not a timing
-  acceptance run. Final off and component on optimizer archives were preserved
+  Exact-final-core diagnostic replay is now running independently of expensive
+  builds; these runs are not timing acceptance runs. Final off and component on optimizer archives were preserved
   locally before expiry (ZIP SHA256 respectively
   `a1a5ba966c2c4f5f21217345cb9cdd8b84e84c243238d542fafb96738d17a091`
   and `8db2b8f2448b8efb9832be8376155d5226d28b8f334e9296bf2f4eaf466ad4ea`).
+
+### Exact-core startup diagnostics (2026-11-23)
+
+- Restore validates the final-core optimizer identity/proof and SHA256
+  `375a07601afac782b81ffd7d49a0891bf7980cca395e5deabd918e569ea06502`.
+  The original adapters and locked dependencies are preserved. WVL templates
+  are reconstructed at the exact revision, and the core import minimum (9203
+  pages) supplies initial memory, not the stale tracked generated value.
+- Run [45087383256](https://github.com/oligamiq/rubrc/actions/runs/45087383256)
+  reproduced the cache-startup stall within five minutes. Captured farm output
+  contained only session 0 shell/sysroot messages, not analyzer output.
+- Run [45098532999](https://github.com/oligamiq/rubrc/actions/runs/45098532999)
+  also timed out on `rust-analyzer --version` after five minutes. Thus the
+  failure is not specific to generating the standard-library snapshot.
+- Run [45099671233](https://github.com/oligamiq/rubrc/actions/runs/45099671233)
+  exercised the existing editor dispatch on that same core to use its already
+  compiled lifecycle markers. It recorded `lsp:thread:start`, successful reserve,
+  and `lsp:_reset:enter`, but no `_reset:return` in a 30-second observation window.
+  CI success means bounded diagnostic collection completed, NOT LSP readiness.
+  The analogous shell path lacks lifecycle markers, so its exact internal wait
+  site is not proven merely by this editor-path observation.
+- Baseline batching is OFF in all these diagnostics. No browser application
+  benchmark is available. Root cause inside reset is still under investigation;
+  neither a lock upgrade deadlock nor runtime initialization failure is yet proven.
 
 ## Implementation
 
