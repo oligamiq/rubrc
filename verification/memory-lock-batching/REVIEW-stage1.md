@@ -13,7 +13,7 @@ Reviewer executed `python3 verification/memory-lock-batching/model_check.py` on 
 3. Terminal ownership should not depend on writer being done. Made check per reader, independent of writer progress.
 4. Prevent assertions disabled accidentally: checker exits nonzero under Python -O.
 
-Parent reran revised checker hash e1a01d10dc70c5acef25c6217a1a0fb4e8ebc2ee3e786f9fbd7db1f9ede9bf78; same positive counts, six controls detected. Preserve both results: stage1-results.json (original) and stage1-results-v2.json (current). Reviewer did not re-review all v2 edits at time of this record.
+Parent reran revised checker hash e1a01d10dc70c5acef25c6217a1a0fb4e8ebc2ee3e786f9fbd7db1f9ede9bf78; same positive counts, six controls detected. Preserve both results: stage1-results.json (original) and stage1-results-v2.json (current). Reviewer subsequently re-reviewed the v2 edits and reproduced exact equality with stage1-results-v2.json, including all six controls; no new blocking issue found within scope.
 
 ## Source correspondence independently inspected
 
