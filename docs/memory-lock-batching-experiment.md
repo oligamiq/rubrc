@@ -1,6 +1,21 @@
 # Memory-lock batching experiment
 
-## Objective and current state
+## Final result (recorded 2026-11-26 JST)
+
+Implementation and requested benchmark completed. Corrected paired CI45131532216
+passed all builds, actual WASM cache generation, and same-runner browser A–B–B–A
+acceptance. Semantic warming:31.6968s off →14.9004s on (2.127×,53.0% less time).
+Both candidate session medians beat both baseline medians. This is one small
+hosted experiment, not a universal speedup or statistical significance claim.
+See [full report and caveats](results/memory-lock-batching-45131532216/REPORT.md)
+and its preserved raw logs. Both arms use the same reset fix and strong profile.
+Caches were generated separately, not byte-identical; diagnostic checks are
+limited as documented. Default stays OFF; no deployment performed.
+
+## Objective and chronological progress
+
+The following status notes preserve the history; the final result above supersedes
+old references to pending builds or unmeasured application performance.
 
 Implement idea 1: reduce per-access relocation read-lock overhead, then benchmark
 against the same runtime with batching disabled. The user requested implementation

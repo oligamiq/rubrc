@@ -1,0 +1,473 @@
+{
+  "decision": "improved",
+  "baseline": {
+    "medianMs": 31696.831249999992,
+    "minMs": 31408.91749999998,
+    "maxMs": 31984.745000000003
+  },
+  "candidate": {
+    "medianMs": 14900.378750000003,
+    "minMs": 14654.152499999997,
+    "maxMs": 15146.60500000001
+  },
+  "sessions": [
+    {
+      "mode": "batching-off",
+      "build": {
+        "sourceSha": "ff3e160d74cf2be990d0b0b39d764b306833e6bd",
+        "analyzerSha": "07e8d30e340e504655ebace245a8df17f7f91fbf",
+        "wvlRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+        "memoryLockMode": "waiter-aware",
+        "coreOptimizationRequested": "O3",
+        "coreOptimization": "O3",
+        "vfsMemoryTelemetry": 1,
+        "vfsInitialHeapBytes": 536870912,
+        "optimizationProfile": {
+          "name": "strong-compatible-v1",
+          "rust": {
+            "optLevel": 3,
+            "lto": "fat",
+            "codegenUnits": 1
+          },
+          "analyzerWasm": "O3",
+          "wvlStages": "O4-with-O3-for-try-table",
+          "finalCore": "O3",
+          "exceptionCeiling": "Binaryen-131-Flatten-does-not-support-TryTable",
+          "wvlSizeRollback": false,
+          "shellDebugLog": false,
+          "prebuiltGuests": "fixed-inputs-reoptimized-at-compatible-ceiling",
+          "unsafeOptimizationAssumptions": false
+        },
+        "optimizationEvidenceSha256": "8152e442e4047043144e466f5ed214b85585067224c3a1b30b6d5ff5b3e1d88f",
+        "memoryLockBatching": "off",
+        "memoryLockBatchingEvidenceSha256": "6fecfb492add15b8618bbdfc9127b9feac0034dc8c1740f9e3c86a83d26a8ba8"
+      },
+      "parallelism": "RA main pool (numThreads): 2 · VTP starts 8 (auto-grow) · browser 4",
+      "semanticMedianMs": 31984.745000000003,
+      "visits": [
+        {
+          "visit": "cold",
+          "elapsedMs": 64949.081184,
+          "postSysrootMs": 46711.91010742187,
+          "semanticWarmMs": 30522.735
+        },
+        {
+          "visit": "reload",
+          "elapsedMs": 66621.58817700001,
+          "postSysrootMs": 49382.50997070313,
+          "semanticWarmMs": 33446.755000000005
+        }
+      ],
+      "completionMs": 1696.5661210000108,
+      "diagnosticMs": 798.6669359999942,
+      "calibration": {
+        "kind": "calibration",
+        "profile": "normal",
+        "remote": false,
+        "browser": "Chrome/150.0.7871.24",
+        "limits": {
+          "latency": 0,
+          "downloadThroughput": -1,
+          "uploadThroughput": -1
+        },
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36",
+        "hardwareConcurrency": 4,
+        "width": 1280,
+        "height": 900,
+        "dpr": 1,
+        "calibration": {
+          "bytes": 4194304,
+          "elapsedMs": 34.88999999999942,
+          "workers": [
+            {
+              "bytes": 2097152,
+              "elapsedMs": 34.05999999999767
+            },
+            {
+              "bytes": 2097152,
+              "elapsedMs": 32.19499999999971
+            }
+          ],
+          "ruleObserved": false,
+          "requests": [
+            {
+              "target": "other",
+              "url": "http://127.0.0.1:4187/__rubrc_probe.bin?n=0.45991885327128545",
+              "started": 47.67671,
+              "status": 200,
+              "diskCache": false,
+              "serviceWorker": false,
+              "ended": 47.696969,
+              "bytes": 2097405
+            },
+            {
+              "target": "other",
+              "url": "http://127.0.0.1:4187/__rubrc_probe.bin?n=0.5409769472061202",
+              "started": 47.676617,
+              "status": 200,
+              "diskCache": false,
+              "serviceWorker": false,
+              "ended": 47.697686,
+              "bytes": 2097405
+            }
+          ],
+          "verifiedBy": "shared page profile and concurrent Worker throughput"
+        }
+      },
+      "peakRendererRssKiB": 5480244
+    },
+    {
+      "mode": "batching-on",
+      "build": {
+        "sourceSha": "ff3e160d74cf2be990d0b0b39d764b306833e6bd",
+        "analyzerSha": "07e8d30e340e504655ebace245a8df17f7f91fbf",
+        "wvlRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+        "memoryLockMode": "waiter-aware",
+        "coreOptimizationRequested": "O3",
+        "coreOptimization": "O3",
+        "vfsMemoryTelemetry": 1,
+        "vfsInitialHeapBytes": 536870912,
+        "optimizationProfile": {
+          "name": "strong-compatible-v1",
+          "rust": {
+            "optLevel": 3,
+            "lto": "fat",
+            "codegenUnits": 1
+          },
+          "analyzerWasm": "O3",
+          "wvlStages": "O4-with-O3-for-try-table",
+          "finalCore": "O3",
+          "exceptionCeiling": "Binaryen-131-Flatten-does-not-support-TryTable",
+          "wvlSizeRollback": false,
+          "shellDebugLog": false,
+          "prebuiltGuests": "fixed-inputs-reoptimized-at-compatible-ceiling",
+          "unsafeOptimizationAssumptions": false
+        },
+        "optimizationEvidenceSha256": "17765696db0e9a37d2e3c4dc94024a1a5b515217c7a3a3bc8eb019982be0b359",
+        "memoryLockBatching": "on",
+        "memoryLockBatchingEvidenceSha256": "95afa2bde2b4feaab9979f6fc82c309faeb65ada9a0a363262008533321c6b4a"
+      },
+      "parallelism": "RA main pool (numThreads): 2 · VTP starts 8 (auto-grow) · browser 4",
+      "semanticMedianMs": 14654.152499999997,
+      "visits": [
+        {
+          "visit": "cold",
+          "elapsedMs": 38308.415516,
+          "postSysrootMs": 23318.120234375005,
+          "semanticWarmMs": 15359.88500000001
+        },
+        {
+          "visit": "reload",
+          "elapsedMs": 36229.395663999996,
+          "postSysrootMs": 22608.319921874994,
+          "semanticWarmMs": 13948.419999999984
+        }
+      ],
+      "completionMs": 708.1802520000056,
+      "diagnosticMs": 810.7643520000129,
+      "calibration": {
+        "kind": "calibration",
+        "profile": "normal",
+        "remote": false,
+        "browser": "Chrome/150.0.7871.24",
+        "limits": {
+          "latency": 0,
+          "downloadThroughput": -1,
+          "uploadThroughput": -1
+        },
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36",
+        "hardwareConcurrency": 4,
+        "width": 1280,
+        "height": 900,
+        "dpr": 1,
+        "calibration": {
+          "bytes": 4194304,
+          "elapsedMs": 23.27499999999418,
+          "workers": [
+            {
+              "bytes": 2097152,
+              "elapsedMs": 22.79999999998836
+            },
+            {
+              "bytes": 2097152,
+              "elapsedMs": 21.779999999998836
+            }
+          ],
+          "ruleObserved": false,
+          "requests": [
+            {
+              "target": "other",
+              "url": "http://127.0.0.1:4187/__rubrc_probe.bin?n=0.719412361456305",
+              "started": 184.222257,
+              "status": 200,
+              "diskCache": false,
+              "serviceWorker": false,
+              "ended": 184.237744,
+              "bytes": 2097405
+            },
+            {
+              "target": "other",
+              "url": "http://127.0.0.1:4187/__rubrc_probe.bin?n=0.7595830398394351",
+              "started": 184.222333,
+              "status": 200,
+              "diskCache": false,
+              "serviceWorker": false,
+              "ended": 184.235434,
+              "bytes": 2097405
+            }
+          ],
+          "verifiedBy": "shared page profile and concurrent Worker throughput"
+        }
+      },
+      "peakRendererRssKiB": 4235976
+    },
+    {
+      "mode": "batching-on",
+      "build": {
+        "sourceSha": "ff3e160d74cf2be990d0b0b39d764b306833e6bd",
+        "analyzerSha": "07e8d30e340e504655ebace245a8df17f7f91fbf",
+        "wvlRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+        "memoryLockMode": "waiter-aware",
+        "coreOptimizationRequested": "O3",
+        "coreOptimization": "O3",
+        "vfsMemoryTelemetry": 1,
+        "vfsInitialHeapBytes": 536870912,
+        "optimizationProfile": {
+          "name": "strong-compatible-v1",
+          "rust": {
+            "optLevel": 3,
+            "lto": "fat",
+            "codegenUnits": 1
+          },
+          "analyzerWasm": "O3",
+          "wvlStages": "O4-with-O3-for-try-table",
+          "finalCore": "O3",
+          "exceptionCeiling": "Binaryen-131-Flatten-does-not-support-TryTable",
+          "wvlSizeRollback": false,
+          "shellDebugLog": false,
+          "prebuiltGuests": "fixed-inputs-reoptimized-at-compatible-ceiling",
+          "unsafeOptimizationAssumptions": false
+        },
+        "optimizationEvidenceSha256": "17765696db0e9a37d2e3c4dc94024a1a5b515217c7a3a3bc8eb019982be0b359",
+        "memoryLockBatching": "on",
+        "memoryLockBatchingEvidenceSha256": "95afa2bde2b4feaab9979f6fc82c309faeb65ada9a0a363262008533321c6b4a"
+      },
+      "parallelism": "RA main pool (numThreads): 2 · VTP starts 8 (auto-grow) · browser 4",
+      "semanticMedianMs": 15146.60500000001,
+      "visits": [
+        {
+          "visit": "cold",
+          "elapsedMs": 36095.112495,
+          "postSysrootMs": 22667.14489257813,
+          "semanticWarmMs": 14811.309999999998
+        },
+        {
+          "visit": "reload",
+          "elapsedMs": 36882.491979,
+          "postSysrootMs": 23172.530156249995,
+          "semanticWarmMs": 15481.900000000023
+        }
+      ],
+      "completionMs": 902.067470000009,
+      "diagnosticMs": 624.2731110000022,
+      "calibration": {
+        "kind": "calibration",
+        "profile": "normal",
+        "remote": false,
+        "browser": "Chrome/150.0.7871.24",
+        "limits": {
+          "latency": 0,
+          "downloadThroughput": -1,
+          "uploadThroughput": -1
+        },
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36",
+        "hardwareConcurrency": 4,
+        "width": 1280,
+        "height": 900,
+        "dpr": 1,
+        "calibration": {
+          "bytes": 4194304,
+          "elapsedMs": 36.23000000001048,
+          "workers": [
+            {
+              "bytes": 2097152,
+              "elapsedMs": 26.02499999999418
+            },
+            {
+              "bytes": 2097152,
+              "elapsedMs": 35.77500000002328
+            }
+          ],
+          "ruleObserved": false,
+          "requests": [
+            {
+              "target": "other",
+              "url": "http://127.0.0.1:4187/__rubrc_probe.bin?n=0.7715223901677066",
+              "started": 262.097823,
+              "status": 200,
+              "diskCache": false,
+              "serviceWorker": false,
+              "ended": 262.128209,
+              "bytes": 2097405
+            },
+            {
+              "target": "other",
+              "url": "http://127.0.0.1:4187/__rubrc_probe.bin?n=0.6809337859866913",
+              "started": 262.097797,
+              "status": 200,
+              "diskCache": false,
+              "serviceWorker": false,
+              "ended": 262.118433,
+              "bytes": 2097405
+            }
+          ],
+          "verifiedBy": "shared page profile and concurrent Worker throughput"
+        }
+      },
+      "peakRendererRssKiB": 4285836
+    },
+    {
+      "mode": "batching-off",
+      "build": {
+        "sourceSha": "ff3e160d74cf2be990d0b0b39d764b306833e6bd",
+        "analyzerSha": "07e8d30e340e504655ebace245a8df17f7f91fbf",
+        "wvlRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+        "memoryLockMode": "waiter-aware",
+        "coreOptimizationRequested": "O3",
+        "coreOptimization": "O3",
+        "vfsMemoryTelemetry": 1,
+        "vfsInitialHeapBytes": 536870912,
+        "optimizationProfile": {
+          "name": "strong-compatible-v1",
+          "rust": {
+            "optLevel": 3,
+            "lto": "fat",
+            "codegenUnits": 1
+          },
+          "analyzerWasm": "O3",
+          "wvlStages": "O4-with-O3-for-try-table",
+          "finalCore": "O3",
+          "exceptionCeiling": "Binaryen-131-Flatten-does-not-support-TryTable",
+          "wvlSizeRollback": false,
+          "shellDebugLog": false,
+          "prebuiltGuests": "fixed-inputs-reoptimized-at-compatible-ceiling",
+          "unsafeOptimizationAssumptions": false
+        },
+        "optimizationEvidenceSha256": "8152e442e4047043144e466f5ed214b85585067224c3a1b30b6d5ff5b3e1d88f",
+        "memoryLockBatching": "off",
+        "memoryLockBatchingEvidenceSha256": "6fecfb492add15b8618bbdfc9127b9feac0034dc8c1740f9e3c86a83d26a8ba8"
+      },
+      "parallelism": "RA main pool (numThreads): 2 · VTP starts 8 (auto-grow) · browser 4",
+      "semanticMedianMs": 31408.91749999998,
+      "visits": [
+        {
+          "visit": "cold",
+          "elapsedMs": 63763.061663,
+          "postSysrootMs": 48562.874970703095,
+          "semanticWarmMs": 32331.169999999984
+        },
+        {
+          "visit": "reload",
+          "elapsedMs": 61599.242087000006,
+          "postSysrootMs": 45649.21998046874,
+          "semanticWarmMs": 30486.66499999998
+        }
+      ],
+      "completionMs": 1819.6777830000065,
+      "diagnosticMs": 735.903535999998,
+      "calibration": {
+        "kind": "calibration",
+        "profile": "normal",
+        "remote": false,
+        "browser": "Chrome/150.0.7871.24",
+        "limits": {
+          "latency": 0,
+          "downloadThroughput": -1,
+          "uploadThroughput": -1
+        },
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36",
+        "hardwareConcurrency": 4,
+        "width": 1280,
+        "height": 900,
+        "dpr": 1,
+        "calibration": {
+          "bytes": 4194304,
+          "elapsedMs": 36.445000000006985,
+          "workers": [
+            {
+              "bytes": 2097152,
+              "elapsedMs": 35.72499999997672
+            },
+            {
+              "bytes": 2097152,
+              "elapsedMs": 35.14500000001863
+            }
+          ],
+          "ruleObserved": false,
+          "requests": [
+            {
+              "target": "other",
+              "url": "http://127.0.0.1:4187/__rubrc_probe.bin?n=0.6135680621886014",
+              "started": 338.516635,
+              "status": 200,
+              "diskCache": false,
+              "serviceWorker": false,
+              "ended": 338.544812,
+              "bytes": 2097405
+            },
+            {
+              "target": "other",
+              "url": "http://127.0.0.1:4187/__rubrc_probe.bin?n=0.9962240660481632",
+              "started": 338.517049,
+              "status": 200,
+              "diskCache": false,
+              "serviceWorker": false,
+              "ended": 338.546247,
+              "bytes": 2097405
+            }
+          ],
+          "verifiedBy": "shared page profile and concurrent Worker throughput"
+        }
+      },
+      "peakRendererRssKiB": 5577584
+    }
+  ],
+  "artifacts": {
+    "batching-off": {
+      "coreSha": "3a7f6a68b9f14a700289a13d2f8115047c8b39bc87b3409f05a9f25b835a3f9b",
+      "lspSha": "32e175b2b5ded343a87c6300345a7c04148637c4f950cf2f92f3e55d765a5e0e",
+      "cacheSha": "87fddca1036c501b84a7e8e62f25a0c5dd4ca4c7e0d38834599a0fbcae0050d2",
+      "guestInputs": {
+        "llvm": "49646790bd63caa399c7f0a3bb92a2b946e3c6a8d174ae4cedd063f27a84fc40",
+        "rustc": "c6dccf3e5f01631b942a0a008b9f2f5312987e7d8590f8c61024cd00687a5791",
+        "cargo": "6c2041141d23732e76b6241d53be379eb5c356837de775ca8d296c38fadccf4c"
+      }
+    },
+    "batching-on": {
+      "coreSha": "1448142480a5d35519f5eb7048e1a4b684cb94ae3bc31ad09ae6bb276a665d25",
+      "lspSha": "32e175b2b5ded343a87c6300345a7c04148637c4f950cf2f92f3e55d765a5e0e",
+      "cacheSha": "1fa993ba2e8257e688e5c1f3f9b2d7b97e9daa2d33304007885d37f20a0ccba3",
+      "guestInputs": {
+        "llvm": "49646790bd63caa399c7f0a3bb92a2b946e3c6a8d174ae4cedd063f27a84fc40",
+        "rustc": "c6dccf3e5f01631b942a0a008b9f2f5312987e7d8590f8c61024cd00687a5791",
+        "cargo": "6c2041141d23732e76b6241d53be379eb5c356837de775ca8d296c38fadccf4c"
+      }
+    }
+  },
+  "batchingEvidence": {
+    "batching-off": {
+      "acquires": 11272568,
+      "elidedAcquires": 0,
+      "enabled": false,
+      "maxBatchOperators": 64,
+      "scalarAccesses": 11272568
+    },
+    "batching-on": {
+      "acquires": 4478591,
+      "elidedAcquires": 6793977,
+      "enabled": true,
+      "maxBatchOperators": 64,
+      "scalarAccesses": 11272568
+    }
+  }
+}

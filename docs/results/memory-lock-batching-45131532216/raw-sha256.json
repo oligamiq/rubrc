@@ -1,0 +1,9 @@
+{
+  "2-batching-on/normal.jsonl": "b3fb96ade76297adff64f9dfdb8c7d9d295f646e2e913101459ab92482da72a1",
+  "3-batching-on/normal.jsonl": "742c493562bc9b49769ab48d7de6f5470668fef7cc5b4fb3dfef1aa7573e44f2",
+  "4-batching-off/normal.jsonl": "d86b1dc8b42b34198ada52311e2fde9970cb30bb0dec25ae6b3e7db88c5b6039",
+  "1-batching-off/normal.jsonl": "8a1c0cb34de59c28d4329e270946a9b76b61688b5932f7cec629bcb116cc9362",
+  "comparison.json": "d8a93bc7f1861f3facf4d3d92ae366f4f3679dfde50e6ce879a99777c2c93161",
+  "sessions.json": "d3e4bd5902385da76986ce627e698fc0fd86cb8cc0cc3b247b7733a30c4b837b",
+  "runner-cpu.txt": "0535bb1480e83c69fe356e41634e13a277dab7414cf5d563975b02388982cb37"
+}

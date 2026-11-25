@@ -71,7 +71,15 @@ The tiny fixture uses shared memory, a680-byte passive zero segment, initial sta
 
 Four focused tests passed locally with Binaryen120/Node; hosted required gate45130504077 passed with Binaryen131/Deno and existing batching/relocation tests. Raw gate logs are under `target/lock-batching-evidence/45130504077/artifacts/ci-logs/`.
 
-## Remaining work and boundaries
+## Final follow-up (2026-11-26 JST)
+
+Run45131532216 completed successfully: both actual WASM cache builds and the
+paired browser replay passed. The reset correction unblocked this application
+experiment without lowering optimization. Final measurements and limitations:
+[benchmark report](results/memory-lock-batching-45131532216/REPORT.md).
+The notes below preserve the prior in-progress state, not the current outcome.
+
+## Earlier remaining work and boundaries
 - Fresh paired app run45131532216 uses source `ff3e160d74cf2be990d0b0b39d764b306833e6bd`, the fixed WVL revision, and NO old checkpoint producer. Both seed and lower stages passed. On2026-11-24(JST), lower evidence was downloaded to `target/lock-batching-evidence/45131532216/lower-evidence/` and independently verified: nine successful optimizer proofs per arm, eight exact cache hits and one new execution, then intentional status75 checkpoint. Lowered optimization execution times were10753203ms(off) and4224821ms(on); these are build times, NOT application measurements. Component-off was running at reconciliation. The previous local watcher no longer existed after session interruption; the external run was still active, and no duplicate build was dispatched.
 - Both candidate and baseline need actual startup/cache completion and paired browser measurement. Neither gate success nor the microbenchmark establishes application speedup.
 - Externally preoptimized inputs may already encode dropped-segment state; the new pass cannot generically reconstruct arbitrary earlier optimizer transformations. The exact analyzer used here was checked not to contain that state before WVL.
