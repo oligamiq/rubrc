@@ -1,6 +1,6 @@
 # Stage 2a: exhaustive reduced-domain semantic validation
 
-Date: 2026-11-26 JST. Target WVL revision: `77f45543eb976e4e7843e78fcd67bd837acac6bd`. This is a deliberately small, dependency-free semantic validation experiment, **not** a proof over WebAssembly i32/i64 or a proof of the Rust transformation. Stage 3 implementation correspondence remains open. Stage 2b full-width symbolic bitvectors would be separate future work.
+Date: 2026-11-26 JST. Target WVL revision: `77f45543eb976e4e7843e78fcd67bd837acac6bd`. This is a deliberately small, dependency-free semantic validation experiment, **not** a proof over WebAssembly i32/i64 or a proof of the Rust transformation. Follow-up Stage3a selected actual-pass event correspondence is recorded in CORRESPONDENCE.md; full implementation refinement remains open. Separate Stage2b full-width local symbolic identities are recorded in SYMBOLIC.md and do not expand this reduced-domain claim.
 
 ## Exact finite domain
 
