@@ -24,10 +24,17 @@ jobs:
       PYTHONDONTWRITEBYTECODE: '1'
       WVL_REVISION: 77f45543eb976e4e7843e78fcd67bd837acac6bd
     steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: false
-          persist-credentials: false
+      # checkout's auth cleanup traverses a legacy gitlink with no .gitmodules URL.
+      # Public exact-SHA fetch avoids that unrelated submodule path entirely.
+      - name: Checkout exact verification source
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          git init .
+          git remote add origin https://github.com/oligamiq/rubrc.git
+          git fetch --no-tags --depth=1 origin "$SOURCE_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
       - name: Checkout pinned production source
         run: |
           git init .worktrees/wvl-lock-batching
