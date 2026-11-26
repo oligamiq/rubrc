@@ -287,7 +287,7 @@ def main():
         summary['correspondenceArtifact']=str((batching/(prefix+'.json')).relative_to(ROOT))
         # Copy fresh artifacts into the CI bundle; do not remove originals.
         for suffix in ('.json','.stdout.log','.stderr.log'):
-            (out/('correspondence'+suffix)).write_bytes((batching/(prefix+suffix)).read_bytes())
+            (out/('correspondence' + ('' if suffix == '.json' else '-raw') + suffix)).write_bytes((batching/(prefix+suffix)).read_bytes())
         ordering=ROOT/'verification/memory-lock-ordering'
         command('litmus',[py,ordering/'run_litmus.py','--output-dir',out/'litmus'],300)
         r=load(out/'litmus/results.json')
@@ -313,6 +313,11 @@ def main():
         final_rev=command('source-revision-after',['git','-C',source,'rev-parse','HEAD']).strip()
         final_clean=command('source-status-after',['git','-C',source,'status','--porcelain','--untracked-files=no']).strip()
         validate('production checkout remains pinned and clean',final_rev==WVL_REV and not final_clean)
+        for record in summary['commands']:
+            for stream in ('stdout','stderr'):
+                saved=record[stream]
+                require(hashlib.sha256((out/saved['file']).read_bytes()).hexdigest()==saved['sha256'], 'command log overwritten: '+saved['file'])
+        validate('all command log digests still match final artifacts',True)
         summary['passed']=True
     except Exception as error:
         summary['error']=repr(error)
