@@ -18,6 +18,7 @@ import {
   recordStartupTestState,
 } from "./lsp_test_api";
 import {
+  type AnalyzerInitializationContext,
   type StagedAnalyzerSession,
   StartupCoordinator,
 } from "./startup_coordinator";
@@ -67,6 +68,7 @@ const App = (props: {
   startLspClient: (
     monaco: typeof import("monaco-editor"),
     model: monaco.editor.ITextModel,
+    context: AnalyzerInitializationContext,
   ) => Promise<StagedAnalyzerSession>;
   registerRemountPreparation?: (
     prepare: (() => Promise<void>) | undefined,
@@ -122,7 +124,7 @@ const App = (props: {
         signal,
       );
     },
-    initializeAnalyzer: async (model) => {
+    initializeAnalyzer: async (model, _signal, context) => {
       await yieldAnimationFrame(runtime.signal);
       const mountedMonaco = mountedMonacoRef;
       if (mountedMonaco === undefined) {
@@ -131,6 +133,7 @@ const App = (props: {
       const session = await props.startLspClient(
         mountedMonaco,
         model as monaco.editor.ITextModel,
+        context,
       );
       return {
         activateProject: async (

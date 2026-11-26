@@ -1,0 +1,200 @@
+Check page/src/worker_process/lsp_dispatch_test.ts
+Check page/src/startup_coordinator_test.ts
+Check page/src/rust_lsp_config_test.ts
+Check page/src/rust_lsp_startup_test.ts
+Check page/src/rust_lsp_client_test.ts
+Check page/src/app_startup_lifecycle_test.ts
+Check page/src/lsp_start_gate_test.ts
+Check page/src/rust_analyzer_readiness_test.ts
+Check page/src/rust_document_sync_test.ts
+Check page/src/stdlib_cache_test.ts
+running 8 tests from ./page/src/worker_process/lsp_dispatch_test.ts
+stdlib cache is installed as raw bytes in VFS-owned memory with acknowledgement ... ok (2ms)
+unacknowledged cache installs fail and still free the VFS buffer ... ok (1ms)
+signed LSP output routes away from terminal ... ok (113µs)
+spawned terminal writes reach LSP transport and preserve terminals ... ok (140µs)
+special input copies, dispatches, and frees synchronously ... ok (229µs)
+VFS input uses event 7 and ordinary terminal input is not handled ... ok (182µs)
+dispatch failure still frees and propagates ... ok (163µs)
+worker terminal forwarding observes rejected channel calls ... ok (6ms)
+running 23 tests from ./page/src/startup_coordinator_test.ts
+coordinator overlaps prefetch with lightweight analyzer startup ... ok (1ms)
+synchronous startup dependency throws keep both branches observed ... ok (1ms)
+coordinator publishes immutable progress and ignores stale callbacks ... ok (673µs)
+coordinator publishes project progress and clears it after crate graph activation ... ok (10ms)
+coordinator preserves the last project progress when activation fails ... ok (362µs)
+coordinator ignores project progress after abort and generation disposal ... ok (362µs)
+coordinator preserves startup failures and disposes the session ... ok (289µs)
+unformattable failures cannot bypass analyzer disposal ... ok (366µs)
+subscribe removes a listener whose initial delivery throws ... ok (199µs)
+publication does not revisit listeners subscribed during delivery ... ok (188µs)
+subscriber failures cannot replace errors or skip cleanup ... ok (226µs)
+prefetch rejection is observed immediately and retained ... ok (748µs)
+late callbacks cannot overwrite a failed snapshot ... ok (313µs)
+coordinator checks cancellation after each phase await ... ok (773µs)
+flush rejects before ready and delegates after startup ... ok (265µs)
+dispose waits for analyzer session disposal ... ok (222µs)
+dispose reports late session cleanup failure ... ok (274µs)
+coordinator conveys sysrootsReady only after successful cached install ... ok (347µs)
+cached startup never initializes after install failure ... ok (211µs)
+cached startup never initializes after abort failure ... ok (68µs)
+cached startup never initializes after cache failure ... ok (107µs)
+coordinator supports cache-enabled startup ordering ... ok (174µs)
+coordinator falls back to original order when cache is unavailable ... ok (185µs)
+running 7 tests from ./page/src/rust_lsp_config_test.ts
+lightweight rust-analyzer options have the exact startup shape ... ok (428µs)
+full rust-analyzer settings preserve the validated project shape ... ok (201µs)
+rust-analyzer configuration builders return fresh objects ... ok (57µs)
+rust-analyzer configuration responses switch from lightweight to the full project ... ok (807µs)
+single-init uses one immutable full snapshot and never downgrades ... ok (137µs)
+legacy activation returns the same selected-thread configuration as responses ... ok (76µs)
+rust-analyzer configuration carries the selected thread count ... ok (98µs)
+running 9 tests from ./page/src/rust_lsp_startup_test.ts
+startup snapshots the current model into VFS before starting the client ... ok (19ms)
+client startup timeout preserves the startup phase ... ok (4ms)
+startup timeout bounds stalled pre-population without cancelling client ... ok (4ms)
+abort bounds stalled pre-population without cancelling client ... ok (3ms)
+abort observes pre-population settlement before rejecting ... ok (2ms)
+client startup failure preserves the original error ... ok (261µs)
+VFS pre-population failure prevents client startup ... ok (258µs)
+abort cancels start, waits for settlement, and preserves its reason ... ok (537µs)
+timeout cancellation is bounded and observes a late rejection ... ok (7ms)
+running 47 tests from ./page/src/rust_lsp_client_test.ts
+RustLspResourceOwner is synchronously adoptable by a runtime ... ok (952µs)
+RustLspResourceOwner memoizes disposal before synchronous listener reentry ... ok (189µs)
+RustLspResourceOwner reentrant abort closes transport once and skips stop ... ok (354µs)
+RustLspResourceOwner abort severs transport during pending disposal ... ok (235µs)
+RustLspResourceOwner disposal drains reentrant late sync cleanup ... ok (331µs)
+RustLspResourceOwner disposal drains reentrant late client cleanup ... ok (118µs)
+RustLspResourceOwner aggregates synchronous reentrant late cleanup failure ... ok (296µs)
+RustLspResourceOwner rejects and cleans every late resource acquisition ... ok (9ms)
+RustLspResourceOwner abort skips graceful stop and disposes remaining resources ... ok (422µs)
+RustLspResourceOwner abort cancels document sync before disposal ... ok (419µs)
+browser startup uses the non-progress sequencer ... ok (514µs)
+browser startup receives the named model and starts lightweight ... ok (151µs)
+legacy: project activation preserves the staged readiness order ... ok (844µs)
+legacy: project activation rejects a different model before side effects ... ok (347µs)
+legacy: project activation rechecks abort after snapshot before VFS mutation ... ok (294µs)
+legacy: activation didOpen mirrors an edit made after its initial snapshot ... ok (1ms)
+legacy: project activation stops at every aborted barrier ... ok (824µs)
+legacy: project activation settles direct mutations before rejecting abort ... ok (4ms)
+legacy: project activation promptly aborts pending observation waiters ... ok (9ms)
+legacy: project activation observes a late rejection after synchronous observation abort ... ok (2ms)
+legacy: project activation observes a late didOpen rejection after synchronous abort ... ok (2ms)
+legacy: project activation checks abort after semantic readiness ... ok (450µs)
+single-init: project activation preserves the staged readiness order ... ok (80µs)
+single-init: project activation rejects a different model before side effects ... ok (55µs)
+single-init: project activation rechecks abort after snapshot before VFS mutation ... ok (82µs)
+single-init: activation didOpen mirrors an edit made after its initial snapshot ... ok (129µs)
+single-init: project activation stops at every aborted barrier ... ok (289µs)
+single-init: project activation settles direct mutations before rejecting abort ... ok (2ms)
+single-init: project activation promptly aborts pending observation waiters ... ok (9ms)
+single-init: project activation observes a late rejection after synchronous observation abort ... ok (2ms)
+single-init: project activation observes a late didOpen rejection after synchronous abort ... ok (2ms)
+single-init: project activation checks abort after semantic readiness ... ok (149µs)
+lightweight startup sends no full configuration or workspace reload ... ok (391µs)
+browser client wires abort and transport cancellation into startup ... ok (254µs)
+browser client preserves superclass pushed-diagnostic capabilities ... ok (195µs)
+Fetching progress remains attached to resource ownership ... ok (191µs)
+analyzer test requests are exposed only in LSP test builds ... ok (277µs)
+analyzer test callback disposal preserves a newer client ... ok (504µs)
+stale generation cannot install delayed analyzer test callbacks ... ok (247µs)
+older analyzer disposal preserves newer generation callbacks ... ok (94µs)
+RustLspResourceOwner disposes all resources even if one throws ... ok (409µs)
+RustLspResourceOwner tears down owned resources in dependency order ... ok (186µs)
+RustLspResourceOwner is idempotent ... ok (89µs)
+RustLspResourceOwner gracefully handles missing resources ... ok (87µs)
+RustLspResourceOwner disposes the progress listener ... ok (85µs)
+disposeRustLspResources tests synchronous construction failure cleanly ... ok (58µs)
+startRustLspClient preserves original construction error when cleanup throws ... ok (141µs)
+running 17 tests from ./page/src/app_startup_lifecycle_test.ts
+single project initialization requires exact opt-in and installed sysroots ... ok (439µs)
+additional target prefetches before guest load and deduplicates ... ok (1ms)
+startup target is initially complete and is not reinstalled ... ok (130µs)
+additional target surfaces prefetch failure and skips guest load ... ok (176µs)
+different additional targets serialize their archive streams ... ok (237µs)
+app cleanup waits for aborted guest settlement before releasing resources ... ok (219µs)
+archive progress subscription remains active through extraction ... ok (167µs)
+target loader settlement waits for an accepted extraction after abort ... ok (423µs)
+generation abort issues no accepted target follow-up calls ... ok (17ms)
+correlated target failure reads error and releases request ... ok (1ms)
+generation abort races state, error, and release transports ... ok (1ms)
+correlated target timeout releases a pending request ... ok (313µs)
+pending timeout cancellation race waits for guest terminal state ... ok (230µs)
+generation abort wins an accepted transport rejection ... ok (250µs)
+correlated target rejects a failed terminal release ... ok (175µs)
+additional sysroot endpoint calls have a bounded transport deadline ... ok (2ms)
+accepted endpoint rejection terminates worker before settlement ... ok (273µs)
+running 12 tests from ./page/src/lsp_start_gate_test.ts
+App creates and attaches the editable named model at mount ... ok (5ms)
+remount preparation persists every file-backed Monaco model ... ok (246µs)
+App wires the runtime-owned archive store into staged startup ... FAILED (36ms)
+entrypoint creates one page supervisor beside the persistent workspace ... ok (1ms)
+App exposes startup state and gates run and target changes ... ok (451µs)
+entrypoint starts LSP from canonical runtime dependencies ... ok (350µs)
+App adopts startup and attaches the model before runtime startup ... ok (192µs)
+adopted coordinator preserves the runtime abort reason ... ok (4ms)
+overlay preserves the editor and renders determinate, indeterminate, and failure states ... ok (2ms)
+overlay renders structured project progress while running and failed ... ok (252µs)
+test API exposes the named model immediately ... ok (1ms)
+test entrypoint remounts only after canonical runtime disposal ... ok (464µs)
+Uncaught error from ./page/src/rust_analyzer_readiness_test.ts FAILED
+running 20 tests from ./page/src/rust_document_sync_test.ts
+didOpen completion follows the VFS write and LSP continuation ... ok (1ms)
+didOpen completion rejects with the original continuation error ... ok (399µs)
+strict initial didOpen rejects on VFS failure without forwarding ... ok (286µs)
+disposal rejects a pending didOpen waiter ... ok (262µs)
+disposal waits for an in-flight didOpen continuation ... ok (19ms)
+abort discards pending writes without waiting for an in-flight didOpen ... ok (481µs)
+didChange forwards immediately and debounces only VFS ... ok (296µs)
+didChange reports every document version before forwarding ... ok (210µs)
+an edit during didOpen cannot overtake the open notification ... ok (331µs)
+flush writes a pending debounce before the run callback ... ok (169µs)
+flush waits for an in-flight write before the run callback ... ok (175µs)
+flush drains an edit queued during an in-flight write ... ok (147µs)
+failed workspace flush suppresses the run callback ... ok (230µs)
+a later successful write clears the workspace flush failure ... ok (190µs)
+a later flush retries a failed snapshot without another edit ... ok (145µs)
+different Rust file URIs retain independent snapshots ... ok (173µs)
+didClose flushes VFS before standard close ... ok (236µs)
+didClose waiter resolves only after the standard close completes ... ok (155µs)
+non-Rust and non-file models bypass VFS mirroring ... ok (109µs)
+ordinary sync logs VFS failures without suppressing LSP and recovers ... ok (267µs)
+running 4 tests from ./page/src/stdlib_cache_test.ts
+cache installation sends the binary buffer without JSON or workspace mirroring ... ok (477µs)
+missing or invalid cache manifest falls back to cold startup ... ok (16ms)
+cache integrity is checked against actual bytes ... ok (20ms)
+aborting cache preparation prevents further startup ... ok (422µs)
+
+ ERRORS 
+
+App wires the runtime-owned archive store into staged startup => ./page/src/lsp_start_gate_test.ts:126:6
+error: Error: coordinator does not initialize the analyzer with Monaco and named model
+  if (!condition) throw new Error(message);
+                        ^
+    at assert (file:///home/oligami/projects/rubrc/page/src/lsp_start_gate_test.ts:2:25)
+    at file:///home/oligami/projects/rubrc/page/src/lsp_start_gate_test.ts:146:3
+
+./page/src/rust_analyzer_readiness_test.ts (uncaught error)
+error: (in promise) NotCapable: Requires env access to "XDG_RUNTIME_DIR", run again with the --allow-env flag
+    at Object.getEnv [as get] (ext:deno_os/30_os.js:1:1291)
+    at denoEnvGet (ext:deno_node/_process/process.ts:1:1219)
+    at Object.get (ext:deno_node/_process/process.ts:1:1360)
+    at Object.<anonymous> (file:///home/oligami/projects/rubrc/node_modules/vscode-jsonrpc/lib/node/main.js:152:36)
+    at Module._compile (node:module:5:1422)
+    at loadMaybeCjs (node:module:5:1904)
+    at Object.Module._extensions..js (node:module:5:1570)
+    at Module.load (node:module:4:1568)
+    at Module._load (node:module:1:24918)
+    at Module.require (node:module:4:1989)
+This error was not caught from a test and caused the test runner to fail on the referenced module.
+It most likely originated from a dangling promise, event/timeout handler or top-level code.
+
+ FAILURES 
+
+App wires the runtime-owned archive store into staged startup => ./page/src/lsp_start_gate_test.ts:126:6
+./page/src/rust_analyzer_readiness_test.ts (uncaught error)
+
+FAILED | 146 passed | 2 failed (3s)
+
+error: Test failed

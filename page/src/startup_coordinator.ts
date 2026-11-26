@@ -43,6 +43,11 @@ export type StagedAnalyzerSession = {
   dispose(): Promise<void>;
 };
 
+// A sequencing capability, not proof that rust-analyzer accepted a semantic cache.
+export type AnalyzerInitializationContext = {
+  readonly sysrootsReady: boolean;
+};
+
 export type StartupDependencies = {
   waitForVfsRuntime(signal: AbortSignal): Promise<void>;
   prefetchSysroots(
@@ -52,6 +57,7 @@ export type StartupDependencies = {
   initializeAnalyzer(
     model: StartupModel,
     signal: AbortSignal,
+    context: AnalyzerInitializationContext,
   ): Promise<StagedAnalyzerSession>;
   installSysroots(signal: AbortSignal): Promise<void>;
   prepareStdlibCache?: (signal: AbortSignal) => Promise<boolean>;
@@ -245,12 +251,16 @@ export class StartupCoordinator {
         signal.throwIfAborted();
 
         this.#setPhase(generation, "analyzer-initializing");
-        analyzer = await this.#dependencies.initializeAnalyzer(model, signal);
+        analyzer = await this.#dependencies.initializeAnalyzer(model, signal, {
+          sysrootsReady: true,
+        });
         this.#session = analyzer;
         signal.throwIfAborted();
       } else {
         this.#setPhase(generation, "analyzer-initializing");
-        analyzer = await this.#dependencies.initializeAnalyzer(model, signal);
+        analyzer = await this.#dependencies.initializeAnalyzer(model, signal, {
+          sysrootsReady: false,
+        });
         this.#session = analyzer;
         signal.throwIfAborted();
         await prefetch;

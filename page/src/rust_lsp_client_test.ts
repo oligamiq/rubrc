@@ -14,7 +14,10 @@ import {
 import { mergeVersionedPublishDiagnostics } from "./rust_lsp_client_capabilities.ts";
 import { activateRustProject } from "./rust_lsp_startup.ts";
 import { RustDocumentSync } from "./rust_document_sync.ts";
-import type { CrateGraphProgress } from "./rust_analyzer_readiness.ts";
+import {
+  type CrateGraphProgress,
+  RustAnalyzerReadiness,
+} from "./rust_analyzer_readiness.ts";
 
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
@@ -280,16 +283,18 @@ Deno.test("RustLspResourceOwner rejects and cleans every late resource acquisiti
         disposalError.errors.includes(cleanupError),
       "late async cleanup failure did not participate in disposal",
     );
-    for (const name of [
-      "sync",
-      "client",
-      "connection",
-      "shared-ref",
-      "progress",
-      "test-api",
-      "readiness",
-      "model-listener",
-    ]) {
+    for (
+      const name of [
+        "sync",
+        "client",
+        "connection",
+        "shared-ref",
+        "progress",
+        "test-api",
+        "readiness",
+        "model-listener",
+      ]
+    ) {
       assert(calls[name] === 1, `${name} late cleanup count changed`);
     }
     assert(unhandled === 0, "late async cleanup rejection was unobserved");
@@ -314,8 +319,9 @@ Deno.test("RustLspResourceOwner abort skips graceful stop and disposes remaining
     needsStop: () => true,
     stop: async () => {
       called("client");
-      if (transportClosed)
+      if (transportClosed) {
         throw new Error("client stopped over closed transport");
+      }
     },
   });
   owner.setConnection({
@@ -335,15 +341,17 @@ Deno.test("RustLspResourceOwner abort skips graceful stop and disposes remaining
   await owner.dispose();
 
   assert(calls.client === undefined, "abort attempted graceful client stop");
-  for (const name of [
-    "test-api",
-    "progress",
-    "model-listener",
-    "readiness",
-    "sync",
-    "transport",
-    "shared-ref",
-  ]) {
+  for (
+    const name of [
+      "test-api",
+      "progress",
+      "model-listener",
+      "readiness",
+      "sync",
+      "transport",
+      "shared-ref",
+    ]
+  ) {
     assert(calls[name] === 1, `${name} abort cleanup count changed`);
   }
 });
@@ -461,653 +469,776 @@ Deno.test("browser startup receives the named model and starts lightweight", asy
   assert(!source.includes("createModel("), "client still creates a model");
 });
 
-Deno.test("project activation preserves the staged readiness order", async () => {
-  const order: string[] = [];
-  let text = "latest before activation";
-  const model = {
-    getValue: () => {
-      order.push("latest snapshot");
-      return text;
-    },
-    getVersionId: () => 7,
-  };
-  const sync = {
-    waitForDidClose: (_uri: string) => {
-      order.push("didClose waiter armed");
-      return Promise.resolve().then(() => {
-        order.push("didClose complete");
-      });
-    },
-    waitForDidOpen: (_uri: string) => {
-      order.push("didOpen waiter armed");
-      return Promise.resolve().then(() => {
-        order.push("didOpen complete");
-      });
-    },
-    waitForStrictDidOpen: (_uri: string) => {
-      order.push("didOpen waiter armed");
-      return Promise.resolve().then(() => {
-        order.push("didOpen complete");
-      });
-    },
-  };
-  const graphProgress: CrateGraphProgress = Object.freeze({
-    attempt: 1,
-    elapsedMs: 5_000,
-    remainingMs: 295_000,
-    labels: Object.freeze(["rubrc_main", "core"]),
-    ready: false,
-  });
-  const readiness = {
-    waitForCrateGraph: async (
-      _signal: AbortSignal,
-      observeProgress?: (progress: CrateGraphProgress) => void,
-    ) => {
-      order.push("crate graph request");
-      observeProgress?.(graphProgress);
-      order.push("crate graph ready");
-    },
-    noteDocumentChanged: (version: number) => {
-      order.push(`diagnostics listener armed:${version}`);
-    },
-    waitForSemanticReadiness: async (_model: unknown, _signal: AbortSignal) => {
-      order.push("latest diagnostics");
-      order.push("explicit inlayHint complete");
-    },
-  };
-  const client = {
-    sendNotification: async (method: string, params: unknown) => {
-      assert(
-        method === "workspace/didChangeConfiguration",
-        `wrong activation notification: ${method}`,
-      );
-      assert(
-        JSON.stringify(params).includes('"display_name":"rubrc-main"'),
-        "full project settings were not sent",
-      );
-      order.push("didChangeConfiguration(full settings)");
-    },
-    sendRequest: async (method: string, params: unknown) => {
-      assert(
-        method === "rust-analyzer/reloadWorkspace",
-        `wrong request: ${method}`,
-      );
-      assert(params === undefined, "workspace reload unexpectedly sent params");
-      order.push("reloadWorkspace complete");
-    },
-  };
-
-  await activateRustProject({
-    initializedModel: model,
-    model,
-    signal: new AbortController().signal,
-    uri: "file:///src/main.rs",
-    writeMain: async (content) => {
-      assert(content === text, "activation wrote a stale model snapshot");
-      order.push("VFS write complete");
-    },
-    client,
-    readiness,
-    sync,
-    setModelLanguage: (_model, language) => {
-      order.push(`setModelLanguage(${language})`);
-    },
-    semanticWarming: () => order.push("semanticWarming"),
-    reportProjectProgress: (progress) => {
-      assert(progress === graphProgress, "activation cloned project progress");
-      order.push("project progress:1");
-    },
-  });
-
-  assert(
-    order.join(",") ===
-      [
-        "latest snapshot",
-        "didChangeConfiguration(full settings)",
-        "crate graph request",
-        "project progress:1",
-        "crate graph ready",
-        "VFS write complete",
-        "diagnostics listener armed:7",
-        "didClose waiter armed",
-        "setModelLanguage(plaintext)",
-        "didClose complete",
-        "didOpen waiter armed",
-        "setModelLanguage(rust)",
-        "didOpen complete",
-        "semanticWarming",
-        "latest diagnostics",
-        "explicit inlayHint complete",
-      ].join(","),
-    `wrong activation order: ${order}`,
-  );
-});
-
-Deno.test("project activation rejects a different model before side effects", async () => {
-  const initializedModel = {
-    getValue: () => "initialized",
-    getVersionId: () => 1,
-  };
-  const activationModel = {
-    getValue: () => "different",
-    getVersionId: () => 2,
-  };
-  const effects: string[] = [];
-  let received: unknown;
-
-  await activateRustProject({
-    initializedModel,
-    model: activationModel,
-    signal: new AbortController().signal,
-    uri: "file:///src/main.rs",
-    writeMain: async () => {
-      effects.push("write");
-    },
-    client: {
-      sendNotification: async () => {
-        effects.push("configuration");
-      },
-      sendRequest: async () => {
-        effects.push("reload");
-      },
-    },
-    readiness: {
-      waitForCrateGraph: async () => {
-        effects.push("crate-graph");
-      },
-      noteDocumentChanged: () => effects.push("diagnostics"),
-      waitForSemanticReadiness: async () => {
-        effects.push("semantic");
-      },
-    },
-    sync: {
-      waitForDidClose: async () => {
-        effects.push("didClose");
-      },
-      waitForStrictDidOpen: async () => {
-        effects.push("didOpen");
-      },
-    },
-    setModelLanguage: () => effects.push("language"),
-    semanticWarming: () => effects.push("warming"),
-    reportProjectProgress: () => {},
-  }).catch((error) => {
-    received = error;
-  });
-
-  assert(
-    received instanceof Error &&
-      received.message === "Rust activation model changed after initialization",
-    `wrong model mismatch error: ${received}`,
-  );
-  assert(
-    effects.length === 0,
-    `model mismatch caused side effects: ${effects}`,
-  );
-});
-
-Deno.test("project activation rechecks abort after snapshot before VFS mutation", async () => {
-  const controller = new AbortController();
-  const reason = new Error("abort during snapshot");
-  let writes = 0;
-  const model = {
-    getValue: () => {
-      controller.abort(reason);
-      return "text";
-    },
-    getVersionId: () => 1,
-  };
-  let received: unknown;
-
-  await activateRustProject({
-    initializedModel: model,
-    model,
-    signal: controller.signal,
-    uri: "file:///src/main.rs",
-    writeMain: async () => {
-      writes++;
-    },
-    client: {
-      sendNotification: async () => {},
-      sendRequest: async () => {},
-    },
-    readiness: {
-      waitForCrateGraph: async () => {},
-      noteDocumentChanged: () => {},
-      waitForSemanticReadiness: async () => {},
-    },
-    sync: {
-      waitForDidClose: async () => {},
-      waitForStrictDidOpen: async () => {},
-    },
-    setModelLanguage: () => {},
-    semanticWarming: () => {},
-    reportProjectProgress: () => {},
-  }).catch((error) => {
-    received = error;
-  });
-
-  assert(received === reason, "snapshot abort reason changed");
-  assert(writes === 0, "VFS mutation started after snapshot abort");
-});
-
-Deno.test("activation didOpen mirrors an edit made after its initial snapshot", async () => {
-  const uri = "file:///src/main.rs";
-  const initial = "fn main() { initial(); }";
-  const latest = "fn main() { latest(); }";
-  let text = initial;
-  let version = 1;
-  const order: string[] = [];
-  const writes: string[] = [];
-  const model = {
-    getValue: () => text,
-    getVersionId: () => version,
-  };
-  const sync = new RustDocumentSync(async (_path, content) => {
-    writes.push(content);
-    order.push(`write:${content}`);
-  });
-  let didOpenDispatch: Promise<void> | undefined;
-  const rustDocument = {
-    uri: {
-      scheme: "file",
-      authority: "",
-      path: "/src/main.rs",
-      toString: () => uri,
-    },
-    languageId: "rust",
-    get version() {
-      return version;
-    },
-    getText: () => text,
-  } as never;
-
-  await activateRustProject({
-    initializedModel: model,
-    model,
-    signal: new AbortController().signal,
-    uri,
-    writeMain: async (content) => {
-      writes.push(content);
-      order.push(`write:${content}`);
-      text = latest;
-      version = 2;
-    },
-    client: {
-      sendNotification: async () => {
-        order.push("configuration");
-      },
-      sendRequest: async () => {
-        order.push("reload");
-      },
-    },
-    readiness: {
-      waitForCrateGraph: async () => {
-        order.push("crate-graph");
-      },
-      noteDocumentChanged: (current) => order.push(`version:${current}`),
-      waitForSemanticReadiness: async () => {
-        order.push("semantic-ready");
-      },
-    },
-    sync,
-    setModelLanguage: (_model, language) => {
-      order.push(`language:${language}`);
-      if (language === "plaintext") {
-        void sync.middleware.didClose!(rustDocument, async () => {
-          order.push("didClose-forwarded");
-        });
-        return;
-      }
-      didOpenDispatch = Promise.resolve(
-        sync.middleware.didOpen!(rustDocument, async () => {
-          order.push("didOpen-forwarded");
-        }),
-      );
-    },
-    semanticWarming: () => order.push("semantic-warming"),
-    reportProjectProgress: () => {},
-  });
-  await didOpenDispatch;
-
-  assert(
-    writes.join("|") === `${initial}|${latest}`,
-    `activation did not mirror the latest text: ${writes}`,
-  );
-  assert(
-    order.indexOf(`write:${latest}`) < order.indexOf("didOpen-forwarded") &&
-      order.indexOf("didOpen-forwarded") < order.indexOf("semantic-warming"),
-    `activation did not await latest didOpen mirroring: ${order}`,
-  );
-});
-
-Deno.test("project activation stops at every aborted barrier", async () => {
-  const cases = [
-    ["configuration", "configuration"],
-    ["crate-graph", "configuration,crate-graph"],
-    ["write", "configuration,crate-graph,write"],
-    ["diagnostics", "configuration,crate-graph,write,diagnostics"],
-    ["didClose", "configuration,crate-graph,write,diagnostics,didClose"],
-    [
-      "didOpen",
-      "configuration,crate-graph,write,diagnostics,didClose,language,didOpen",
-    ],
-    [
-      "language",
-      "configuration,crate-graph,write,diagnostics,didClose,language",
-    ],
-    [
-      "warming",
-      "configuration,crate-graph,write,diagnostics,didClose,language,didOpen,language,warming",
-    ],
-  ] as const;
-
-  for (const [abortAt, expected] of cases) {
-    const controller = new AbortController();
+for (const singleProjectInitialization of [false, true]) {
+  Deno.test(`${singleProjectInitialization ? "single-init" : "legacy"}: project activation preserves the staged readiness order`, async () => {
     const order: string[] = [];
-    const step = (name: string) => {
-      order.push(name);
-      if (name === abortAt) controller.abort(new Error(`abort:${name}`));
+    let text = "latest before activation";
+    const model = {
+      getValue: () => {
+        order.push("latest snapshot");
+        return text;
+      },
+      getVersionId: () => 7,
     };
-    let received: unknown;
-    const model = { getValue: () => "text", getVersionId: () => 1 };
+    const sync = {
+      waitForDidClose: (_uri: string) => {
+        order.push("didClose waiter armed");
+        return Promise.resolve().then(() => {
+          order.push("didClose complete");
+        });
+      },
+      waitForDidOpen: (_uri: string) => {
+        order.push("didOpen waiter armed");
+        return Promise.resolve().then(() => {
+          order.push("didOpen complete");
+        });
+      },
+      waitForStrictDidOpen: (_uri: string) => {
+        order.push("didOpen waiter armed");
+        return Promise.resolve().then(() => {
+          order.push("didOpen complete");
+        });
+      },
+    };
+    const graphProgress: CrateGraphProgress = Object.freeze({
+      attempt: 1,
+      elapsedMs: 5_000,
+      remainingMs: 295_000,
+      labels: Object.freeze(["rubrc_main", "core"]),
+      ready: false,
+    });
+    const readiness = {
+      waitForCrateGraph: async (
+        _signal: AbortSignal,
+        observeProgress?: (progress: CrateGraphProgress) => void,
+      ) => {
+        order.push("crate graph request");
+        observeProgress?.(graphProgress);
+        order.push("crate graph ready");
+      },
+      noteDocumentChanged: (version: number) => {
+        order.push(`diagnostics listener armed:${version}`);
+      },
+      waitForSemanticReadiness: async (
+        _model: unknown,
+        _signal: AbortSignal,
+      ) => {
+        order.push("latest diagnostics");
+        order.push("explicit inlayHint complete");
+      },
+    };
+    const client = {
+      sendNotification: async (method: string, params: unknown) => {
+        assert(
+          method === "workspace/didChangeConfiguration",
+          `wrong activation notification: ${method}`,
+        );
+        assert(
+          JSON.stringify(params).includes('"display_name":"rubrc-main"'),
+          "full project settings were not sent",
+        );
+        order.push("didChangeConfiguration(full settings)");
+      },
+      sendRequest: async (method: string, params: unknown) => {
+        assert(
+          method === "rust-analyzer/reloadWorkspace",
+          `wrong request: ${method}`,
+        );
+        assert(
+          params === undefined,
+          "workspace reload unexpectedly sent params",
+        );
+        order.push("reloadWorkspace complete");
+      },
+    };
+
     await activateRustProject({
+      projectSettings: singleProjectInitialization ? null : undefined,
       initializedModel: model,
       model,
-      signal: controller.signal,
+      signal: new AbortController().signal,
       uri: "file:///src/main.rs",
-      writeMain: async () => step("write"),
+      writeMain: async (content) => {
+        assert(content === text, "activation wrote a stale model snapshot");
+        order.push("VFS write complete");
+      },
+      client,
+      readiness,
+      sync,
+      setModelLanguage: (_model, language) => {
+        order.push(`setModelLanguage(${language})`);
+      },
+      semanticWarming: () => order.push("semanticWarming"),
+      reportProjectProgress: (progress) => {
+        assert(
+          progress === graphProgress,
+          "activation cloned project progress",
+        );
+        order.push("project progress:1");
+      },
+    });
+
+    assert(
+      order.join(",") ===
+        [
+          "latest snapshot",
+          ...(singleProjectInitialization
+            ? []
+            : ["didChangeConfiguration(full settings)"]),
+          "crate graph request",
+          "project progress:1",
+          "crate graph ready",
+          "VFS write complete",
+          "diagnostics listener armed:7",
+          "didClose waiter armed",
+          "setModelLanguage(plaintext)",
+          "didClose complete",
+          "didOpen waiter armed",
+          "setModelLanguage(rust)",
+          "didOpen complete",
+          "semanticWarming",
+          "latest diagnostics",
+          "explicit inlayHint complete",
+        ].join(","),
+      `wrong activation order: ${order}`,
+    );
+  });
+
+  Deno.test(`${singleProjectInitialization ? "single-init" : "legacy"}: project activation rejects a different model before side effects`, async () => {
+    const initializedModel = {
+      getValue: () => "initialized",
+      getVersionId: () => 1,
+    };
+    const activationModel = {
+      getValue: () => "different",
+      getVersionId: () => 2,
+    };
+    const effects: string[] = [];
+    let received: unknown;
+
+    await activateRustProject({
+      projectSettings: singleProjectInitialization ? null : undefined,
+      initializedModel,
+      model: activationModel,
+      signal: new AbortController().signal,
+      uri: "file:///src/main.rs",
+      writeMain: async () => {
+        effects.push("write");
+      },
       client: {
-        sendNotification: async () => step("configuration"),
-        sendRequest: async () => step("reload"),
+        sendNotification: async () => {
+          effects.push("configuration");
+        },
+        sendRequest: async () => {
+          effects.push("reload");
+        },
       },
       readiness: {
-        waitForCrateGraph: async () => step("crate-graph"),
-        noteDocumentChanged: () => step("diagnostics"),
-        waitForSemanticReadiness: async () => step("semantic-ready"),
+        waitForCrateGraph: async () => {
+          effects.push("crate-graph");
+        },
+        noteDocumentChanged: () => effects.push("diagnostics"),
+        waitForSemanticReadiness: async () => {
+          effects.push("semantic");
+        },
       },
       sync: {
-        waitForDidClose: async () => step("didClose"),
-        waitForStrictDidOpen: async () => step("didOpen"),
+        waitForDidClose: async () => {
+          effects.push("didClose");
+        },
+        waitForStrictDidOpen: async () => {
+          effects.push("didOpen");
+        },
       },
-      setModelLanguage: () => step("language"),
-      semanticWarming: () => step("warming"),
+      setModelLanguage: () => effects.push("language"),
+      semanticWarming: () => effects.push("warming"),
       reportProjectProgress: () => {},
     }).catch((error) => {
       received = error;
     });
 
-    assert(received === controller.signal.reason, `${abortAt} reason changed`);
     assert(
-      order.join(",") === expected,
-      `${abortAt} allowed later activation work: ${order}`,
+      received instanceof Error &&
+        received.message ===
+          "Rust activation model changed after initialization",
+      `wrong model mismatch error: ${received}`,
     );
-  }
-});
+    assert(
+      effects.length === 0,
+      `model mismatch caused side effects: ${effects}`,
+    );
+  });
 
-Deno.test("project activation settles direct mutations before rejecting abort", async () => {
-  const mutations = ["configuration", "write"] as const;
-
-  for (const pendingAt of mutations) {
+  Deno.test(`${singleProjectInitialization ? "single-init" : "legacy"}: project activation rechecks abort after snapshot before VFS mutation`, async () => {
     const controller = new AbortController();
-    const order: string[] = [];
-    let entered!: () => void;
-    let resolveMutation!: () => void;
-    let rejectMutation!: (error: unknown) => void;
-    const enteredBarrier = new Promise<void>((resolve) => {
-      entered = resolve;
-    });
-    const pending = new Promise<void>((resolve, reject) => {
-      resolveMutation = resolve;
-      rejectMutation = reject;
-    });
-    const barrier = async (name: string) => {
-      order.push(name);
-      if (name === pendingAt) {
-        entered();
-        await pending;
-      }
+    const reason = new Error("abort during snapshot");
+    let writes = 0;
+    const model = {
+      getValue: () => {
+        controller.abort(reason);
+        return "text";
+      },
+      getVersionId: () => 1,
     };
-    const model = { getValue: () => "text", getVersionId: () => 1 };
     let received: unknown;
-    let activationSettled = false;
-    const activation = activateRustProject({
+
+    await activateRustProject({
+      projectSettings: singleProjectInitialization ? null : undefined,
       initializedModel: model,
       model,
       signal: controller.signal,
       uri: "file:///src/main.rs",
-      writeMain: () => barrier("write"),
+      writeMain: async () => {
+        writes++;
+      },
       client: {
-        sendNotification: () => barrier("configuration"),
-        sendRequest: () => barrier("reload"),
+        sendNotification: async () => {},
+        sendRequest: async () => {},
       },
       readiness: {
-        waitForCrateGraph: () => barrier("crate-graph"),
-        noteDocumentChanged: () => order.push("diagnostics"),
-        waitForSemanticReadiness: () => barrier("semantic-ready"),
-      },
-      sync: {
-        waitForDidClose: () => barrier("didClose"),
-        waitForStrictDidOpen: () => barrier("didOpen"),
-      },
-      setModelLanguage: () => order.push("language"),
-      semanticWarming: () => order.push("warming"),
-      reportProjectProgress: () => {},
-    })
-      .catch((error) => {
-        received = error;
-        order.push("rejected");
-      })
-      .finally(() => {
-        activationSettled = true;
-      });
-
-    await enteredBarrier;
-    const reason = new Error(`abort pending ${pendingAt}`);
-    controller.abort(reason);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert(!activationSettled, `${pendingAt} rejected before mutation settled`);
-    assert(!order.includes("rejected"), `${pendingAt} rejected while detached`);
-
-    if (pendingAt === "write") {
-      resolveMutation();
-    } else {
-      rejectMutation(new Error("late configuration failure"));
-    }
-    await activation;
-    assert(received === reason, `${pendingAt} abort reason changed`);
-    assert(order.at(-1) === "rejected", `${pendingAt} continued after abort`);
-  }
-});
-
-Deno.test("project activation promptly aborts pending observation waiters", async () => {
-  const observations = [
-    "crate-graph",
-    "didClose",
-    "didOpen",
-    "semantic-ready",
-  ] as const;
-
-  for (const pendingAt of observations) {
-    const controller = new AbortController();
-    let entered!: () => void;
-    const enteredBarrier = new Promise<void>((resolve) => {
-      entered = resolve;
-    });
-    const pending = new Promise<void>(() => {});
-    const barrier = async (name: string) => {
-      if (name === pendingAt) {
-        entered();
-        await pending;
-      }
-    };
-    const model = { getValue: () => "text", getVersionId: () => 1 };
-    let received: unknown;
-    let activationSettled = false;
-    const activation = activateRustProject({
-      initializedModel: model,
-      model,
-      signal: controller.signal,
-      uri: "file:///src/main.rs",
-      writeMain: () => barrier("write"),
-      client: {
-        sendNotification: () => barrier("configuration"),
-        sendRequest: () => barrier("reload"),
-      },
-      readiness: {
-        waitForCrateGraph: () => barrier("crate-graph"),
+        waitForCrateGraph: async () => {},
         noteDocumentChanged: () => {},
-        waitForSemanticReadiness: () => barrier("semantic-ready"),
+        waitForSemanticReadiness: async () => {},
       },
       sync: {
-        waitForDidClose: () => barrier("didClose"),
-        waitForStrictDidOpen: () => barrier("didOpen"),
+        waitForDidClose: async () => {},
+        waitForStrictDidOpen: async () => {},
       },
       setModelLanguage: () => {},
       semanticWarming: () => {},
       reportProjectProgress: () => {},
-    })
-      .catch((error) => {
+    }).catch((error) => {
+      received = error;
+    });
+
+    assert(received === reason, "snapshot abort reason changed");
+    assert(writes === 0, "VFS mutation started after snapshot abort");
+  });
+
+  Deno.test(`${singleProjectInitialization ? "single-init" : "legacy"}: activation didOpen mirrors an edit made after its initial snapshot`, async () => {
+    const uri = "file:///src/main.rs";
+    const initial = "fn main() { initial(); }";
+    const latest = "fn main() { latest(); }";
+    let text = initial;
+    let version = 1;
+    const order: string[] = [];
+    const writes: string[] = [];
+    const model = {
+      getValue: () => text,
+      getVersionId: () => version,
+    };
+    const sync = new RustDocumentSync(async (_path, content) => {
+      writes.push(content);
+      order.push(`write:${content}`);
+    });
+    let didOpenDispatch: Promise<void> | undefined;
+    const rustDocument = {
+      uri: {
+        scheme: "file",
+        authority: "",
+        path: "/src/main.rs",
+        toString: () => uri,
+      },
+      languageId: "rust",
+      get version() {
+        return version;
+      },
+      getText: () => text,
+    } as never;
+
+    await activateRustProject({
+      projectSettings: singleProjectInitialization ? null : undefined,
+      initializedModel: model,
+      model,
+      signal: new AbortController().signal,
+      uri,
+      writeMain: async (content) => {
+        writes.push(content);
+        order.push(`write:${content}`);
+        text = latest;
+        version = 2;
+      },
+      client: {
+        sendNotification: async () => {
+          order.push("configuration");
+        },
+        sendRequest: async () => {
+          order.push("reload");
+        },
+      },
+      readiness: {
+        waitForCrateGraph: async () => {
+          order.push("crate-graph");
+        },
+        noteDocumentChanged: (current) => order.push(`version:${current}`),
+        waitForSemanticReadiness: async () => {
+          order.push("semantic-ready");
+        },
+      },
+      sync,
+      setModelLanguage: (_model, language) => {
+        order.push(`language:${language}`);
+        if (language === "plaintext") {
+          void sync.middleware.didClose!(rustDocument, async () => {
+            order.push("didClose-forwarded");
+          });
+          return;
+        }
+        didOpenDispatch = Promise.resolve(
+          sync.middleware.didOpen!(rustDocument, async () => {
+            order.push("didOpen-forwarded");
+          }),
+        );
+      },
+      semanticWarming: () => order.push("semantic-warming"),
+      reportProjectProgress: () => {},
+    });
+    await didOpenDispatch;
+
+    assert(
+      writes.join("|") === `${initial}|${latest}`,
+      `activation did not mirror the latest text: ${writes}`,
+    );
+    assert(
+      order.indexOf(`write:${latest}`) < order.indexOf("didOpen-forwarded") &&
+        order.indexOf("didOpen-forwarded") < order.indexOf("semantic-warming"),
+      `activation did not await latest didOpen mirroring: ${order}`,
+    );
+  });
+
+  Deno.test(`${singleProjectInitialization ? "single-init" : "legacy"}: project activation stops at every aborted barrier`, async () => {
+    const cases = [
+      ["configuration", "configuration"],
+      ["crate-graph", "configuration,crate-graph"],
+      ["write", "configuration,crate-graph,write"],
+      ["diagnostics", "configuration,crate-graph,write,diagnostics"],
+      ["didClose", "configuration,crate-graph,write,diagnostics,didClose"],
+      [
+        "didOpen",
+        "configuration,crate-graph,write,diagnostics,didClose,language,didOpen",
+      ],
+      [
+        "language",
+        "configuration,crate-graph,write,diagnostics,didClose,language",
+      ],
+      [
+        "warming",
+        "configuration,crate-graph,write,diagnostics,didClose,language,didOpen,language,warming",
+      ],
+    ] as const;
+
+    for (const [abortAt, legacyExpected] of cases) {
+      if (singleProjectInitialization && abortAt === "configuration") continue;
+      const expected = singleProjectInitialization
+        ? legacyExpected.replace(/^configuration,?/, "")
+        : legacyExpected;
+      const controller = new AbortController();
+      const order: string[] = [];
+      const step = (name: string) => {
+        order.push(name);
+        if (name === abortAt) controller.abort(new Error(`abort:${name}`));
+      };
+      let received: unknown;
+      const model = { getValue: () => "text", getVersionId: () => 1 };
+      await activateRustProject({
+        projectSettings: singleProjectInitialization ? null : undefined,
+        initializedModel: model,
+        model,
+        signal: controller.signal,
+        uri: "file:///src/main.rs",
+        writeMain: async () => step("write"),
+        client: {
+          sendNotification: async () => step("configuration"),
+          sendRequest: async () => step("reload"),
+        },
+        readiness: {
+          waitForCrateGraph: async () => step("crate-graph"),
+          noteDocumentChanged: () => step("diagnostics"),
+          waitForSemanticReadiness: async () => step("semantic-ready"),
+        },
+        sync: {
+          waitForDidClose: async () => step("didClose"),
+          waitForStrictDidOpen: async () => step("didOpen"),
+        },
+        setModelLanguage: () => step("language"),
+        semanticWarming: () => step("warming"),
+        reportProjectProgress: () => {},
+      }).catch((error) => {
         received = error;
-      })
-      .finally(() => {
-        activationSettled = true;
       });
 
-    await enteredBarrier;
-    const reason = new Error(`abort pending ${pendingAt}`);
-    controller.abort(reason);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert(activationSettled, `${pendingAt} did not abort promptly`);
-    assert(received === reason, `${pendingAt} abort reason changed`);
-    await activation;
-  }
-});
-
-Deno.test("project activation observes a late rejection after synchronous observation abort", async () => {
-  const controller = new AbortController();
-  const reason = new Error("abort while starting crate graph observation");
-  let rejectObservation!: (error: unknown) => void;
-  const observation = new Promise<void>((_resolve, reject) => {
-    rejectObservation = reject;
-  });
-  const model = { getValue: () => "text", getVersionId: () => 1 };
-  let received: unknown;
-
-  await activateRustProject({
-    initializedModel: model,
-    model,
-    signal: controller.signal,
-    uri: "file:///src/main.rs",
-    writeMain: async () => {},
-    client: {
-      sendNotification: async () => {},
-      sendRequest: async () => {},
-    },
-    readiness: {
-      waitForCrateGraph: () => {
-        controller.abort(reason);
-        return observation;
-      },
-      noteDocumentChanged: () => {},
-      waitForSemanticReadiness: async () => {},
-    },
-    sync: {
-      waitForDidClose: async () => {},
-      waitForStrictDidOpen: async () => {},
-    },
-    setModelLanguage: () => {},
-    semanticWarming: () => {},
-    reportProjectProgress: () => {},
-  }).catch((error) => {
-    received = error;
+      assert(
+        received === controller.signal.reason,
+        `${abortAt} reason changed`,
+      );
+      assert(
+        order.join(",") === expected,
+        `${abortAt} allowed later activation work: ${order}`,
+      );
+    }
   });
 
-  assert(received === reason, "synchronous observation abort reason changed");
-  rejectObservation(new Error("late observation rejection"));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-});
+  Deno.test(`${singleProjectInitialization ? "single-init" : "legacy"}: project activation settles direct mutations before rejecting abort`, async () => {
+    const mutations = ["configuration", "write"] as const;
 
-Deno.test("project activation observes a late didOpen rejection after synchronous abort", async () => {
-  const controller = new AbortController();
-  const reason = new Error("abort while creating didOpen waiter");
-  let rejectDidOpen!: (error: unknown) => void;
-  const didOpen = new Promise<void>((_resolve, reject) => {
-    rejectDidOpen = reject;
-  });
-  const model = { getValue: () => "text", getVersionId: () => 1 };
-  let received: unknown;
-
-  await activateRustProject({
-    initializedModel: model,
-    model,
-    signal: controller.signal,
-    uri: "file:///src/main.rs",
-    writeMain: async () => {},
-    client: {
-      sendNotification: async () => {},
-      sendRequest: async () => {},
-    },
-    readiness: {
-      waitForCrateGraph: async () => {},
-      noteDocumentChanged: () => {},
-      waitForSemanticReadiness: async () => {},
-    },
-    sync: {
-      waitForDidClose: async () => {},
-      waitForStrictDidOpen: () => {
-        controller.abort(reason);
-        return didOpen;
-      },
-    },
-    setModelLanguage: () => {},
-    semanticWarming: () => {},
-    reportProjectProgress: () => {},
-  }).catch((error) => {
-    received = error;
-  });
-
-  assert(received === reason, "synchronous didOpen abort reason changed");
-  rejectDidOpen(new Error("late didOpen rejection"));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-});
-
-Deno.test("project activation checks abort after semantic readiness", async () => {
-  const controller = new AbortController();
-  const reason = new Error("abort after semantic readiness");
-  const model = { getValue: () => "text", getVersionId: () => 1 };
-  let received: unknown;
-  await activateRustProject({
-    initializedModel: model,
-    model,
-    signal: controller.signal,
-    uri: "file:///src/main.rs",
-    writeMain: async () => {},
-    client: {
-      sendNotification: async () => {},
-      sendRequest: async () => {},
-    },
-    readiness: {
-      waitForCrateGraph: async () => {},
-      noteDocumentChanged: () => {},
-      waitForSemanticReadiness: () => {
-        queueMicrotask(() => {
-          queueMicrotask(() => controller.abort(reason));
+    for (const pendingAt of mutations) {
+      if (singleProjectInitialization && pendingAt === "configuration") {
+        continue;
+      }
+      const controller = new AbortController();
+      const order: string[] = [];
+      let entered!: () => void;
+      let resolveMutation!: () => void;
+      let rejectMutation!: (error: unknown) => void;
+      const enteredBarrier = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const pending = new Promise<void>((resolve, reject) => {
+        resolveMutation = resolve;
+        rejectMutation = reject;
+      });
+      const barrier = async (name: string) => {
+        order.push(name);
+        if (name === pendingAt) {
+          entered();
+          await pending;
+        }
+      };
+      const model = { getValue: () => "text", getVersionId: () => 1 };
+      let received: unknown;
+      let activationSettled = false;
+      const activation = activateRustProject({
+        projectSettings: singleProjectInitialization ? null : undefined,
+        initializedModel: model,
+        model,
+        signal: controller.signal,
+        uri: "file:///src/main.rs",
+        writeMain: () => barrier("write"),
+        client: {
+          sendNotification: () => barrier("configuration"),
+          sendRequest: () => barrier("reload"),
+        },
+        readiness: {
+          waitForCrateGraph: () => barrier("crate-graph"),
+          noteDocumentChanged: () => order.push("diagnostics"),
+          waitForSemanticReadiness: () => barrier("semantic-ready"),
+        },
+        sync: {
+          waitForDidClose: () => barrier("didClose"),
+          waitForStrictDidOpen: () => barrier("didOpen"),
+        },
+        setModelLanguage: () => order.push("language"),
+        semanticWarming: () => order.push("warming"),
+        reportProjectProgress: () => {},
+      })
+        .catch((error) => {
+          received = error;
+          order.push("rejected");
+        })
+        .finally(() => {
+          activationSettled = true;
         });
-        return Promise.resolve();
-      },
-    },
-    sync: {
-      waitForDidClose: async () => {},
-      waitForStrictDidOpen: async () => {},
-    },
-    setModelLanguage: () => {},
-    semanticWarming: () => {},
-    reportProjectProgress: () => {},
-  }).catch((error) => {
-    received = error;
+
+      await enteredBarrier;
+      const reason = new Error(`abort pending ${pendingAt}`);
+      controller.abort(reason);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert(
+        !activationSettled,
+        `${pendingAt} rejected before mutation settled`,
+      );
+      assert(
+        !order.includes("rejected"),
+        `${pendingAt} rejected while detached`,
+      );
+
+      if (pendingAt === "write") {
+        resolveMutation();
+      } else {
+        rejectMutation(new Error("late configuration failure"));
+      }
+      await activation;
+      assert(received === reason, `${pendingAt} abort reason changed`);
+      assert(order.at(-1) === "rejected", `${pendingAt} continued after abort`);
+    }
   });
-  assert(received === reason, "post-semantic abort was not preserved");
+
+  Deno.test(`${singleProjectInitialization ? "single-init" : "legacy"}: project activation promptly aborts pending observation waiters`, async () => {
+    const observations = [
+      "crate-graph",
+      "didClose",
+      "didOpen",
+      "semantic-ready",
+    ] as const;
+
+    for (const pendingAt of observations) {
+      const controller = new AbortController();
+      let entered!: () => void;
+      const enteredBarrier = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const pending = new Promise<void>(() => {});
+      const barrier = async (name: string) => {
+        if (name === pendingAt) {
+          entered();
+          await pending;
+        }
+      };
+      const model = { getValue: () => "text", getVersionId: () => 1 };
+      let received: unknown;
+      let activationSettled = false;
+      const activation = activateRustProject({
+        projectSettings: singleProjectInitialization ? null : undefined,
+        initializedModel: model,
+        model,
+        signal: controller.signal,
+        uri: "file:///src/main.rs",
+        writeMain: () => barrier("write"),
+        client: {
+          sendNotification: () => barrier("configuration"),
+          sendRequest: () => barrier("reload"),
+        },
+        readiness: {
+          waitForCrateGraph: () => barrier("crate-graph"),
+          noteDocumentChanged: () => {},
+          waitForSemanticReadiness: () => barrier("semantic-ready"),
+        },
+        sync: {
+          waitForDidClose: () => barrier("didClose"),
+          waitForStrictDidOpen: () => barrier("didOpen"),
+        },
+        setModelLanguage: () => {},
+        semanticWarming: () => {},
+        reportProjectProgress: () => {},
+      })
+        .catch((error) => {
+          received = error;
+        })
+        .finally(() => {
+          activationSettled = true;
+        });
+
+      await enteredBarrier;
+      const reason = new Error(`abort pending ${pendingAt}`);
+      controller.abort(reason);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert(activationSettled, `${pendingAt} did not abort promptly`);
+      assert(received === reason, `${pendingAt} abort reason changed`);
+      await activation;
+    }
+  });
+
+  Deno.test(`${singleProjectInitialization ? "single-init" : "legacy"}: project activation observes a late rejection after synchronous observation abort`, async () => {
+    const controller = new AbortController();
+    const reason = new Error("abort while starting crate graph observation");
+    let rejectObservation!: (error: unknown) => void;
+    const observation = new Promise<void>((_resolve, reject) => {
+      rejectObservation = reject;
+    });
+    const model = { getValue: () => "text", getVersionId: () => 1 };
+    let received: unknown;
+
+    await activateRustProject({
+      projectSettings: singleProjectInitialization ? null : undefined,
+      initializedModel: model,
+      model,
+      signal: controller.signal,
+      uri: "file:///src/main.rs",
+      writeMain: async () => {},
+      client: {
+        sendNotification: async () => {},
+        sendRequest: async () => {},
+      },
+      readiness: {
+        waitForCrateGraph: () => {
+          controller.abort(reason);
+          return observation;
+        },
+        noteDocumentChanged: () => {},
+        waitForSemanticReadiness: async () => {},
+      },
+      sync: {
+        waitForDidClose: async () => {},
+        waitForStrictDidOpen: async () => {},
+      },
+      setModelLanguage: () => {},
+      semanticWarming: () => {},
+      reportProjectProgress: () => {},
+    }).catch((error) => {
+      received = error;
+    });
+
+    assert(received === reason, "synchronous observation abort reason changed");
+    rejectObservation(new Error("late observation rejection"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  Deno.test(`${singleProjectInitialization ? "single-init" : "legacy"}: project activation observes a late didOpen rejection after synchronous abort`, async () => {
+    const controller = new AbortController();
+    const reason = new Error("abort while creating didOpen waiter");
+    let rejectDidOpen!: (error: unknown) => void;
+    const didOpen = new Promise<void>((_resolve, reject) => {
+      rejectDidOpen = reject;
+    });
+    const model = { getValue: () => "text", getVersionId: () => 1 };
+    let received: unknown;
+
+    await activateRustProject({
+      projectSettings: singleProjectInitialization ? null : undefined,
+      initializedModel: model,
+      model,
+      signal: controller.signal,
+      uri: "file:///src/main.rs",
+      writeMain: async () => {},
+      client: {
+        sendNotification: async () => {},
+        sendRequest: async () => {},
+      },
+      readiness: {
+        waitForCrateGraph: async () => {},
+        noteDocumentChanged: () => {},
+        waitForSemanticReadiness: async () => {},
+      },
+      sync: {
+        waitForDidClose: async () => {},
+        waitForStrictDidOpen: () => {
+          controller.abort(reason);
+          return didOpen;
+        },
+      },
+      setModelLanguage: () => {},
+      semanticWarming: () => {},
+      reportProjectProgress: () => {},
+    }).catch((error) => {
+      received = error;
+    });
+
+    assert(received === reason, "synchronous didOpen abort reason changed");
+    rejectDidOpen(new Error("late didOpen rejection"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  Deno.test(`${singleProjectInitialization ? "single-init" : "legacy"}: project activation checks abort after semantic readiness`, async () => {
+    const controller = new AbortController();
+    const reason = new Error("abort after semantic readiness");
+    const model = { getValue: () => "text", getVersionId: () => 1 };
+    let received: unknown;
+    await activateRustProject({
+      projectSettings: singleProjectInitialization ? null : undefined,
+      initializedModel: model,
+      model,
+      signal: controller.signal,
+      uri: "file:///src/main.rs",
+      writeMain: async () => {},
+      client: {
+        sendNotification: async () => {},
+        sendRequest: async () => {},
+      },
+      readiness: {
+        waitForCrateGraph: async () => {},
+        noteDocumentChanged: () => {},
+        waitForSemanticReadiness: () => {
+          queueMicrotask(() => {
+            queueMicrotask(() => controller.abort(reason));
+          });
+          return Promise.resolve();
+        },
+      },
+      sync: {
+        waitForDidClose: async () => {},
+        waitForStrictDidOpen: async () => {},
+      },
+      setModelLanguage: () => {},
+      semanticWarming: () => {},
+      reportProjectProgress: () => {},
+    }).catch((error) => {
+      received = error;
+    });
+    assert(received === reason, "post-semantic abort was not preserved");
+  });
+}
+
+Deno.test("single-init clears early diagnostics and still requires reopen diagnostics plus explicit hint", async () => {
+  const uri = "file:///src/main.rs";
+  const order: string[] = [];
+  const model = {
+    getValue: () => "fn main() {}",
+    getVersionId: () => 7,
+    getFullModelRange: () => ({
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: 13,
+    }),
+  };
+  const diagnostic = () =>
+    readiness.observeMessage({
+      method: "textDocument/publishDiagnostics",
+      params: { uri, version: 7, diagnostics: [] },
+    });
+  let sleeps = 0;
+  const client = {
+    sendNotification: async () => {
+      throw new Error("single-init sent configuration");
+    },
+    async sendRequest<R>(method: string): Promise<R> {
+      order.push(method);
+      if (method === "rust-analyzer/viewCrateGraph") {
+        return 'digraph {\n_0[label="rubrc_main"];\n_1[label="core"];\n_2[label="alloc"];\n_3[label="std"];\n}' as R;
+      }
+      assert(
+        sleeps === 2,
+        "early diagnostics allowed a hint before fresh diagnostics",
+      );
+      return [] as R;
+    },
+  };
+  const readiness = new RustAnalyzerReadiness(client, uri, {
+    sleep: async () => {
+      sleeps++;
+      if (sleeps === 2) diagnostic();
+    },
+  });
+  try {
+    // Initialization may already have produced a complete graph and diagnostics.
+    await readiness.waitForCrateGraph(new AbortController().signal);
+    diagnostic();
+    await activateRustProject({
+      initializedModel: model,
+      model,
+      uri,
+      projectSettings: null,
+      signal: new AbortController().signal,
+      writeMain: async () => {
+        diagnostic();
+        order.push("early diagnostic");
+      },
+      client,
+      readiness,
+      sync: {
+        waitForDidClose: async () => {
+          order.push("didClose");
+        },
+        waitForStrictDidOpen: async () => {
+          order.push("didOpen");
+        },
+      },
+      setModelLanguage: () => {},
+      semanticWarming: () => order.push("warming"),
+      reportProjectProgress: () => {},
+    });
+    assert(sleeps === 2, "activation accepted diagnostics from before reopen");
+    assert(
+      order.indexOf("didOpen") < order.indexOf("warming"),
+      "warming preceded reopen",
+    );
+    assert(
+      order.at(-1) === "textDocument/inlayHint",
+      "explicit semantic probe missing",
+    );
+  } finally {
+    readiness.dispose();
+  }
 });
 
 Deno.test("lightweight startup sends no full configuration or workspace reload", async () => {
@@ -1268,7 +1399,9 @@ Deno.test("analyzer test callback disposal preserves a newer client", async () =
     requestCompletion: state.requestCompletion,
     requestDefinition: state.requestDefinition,
   };
-  const result = await secondRequests.requestSyntaxTree?.("file:///src/main.rs");
+  const result = await secondRequests.requestSyntaxTree?.(
+    "file:///src/main.rs",
+  );
   await secondRequests.requestCrateGraph?.();
   await secondRequests.requestCompletion?.("file:///src/main.rs", {
     line: 2,

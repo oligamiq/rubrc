@@ -1,0 +1,13 @@
+✔ preserves return, receiver, BigInt arguments, memory and input namespace (1.262804ms)
+✔ preserves thrown identity and does not time every call (0.451965ms)
+✔ profiling clock failures cannot change host result or exception (0.178603ms)
+✔ duplicate import descriptors share one counter and async returns are not awaited (0.934126ms)
+✔ rejects invalid sample interval and missing function (0.224583ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 65.948297

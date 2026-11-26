@@ -1,0 +1,126 @@
+diff --git a/page/src/index.tsx b/page/src/index.tsx
+index a2ba196b..528a94b6 100644
+--- a/page/src/index.tsx
++++ b/page/src/index.tsx
+@@ -11,6 +11,7 @@ import { createProductionRuntimeDependencies } from "./production_runtime.ts";
+ import { mountRuntimeApplication } from "./runtime_entrypoint.ts";
+ import { RuntimeCreationFailure } from "./RuntimeCreationFailure.tsx";
+ import { startRustLspClient } from "./rust_lsp_client.ts";
++import { useSingleProjectInitialization } from "./app_startup_lifecycle.ts";
+ import {
+   installRuntimeRemountTestControl,
+   recordRuntimeRemountDisposalFailure,
+@@ -104,8 +105,13 @@ const mountGeneration = () =>
+           registerRemountPreparation={(prepare) => {
+             prepareMountedAppForRemount = prepare;
+           }}
+-          startLspClient={(monaco, model) =>
+-            startRustLspClient(runtime.lspDependencies, monaco, model)}
++          startLspClient={(monaco, model, context) =>
++            startRustLspClient(runtime.lspDependencies, monaco, model, undefined, {
++              singleProjectInitialization: useSingleProjectInitialization(
++                import.meta.env.VITE_RUBRC_RA_SINGLE_PROJECT_INIT,
++                context,
++              ),
++            })}
+         />
+       ),
+       root,
+diff --git a/page/src/rust_lsp_config.ts b/page/src/rust_lsp_config.ts
+index f885ab90..920ef3df 100644
+--- a/page/src/rust_lsp_config.ts
++++ b/page/src/rust_lsp_config.ts
+@@ -1,6 +1,4 @@
+-import {
+-  RUST_ANALYZER_MAIN_LOOP_THREADS_WASI,
+-} from "./runtime_parallelism.ts";
++import { RUST_ANALYZER_MAIN_LOOP_THREADS_WASI } from "./runtime_parallelism.ts";
+ 
+ export function createRustAnalyzerLightweightOptions(
+   numThreads = RUST_ANALYZER_MAIN_LOOP_THREADS_WASI,
+@@ -54,18 +52,33 @@ export function createRustAnalyzerProjectSettings(
+   };
+ }
+ 
++const freezeConfiguration = <T extends object>(value: T): T => {
++  for (const child of Object.values(value)) {
++    if (child !== null && typeof child === "object") freezeConfiguration(child);
++  }
++  return Object.freeze(value);
++};
++
+ export function createRustAnalyzerConfigurationState(
+   numThreads = RUST_ANALYZER_MAIN_LOOP_THREADS_WASI,
++  singleProjectInitialization = false,
+ ) {
+-  let settings:
+-    | ReturnType<typeof createRustAnalyzerLightweightOptions>
+-    | ReturnType<typeof createRustAnalyzerProjectSettings> =
+-      createRustAnalyzerLightweightOptions(numThreads);
++  // One immutable full snapshot preserves project identity and selected threads
++  // across initialization, configuration responses, and legacy activation.
++  const projectSettings = freezeConfiguration(
++    createRustAnalyzerProjectSettings(numThreads),
++  );
++  const initializationOptions = singleProjectInitialization
++    ? projectSettings
++    : freezeConfiguration(createRustAnalyzerLightweightOptions(numThreads));
++  let settings = initializationOptions;
+ 
+   return {
+-    initializationOptions: () => settings,
++    initializationOptions: () => initializationOptions,
+     activateProject: () => {
+-      settings = createRustAnalyzerProjectSettings(numThreads);
++      if (singleProjectInitialization) return null;
++      settings = projectSettings;
++      return projectSettings;
+     },
+     response: (items: readonly { section?: string | null }[]) =>
+       items.map((item) => item.section === "rust-analyzer" ? settings : null),
+diff --git a/page/src/rust_lsp_startup.ts b/page/src/rust_lsp_startup.ts
+index 461bbf4a..c1a07866 100644
+--- a/page/src/rust_lsp_startup.ts
++++ b/page/src/rust_lsp_startup.ts
+@@ -13,6 +13,8 @@ export type RustProjectActivation<TModel> = {
+   signal: AbortSignal;
+   uri: string;
+   writeMain(content: string): Promise<void>;
++  // null means the exact full configuration was already supplied at initialize.
++  projectSettings?: ReturnType<typeof createRustAnalyzerProjectSettings> | null;
+   client: {
+     sendNotification(method: string, params: unknown): Promise<void>;
+     sendRequest?(method: string, params?: unknown): Promise<unknown>;
+@@ -91,12 +93,15 @@ export async function activateRustProject<TModel>(
+   signal.throwIfAborted();
+   const content = model.getValue();
+   signal.throwIfAborted();
+-  await awaitMutationWithAbort(
+-    client.sendNotification("workspace/didChangeConfiguration", {
+-      settings: createRustAnalyzerProjectSettings(),
+-    }),
+-    signal,
+-  );
++  if (activation.projectSettings !== null) {
++    await awaitMutationWithAbort(
++      client.sendNotification("workspace/didChangeConfiguration", {
++        settings: activation.projectSettings ??
++          createRustAnalyzerProjectSettings(),
++      }),
++      signal,
++    );
++  }
+   signal.throwIfAborted();
+   await awaitWithAbort(
+     readiness.waitForCrateGraph(signal, reportProjectProgress),
+@@ -169,8 +174,8 @@ export async function runRustLspStartup(
+     void startupPromise.catch(() => undefined);
+     await Promise.race([startupPromise, startupTimeout, aborted]);
+   } catch (error) {
+-    const activelyCancelled =
+-      error === timeoutError || (signal.aborted && error === signal.reason);
++    const activelyCancelled = error === timeoutError ||
++      (signal.aborted && error === signal.reason);
+     if (activelyCancelled && startupPromise) {
+       if (startPromise) {
+         try {

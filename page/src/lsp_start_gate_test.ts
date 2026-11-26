@@ -144,9 +144,10 @@ Deno.test("App wires the runtime-owned archive store into staged startup", async
     "coordinator does not use the startup-sysroot installation endpoint",
   );
   assert(
-    /props\.startLspClient\(\s*mountedMonaco,\s*model as monaco\.editor\.ITextModel,?\s*\)/.test(
-      source,
-    ),
+    /props\.startLspClient\(\s*mountedMonaco,\s*model as monaco\.editor\.ITextModel,\s*context,?\s*\)/
+      .test(
+        source,
+      ),
     "coordinator does not initialize the analyzer with Monaco and named model",
   );
   assert(
@@ -199,9 +200,10 @@ Deno.test("App exposes startup state and gates run and target changes", async ()
 
   assert(
     source.includes("coordinator.subscribe(setStartup)") ||
-      /coordinator\.subscribe\(\(snapshot\)\s*=>\s*\{[\s\S]*?setStartup\(snapshot\)/.test(
-        source,
-      ),
+      /coordinator\.subscribe\(\(snapshot\)\s*=>\s*\{[\s\S]*?setStartup\(snapshot\)/
+        .test(
+          source,
+        ),
     "App does not subscribe its Solid startup signal to the coordinator",
   );
   assert(
@@ -242,14 +244,25 @@ Deno.test("entrypoint starts LSP from canonical runtime dependencies", async () 
   const source = await readSource("page/src/index.tsx");
 
   assert(
-    /startLspClient=\{\(monaco, model\) =>/.test(source),
+    /startLspClient=\{\(monaco, model, context\) =>/.test(source),
     "entrypoint starter does not accept the named model",
   );
   assert(
     source.includes(
-      "startRustLspClient(runtime.lspDependencies, monaco, model)",
+      "startRustLspClient(runtime.lspDependencies, monaco, model, undefined, {",
     ),
     "entrypoint does not use runtime-owned LSP dependencies",
+  );
+  assert(
+    /useSingleProjectInitialization\(\s*import\.meta\.env\.VITE_RUBRC_RA_SINGLE_PROJECT_INIT,\s*context,/
+      .test(source),
+    "entrypoint does not gate the experiment with coordinator context",
+  );
+  const app = await readSource("page/src/App.tsx");
+  assert(
+    app.includes("initializeAnalyzer: async (model, _signal, context)") &&
+      /model as monaco\.editor\.ITextModel,\s*context,/.test(app),
+    "App drops installed-sysroot context before runtime caller",
   );
 });
 
@@ -373,9 +386,10 @@ Deno.test("test API exposes the named model immediately", async () => {
     "test API does not start a generation",
   );
   assert(
-    /exposeEditor\(\s*mountedMonaco,\s*mountedEditor,\s*model,\s*runtime,?\s*\)/.test(
-      appSource,
-    ),
+    /exposeEditor\(\s*mountedMonaco,\s*mountedEditor,\s*model,\s*runtime,?\s*\)/
+      .test(
+        appSource,
+      ),
     "App does not expose the model at mount",
   );
 });

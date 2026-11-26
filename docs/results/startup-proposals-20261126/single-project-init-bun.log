@@ -1,0 +1,18 @@
+bun test v1.4.2 (744846f84)
+
+page/src/production_runtime_test.ts:
+(pass) crates proxy stays remote outside loopback and uses same-origin locally [0.18ms]
+(pass) partial production bridge cleanup is aborted and runtime-settled [28.86ms]
+(pass) forced destroy timeout still starts Animal disposal but withholds acknowledgement [0.32ms]
+(pass) farm terminal writes are dropped after the generation data plane detaches [0.11ms]
+
+page/src/rust_lsp_client_runtime_test.ts:
+(pass) startRustLspClient registers runtime channels (single-init=false) [29.23ms]
+(pass) startRustLspClient cancellation aborts owner transport (single-init=false) [4.00ms]
+(pass) startRustLspClient registers runtime channels (single-init=true) [0.38ms]
+(pass) startRustLspClient cancellation aborts owner transport (single-init=true) [0.23ms]
+
+ 8 pass
+ 0 fail
+ 22 expect() calls
+Ran 8 tests across 2 files. [4.08s]

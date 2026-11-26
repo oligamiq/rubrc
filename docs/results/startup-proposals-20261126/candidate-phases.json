@@ -1,0 +1,34 @@
+[
+  {
+    "session": 2,
+    "visit": "cold",
+    "totalSeconds": 38.308415516000004,
+    "beforeProjectSeconds": 15.458225000000006,
+    "projectSeconds": 7.27314499999999,
+    "semanticSeconds": 15.35988500000001
+  },
+  {
+    "session": 2,
+    "visit": "reload",
+    "totalSeconds": 36.229395663999995,
+    "beforeProjectSeconds": 14.050304999999993,
+    "projectSeconds": 8.064175000000018,
+    "semanticSeconds": 13.948419999999984
+  },
+  {
+    "session": 3,
+    "visit": "cold",
+    "totalSeconds": 36.095112495,
+    "beforeProjectSeconds": 13.486,
+    "projectSeconds": 7.278695000000007,
+    "semanticSeconds": 14.811309999999997
+  },
+  {
+    "session": 3,
+    "visit": "reload",
+    "totalSeconds": 36.882491979,
+    "beforeProjectSeconds": 14.200125,
+    "projectSeconds": 7.073219999999972,
+    "semanticSeconds": 15.481900000000023
+  }
+]

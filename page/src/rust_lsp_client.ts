@@ -57,6 +57,7 @@ export function startRustLspClient(
   monaco: typeof Monaco,
   model: Monaco.editor.ITextModel,
   platform?: RustLspClientPlatform,
+  startup?: { singleProjectInitialization?: boolean },
 ): Promise<StagedAnalyzerSession>;
 
 export async function startRustLspClient(
@@ -64,6 +65,7 @@ export async function startRustLspClient(
   monaco: typeof Monaco,
   model: Monaco.editor.ITextModel,
   platform?: RustLspClientPlatform,
+  startup: { singleProjectInitialization?: boolean } = {},
 ): Promise<StagedAnalyzerSession> {
   const { ctx, signal } = runtime;
   const owner = new RustLspResourceOwner(runtime.adopter);
@@ -92,6 +94,7 @@ export async function startRustLspClient(
     owner.setSync(sync);
     const analyzerConfiguration = createRustAnalyzerConfigurationState(
       getRustAnalyzerParallelism().mainLoopThreads,
+      startup.singleProjectInitialization,
     );
 
     let readiness: RustAnalyzerReadiness | undefined;
@@ -202,8 +205,9 @@ export async function startRustLspClient(
         semanticWarming,
         reportProjectProgress,
       ) => {
-        analyzerConfiguration.activateProject();
+        const projectSettings = analyzerConfiguration.activateProject();
         await activateRustProject({
+          projectSettings,
           initializedModel: model,
           model: activationModel as Monaco.editor.ITextModel,
           signal: activationSignal,

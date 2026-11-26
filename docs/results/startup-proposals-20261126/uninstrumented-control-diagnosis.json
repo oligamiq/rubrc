@@ -1,0 +1,32 @@
+{
+  "status": "fail",
+  "browser": "Chrome/157.0.8103.78",
+  "waitError": {
+    "message": "Error: Waiting failed",
+    "stack": "Error: Waiting failed\n    at <instance_members_initializer> (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/common/WaitTask.js:21:21)\n    at new WaitTask (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/common/WaitTask.js:27:16)\n    at IsolatedWorld.waitForFunction (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/api/Realm.js:49:26)\n    at CdpFrame.waitForFunction (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/api/Frame.js:580:43)\n    at CdpFrame.<anonymous> (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/util/decorators.js:101:27)\n    at CdpPage.waitForFunction (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/api/Page.js:1447:37)\n    at file:///home/oligami/projects/rubrc/scripts/ci/profile_preview_host_imports.mjs:37:19",
+    "cause": "ProtocolError: Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed.",
+    "causeStack": "ProtocolError: Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed.\n    at <instance_members_initializer> (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/common/CallbackRegistry.js:102:14)\n    at new Callback (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/common/CallbackRegistry.js:106:16)\n    at CallbackRegistry.create (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/common/CallbackRegistry.js:25:26)\n    at Connection._rawSend (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/cdp/Connection.js:118:26)\n    at CdpCDPSession.send (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/cdp/CdpSession.js:72:14)\n    at #evaluate (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/cdp/ExecutionContext.js:360:50)\n    at ExecutionContext.evaluateHandle (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/cdp/ExecutionContext.js:326:36)\n    at IsolatedWorld.evaluateHandle (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/cdp/IsolatedWorld.js:91:30)\n    at CdpJSHandle.evaluateHandle (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/api/JSHandle.js:154:37)\n    at WaitTask.rerun (file:///home/oligami/projects/rubrc/node_modules/puppeteer-core/lib/puppeteer/common/WaitTask.js:99:47)"
+  },
+  "failureState": {
+    "url": "http://127.0.0.1:38199/",
+    "phase": {
+      "phase": "sysroots-loading",
+      "history": [
+        "editor-visible",
+        "vfs-starting",
+        "sysroots-loading"
+      ],
+      "overlayVisible": true,
+      "crateGraphReady": false,
+      "cargoCallsBeforeProjectActivation": 0
+    },
+    "body": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n//\u00a0/src/main.rs\nfn\u00a0main()\u00a0{\n\u00a0\u00a0\u00a0\u00a0let\u00a0first_time\u00a0=\u00a0std::time::SystemTime::now();\n\u00a0\u00a0\u00a0\u00a0let\u00a0count\u00a0=\u00a0std::env::args()\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0.nth(1)\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0.map(|arg|\u00a0arg.parse::<usize>().ok())\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0.flatten()\n\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0.unwrap_or(10);\n\u00a0\u00a0\u00a0\u00a0(0..=count).for_each(|i|\u00a0println!(\"{i}\"));\n\u00a0\u00a0\u00a0\u00a0println!(\"Time:\u00a0{:?}\",\u00a0first_time.elapsed().unwrap());\n}\nStarting rust-analyzer\nsysroots-loading\nRA main pool (numThreads): 2 \u00b7 VTP starts 8 (auto-grow) \u00b7 browser 4\n\u2713\nEditor\n\u2713\nrust-analyzer\n\u203a\nRust source\n25%\n\u203a\nTarget sysroot\n100%\n\u00b7\nProject\nSession 0\n+\n\u25eb\n  External:  cargo, clang, download, llvm, rust-analyzer, rustc\n  Session:   load_src, load_sysroot\necho Hello, World!\nHello, World!\nls -la\ntotal 2\ndr--r--r--   1 user     user            0 Jan 01 00:00 .\ndr--r--r--   1 user     user            0 Jan 01 00:00 ..\ndr--r--r--   1 user     user            0 Jan 01 00:00 .cargo\n-r--r--r--   1 user     user           59 Jan 01 00:00 Cargo.toml\n-r--r--r--   1 user     user          173 Jan 01 00:00 rust-project.json\ndr--r--r--   1 user     user            0 Jan 01 00:00 src\ndr--r--r--   1 user     user            0 Jan 01 00:00 sysroot\ntree\n.\n\u251c\u2500\u2500 Cargo.toml\n\u251c\u2500\u2500 rust-project.json\n\u251c\u2500\u2500 src\n\u2502   \u2514\u2500\u2500 main.rs\n\u2514\u2500\u2500 sysroot\n2 directories, 3 files\nseq | grep 2 | head -n5\n2\n12\n20\n21\n22\n/ $ Loading Rust source...\n \nCompile and Run\nSelect target...\nDownload"
+  },
+  "failureStateError": null,
+  "browserExit": {
+    "code": 0,
+    "signal": null
+  },
+  "startedAt": "2026-11-26T11:26:52.173Z",
+  "finishedAt": "2026-11-26T11:30:02.735Z"
+}

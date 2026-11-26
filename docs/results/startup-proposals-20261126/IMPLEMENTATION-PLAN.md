@@ -1,0 +1,25 @@
+# Approved scoped follow-up
+
+2026-11-26 JST. User approved proceeding, excluded independent-memory architecture as too large, and highlighted timers/frequent JS functions as candidates for boundary-call optimization. No public deployment authorized. Release gates remain page navigation→working completion+diagnostics <=30s and Cargo no regression.
+
+Active objective: inspect recomputation and hot JS boundaries, measure, implement only supported limited changes, test/re-measure. Separate-memory redesign deferred.
+
+Initial environment: /home/oligami/projects/rubrc on perf/memory-lock-batching at1a062076; main8c012fc2. Existing uncommitted lsp_opt.wasm and generated vfs.js/worker.ts are unrelated and must not be overwritten. Node24.22.2, Chrome executable /usr/bin/google-chrome, Deno present. `bun --version` on PATH failed (not installed there), but ~/.bun/bin/bun exists1.4.2. WVL verification checkout stays clean/pinned77f45543.
+
+Parallel read-only startup audit agent191ff6eb-c657-47ce-9cfd-a5f1fd860d02. Available subagent roster only codex/gpt-6-astra (quota unknown), so no Gemini route available.
+
+Existing best preview from run45131532216 lock-preview-batching-on (~124MB) remains downloadable, retrieval started into target/startup-js-boundary-20261126/preview-artifact. It should enable diagnostic instrumentation without rebuilding huge Wasm. Preserve/check artifact identity before use. No preview server started.
+
+Source observations (not performance measurements): browser WASI shim animals.ts clock_time_get does check_fds, a new DataView and JS time→BigInt conversion per call; could be frequent but count/cost not measured. Do not cache monotonic time blindly or replace clocks with event-loop updated shared ticks, which can stall under synchronous work. Distinguish clock reads, timeout scheduling, and actual blocking wait time.
+
+Startup audit early correction: one config update, not evidence of duplicate updates; explicit didClose/didOpen invalidates server caches. linkedProjects:[] alone may not disable initial discovery. Await audited full paths before changing behavior.
+
+Measurement approach: count host import calls in diagnostic-only preview (all worker instantiations), sample durations rather than adding two clock reads to every hot call; keep instrumented results separate from uninstrumented acceptance. Record exceptions/return behavior unchanged. Global Date/performance timer interception alone cannot attribute calls to Wasm imports and can count the profiler itself. Need actual boundary wrappers or CDP profiles with coverage evidence. No claim of speed improvement yet.
+
+Progress: read-only startup audit complete at startup-path-audit.md. Separate authorized implementation agent c6c216f8-1f61-457e-8a45-d17185b490e7 is implementing opt-in VITE_RUBRC_RA_SINGLE_PROJECT_INIT=1, restricted to cache/sysroot-first path; retains document reopen and readiness gates. Original read-only child declined implementation to preserve its task scope.
+
+Diagnostic host import profiler and bootstrap now cover new WebAssembly.Instance, instantiate(module/bytes), instantiateStreaming in each realm. Eight Node tests pass including real minimal Wasm calls, exception identity and standalone serialized worker bootstrap. Logs: host-import-profiler-tests.log / host-import-bootstrap-tests.log. No full app instrumentation run yet. Wrapping can add overhead; sampled synchronous inclusive timings are not CPU times and cannot be summed across threads as wall time. Must collect worker snapshots before termination and verify coverage before conclusions.
+
+Preview artifact download completed. Archive checksum73f6e129a06a25c3e818ac51a84100816c4fcec39b46a59e087a678927e17e64,238entries; core/cache/batching evidence validation passed, reports saved. Diagnostic-only private copy prefixes JS modules with idempotent import profiler bootstrap. First two runs failed with Waiting failed before snapshots. Uninstrumented control confirmed concrete harness bug: Puppeteer Runtime.callFunctionOn protocolTimeout20s shorter than startup wait180s. This is not evidence of production failure. Saved uninstrumented-control-diagnosis.json. protocolTimeout now210s/global240s. Worker snapshot changed to debugger-pause/evaluate since workers blocked in Wasm cannot process ordinary evaluate promptly. Fresh corrected diagnostic running job bash-35bb822d1a79402c. No duplicate running downloads or servers.
+
+Single-project-init implementation complete with279Deno+10Bun tests passing; parent independently reran90focused Deno tests and8profiler tests (logs saved). No real RA performance or Cargo comparison result yet. Agent report single-project-init-implementation.md lists full scope/default-off flag and limitations.

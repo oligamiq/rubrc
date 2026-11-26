@@ -1,0 +1,16 @@
+✔ captures constructor, module instantiate and bytes instantiate without duplicate counts (6.38008ms)
+✔ captures streaming instantiate and preserves exceptions (29.652852ms)
+✔ serialized bootstrap works in separate realm without module imports (3.649524ms)
+✔ preserves return, receiver, BigInt arguments, memory and input namespace (1.299092ms)
+✔ preserves thrown identity and does not time every call (0.507469ms)
+✔ profiling clock failures cannot change host result or exception (0.229973ms)
+✔ duplicate import descriptors share one counter and async returns are not awaited (1.041429ms)
+✔ rejects invalid sample interval and missing function (0.207928ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 105.436223

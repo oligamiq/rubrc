@@ -13,6 +13,8 @@ export type RustProjectActivation<TModel> = {
   signal: AbortSignal;
   uri: string;
   writeMain(content: string): Promise<void>;
+  // null means the exact full configuration was already supplied at initialize.
+  projectSettings?: ReturnType<typeof createRustAnalyzerProjectSettings> | null;
   client: {
     sendNotification(method: string, params: unknown): Promise<void>;
     sendRequest?(method: string, params?: unknown): Promise<unknown>;
@@ -91,12 +93,15 @@ export async function activateRustProject<TModel>(
   signal.throwIfAborted();
   const content = model.getValue();
   signal.throwIfAborted();
-  await awaitMutationWithAbort(
-    client.sendNotification("workspace/didChangeConfiguration", {
-      settings: createRustAnalyzerProjectSettings(),
-    }),
-    signal,
-  );
+  if (activation.projectSettings !== null) {
+    await awaitMutationWithAbort(
+      client.sendNotification("workspace/didChangeConfiguration", {
+        settings: activation.projectSettings ??
+          createRustAnalyzerProjectSettings(),
+      }),
+      signal,
+    );
+  }
   signal.throwIfAborted();
   await awaitWithAbort(
     readiness.waitForCrateGraph(signal, reportProjectProgress),
@@ -169,8 +174,8 @@ export async function runRustLspStartup(
     void startupPromise.catch(() => undefined);
     await Promise.race([startupPromise, startupTimeout, aborted]);
   } catch (error) {
-    const activelyCancelled =
-      error === timeoutError || (signal.aborted && error === signal.reason);
+    const activelyCancelled = error === timeoutError ||
+      (signal.aborted && error === signal.reason);
     if (activelyCancelled && startupPromise) {
       if (startPromise) {
         try {

@@ -1,0 +1,384 @@
+diff --git a/crates/vfs/Cargo.toml b/crates/vfs/Cargo.toml
+index fb7cf8ad..75f1da5b 100644
+--- a/crates/vfs/Cargo.toml
++++ b/crates/vfs/Cargo.toml
+@@ -13,7 +13,7 @@ default = []
+ 
+ [dependencies]
+ am-fs-core = "=0.2.3"
+-am-fs-squashfs = "=0.1.3"
++am-fs-squashfs = { version = "=0.1.3", path = "../../vendor/am-fs-squashfs" }
+ wasi_virt_layer = { version = "0.10.0", default-features = false, features = [
+   "dynamic-fs",
+   # "embedded-fs",
+diff --git a/crates/vfs/build.rs b/crates/vfs/build.rs
+new file mode 100644
+index 00000000..9dbbd94a
+--- /dev/null
++++ b/crates/vfs/build.rs
+@@ -0,0 +1,78 @@
++fn initial_heap_link_arg(
++    target: &str,
++    configured: Option<&str>,
++) -> Result<Option<&'static str>, &'static str> {
++    let Some(value) = configured.filter(|value| !value.is_empty()) else {
++        return Ok(None);
++    };
++    // Native checks must not receive a WASM linker argument. In particular,
++    // inspect Cargo's target, not the build script's own host cfg.
++    if !target.starts_with("wasm") {
++        return Ok(None);
++    }
++    if target != "wasm32-wasip1-threads" {
++        return Err("VFS initial-heap experiment requires wasm32-wasip1-threads");
++    }
++    if value != "536870912" {
++        return Err("RUBRC_VFS_INITIAL_HEAP_BYTES only supports 536870912 in this experiment");
++    }
++    Ok(Some("--initial-heap=536870912"))
++}
++
++fn main() {
++    println!("cargo:rerun-if-changed=build.rs");
++    println!("cargo:rerun-if-env-changed=RUBRC_VFS_INITIAL_HEAP_BYTES");
++    let target = std::env::var("TARGET").expect("Cargo must provide TARGET");
++    let configured = std::env::var("RUBRC_VFS_INITIAL_HEAP_BYTES").ok();
++    match initial_heap_link_arg(&target, configured.as_deref()) {
++        Ok(Some(argument)) => {
++            // Scope the option to this package's cdylib, never to vfs-shell
++            // or the separately built analyzer/compiler guests.
++            println!("cargo:rustc-link-arg-cdylib={argument}");
++            println!("cargo:warning=VFS initial-heap experiment: 512 MiB");
++        }
++        Ok(None) => {}
++        Err(message) => panic!("{message}"),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::initial_heap_link_arg;
++
++    #[test]
++    fn default_does_not_change_the_linker() {
++        assert_eq!(
++            initial_heap_link_arg("wasm32-wasip1-threads", None),
++            Ok(None)
++        );
++        assert_eq!(
++            initial_heap_link_arg("wasm32-wasip1-threads", Some("")),
++            Ok(None)
++        );
++    }
++
++    #[test]
++    fn only_the_validated_wasi_target_gets_the_initial_heap_argument() {
++        assert_eq!(
++            initial_heap_link_arg("wasm32-wasip1-threads", Some("536870912")),
++            Ok(Some("--initial-heap=536870912")),
++        );
++        assert_eq!(
++            initial_heap_link_arg("x86_64-unknown-linux-gnu", Some("536870912")),
++            Ok(None)
++        );
++    }
++
++    #[test]
++    fn unsupported_wasm_target_is_not_silently_mislabeled() {
++        assert!(initial_heap_link_arg("wasm32-unknown-unknown", Some("536870912")).is_err());
++    }
++
++    #[test]
++    fn arbitrary_heap_sizes_are_not_part_of_this_experiment() {
++        for value in ["0", "67108864", "invalid", "536870912 --other-flag"] {
++            assert!(initial_heap_link_arg("wasm32-wasip1-threads", Some(value)).is_err());
++        }
++    }
++}
+diff --git a/lib/src/brotli_stream.ts b/lib/src/brotli_stream.ts
+index bcff9ceb..8389d1eb 100644
+--- a/lib/src/brotli_stream.ts
++++ b/lib/src/brotli_stream.ts
+@@ -49,6 +49,7 @@ export const get_brotli_decompress_stream = async (): Promise<
+ export const fetch_compressed_stream = async (
+   url: string | URL | globalThis.Request,
+   signal?: AbortSignal,
++  onCompressedBytes?: (bytes: number) => void,
+ ): Promise<ReadableStream<Uint8Array>> =>
+   await fetchCompressedStream(url, signal, {
+     cacheStorage: "caches" in globalThis ? caches : undefined,
+@@ -57,4 +58,5 @@ export const fetch_compressed_stream = async (
+       console.warn("Failed to cache compressed asset", error);
+     },
+     getDecompressStream: get_brotli_decompress_stream,
++    onCompressedBytes,
+   });
+diff --git a/lib/src/fetch_compressed_stream.ts b/lib/src/fetch_compressed_stream.ts
+index 8dc4694c..a650084e 100644
+--- a/lib/src/fetch_compressed_stream.ts
++++ b/lib/src/fetch_compressed_stream.ts
+@@ -16,6 +16,7 @@ export type FetchCompressedStreamDependencies = Omit<
+   "acceptResponse"
+ > & {
+   getDecompressStream(): Promise<TransformStream<Uint8Array, Uint8Array>>;
++  onCompressedBytes?: (bytes: number) => void;
+ };
+ 
+ function mediaType(response: Response): string | null {
+@@ -95,5 +96,13 @@ export async function fetchCompressedStream(
+     await response.body.cancel().catch(() => undefined);
+     throw error;
+   }
+-  return response.body.pipeThrough(decompressStream);
++  const body = dependencies.onCompressedBytes
++    ? response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
++      transform(chunk, controller) {
++        if (chunk.byteLength > 0) dependencies.onCompressedBytes?.(chunk.byteLength);
++        controller.enqueue(chunk);
++      },
++    }))
++    : response.body;
++  return body.pipeThrough(decompressStream);
+ }
+diff --git a/page/src/sysroot_archive.ts b/page/src/sysroot_archive.ts
+index 4e401aa9..b63befcf 100644
+--- a/page/src/sysroot_archive.ts
++++ b/page/src/sysroot_archive.ts
+@@ -21,11 +21,15 @@ type ArchiveOptions = {
+   maintainRustSrcCache?: (archiveUrl: string) => void;
+ };
+ export type ArchiveBytesOptions = {
++  /** Overall transfer budget; progress cannot extend this deadline. */
+   timeoutMs?: number;
++  /** Maximum time without input or decoded byte progress (including initial fetch). */
++  idleTimeoutMs?: number;
+   signal?: AbortSignal;
+   fetchStream?: (
+     url: string,
+     signal: AbortSignal,
++    onProgress?: (bytes: number) => void,
+   ) => Promise<ReadableStream<Uint8Array>>;
+ };
+ type ParseArchiveOptions = {
+@@ -37,6 +41,8 @@ type ParseArchiveOptions = {
+ };
+ 
+ const RUST_SRC_ASSET = "rust-src.sqfs";
++export const SYSROOT_TRANSFER_TIMEOUT_MS = 600_000;
++export const SYSROOT_TRANSFER_IDLE_TIMEOUT_MS = 60_000;
+ declare const __RUBRC_SOURCE_REVISION__: string;
+ declare const __RUBRC_BUILD_EPOCH__: string;
+ const SOURCE_REVISION = typeof __RUBRC_SOURCE_REVISION__ === "undefined"
+@@ -99,29 +105,50 @@ export async function loadSysrootArchiveBytes(
+   const controller = new AbortController();
+   const externalAbort = () => controller.abort(options.signal?.reason);
+   options.signal?.addEventListener("abort", externalAbort, { once: true });
+-  const timeoutMs = options.timeoutMs ?? 60_000;
++  const timeoutMs = options.timeoutMs ?? SYSROOT_TRANSFER_TIMEOUT_MS;
++  const idleTimeoutMs = options.idleTimeoutMs ?? SYSROOT_TRANSFER_IDLE_TIMEOUT_MS;
+   const deadline = performance.now() + timeoutMs;
++  let lastActivity = performance.now();
++  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+   const timeoutError = () =>
+     new Error(`sysroot archive ${triple} timed out after ${timeoutMs}ms`);
++  const idleError = () =>
++    new Error(`sysroot archive ${triple} stalled for ${idleTimeoutMs}ms without data`);
++  const noteActivity = () => {
++    lastActivity = performance.now();
++    if (idleTimer !== undefined) clearTimeout(idleTimer);
++    idleTimer = setTimeout(() => controller.abort(idleError()), idleTimeoutMs);
++  };
+   const checkDeadline = () => {
+     controller.signal.throwIfAborted();
+-    if (performance.now() >= deadline) {
++    const now = performance.now();
++    if (now >= deadline) {
+       const error = timeoutError();
+       controller.abort(error);
+       throw error;
+     }
++    if (now - lastActivity >= idleTimeoutMs) {
++      const error = idleError();
++      controller.abort(error);
++      throw error;
++    }
+   };
++  noteActivity();
+   const operation = (async () => {
+-    const fetchStream = options.fetchStream ?? (triple === "rust-src"
++    const fetchStream: NonNullable<ArchiveBytesOptions["fetchStream"]> = options.fetchStream ?? (triple === "rust-src"
+       ? (await import("../../lib/src/fetch_binary_stream.ts")).fetch_binary_stream
+       : (await import("../../lib/src/brotli_stream.ts")).fetch_compressed_stream);
+     const archiveUrl = sysrootArchiveUrl(triple);
+-    const stream = await fetchStream(archiveUrl, controller.signal);
++    const stream = await fetchStream(archiveUrl, controller.signal, (bytes) => {
++      checkDeadline();
++      if (bytes > 0) noteActivity();
++    });
+     const reader = stream.getReader();
+     const cancelRead = () => {
+       void reader.cancel(controller.signal.reason).catch(() => undefined);
+     };
+     controller.signal.addEventListener("abort", cancelRead, { once: true });
++    if (controller.signal.aborted) cancelRead();
+     const chunks: Uint8Array[] = [];
+     let totalLength = 0;
+     try {
+@@ -131,6 +158,7 @@ export async function loadSysrootArchiveBytes(
+         checkDeadline();
+         if (done) break;
+         if (value.byteLength === 0) continue;
++        noteActivity();
+         chunks.push(value);
+         totalLength += value.byteLength;
+       }
+@@ -172,6 +200,7 @@ export async function loadSysrootArchiveBytes(
+     throw error;
+   } finally {
+     if (timer !== undefined) clearTimeout(timer);
++    if (idleTimer !== undefined) clearTimeout(idleTimer);
+     options.signal?.removeEventListener("abort", externalAbort);
+   }
+ }
+diff --git a/page/src/vfs_readiness.ts b/page/src/vfs_readiness.ts
+index d796db32..9cc2a488 100644
+--- a/page/src/vfs_readiness.ts
++++ b/page/src/vfs_readiness.ts
+@@ -17,6 +17,7 @@ export type StartupSysrootTiming = {
+   timeoutMs?: number;
+   now?: () => number;
+   sleep?: () => Promise<void>;
++  onReady?: (kind: StartupSysrootKind) => void;
+ };
+ 
+ export type StartupSysrootStatus =
+@@ -141,9 +142,16 @@ async function pollStartupSysroots(
+     timing.sleep ??
+     (() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
+   const deadline = now() + timeoutMs;
++  const observed = new Set<StartupSysrootKind>();
+ 
+   while (true) {
+     const { states, result } = readStartupSysrootSnapshot(root);
++    for (const { kind } of STARTUP_SYSROOTS) {
++      if (states[kind] === 2 && !observed.has(kind)) {
++        observed.add(kind);
++        timing.onReady?.(kind);
++      }
++    }
+     if (result) return result;
+     if (now() >= deadline) {
+       return {
+diff --git a/page/src/worker_process/util_cmd.ts b/page/src/worker_process/util_cmd.ts
+index b288c0bb..49c673a1 100644
+--- a/page/src/worker_process/util_cmd.ts
++++ b/page/src/worker_process/util_cmd.ts
+@@ -25,6 +25,7 @@ import {
+ } from "../runtime_worker_protocol.ts";
+ import { createRustSrcFsEndpoint } from "../rust_src_vfs_rpc.ts";
+ import { VFS_THREAD_INITIAL_CAPACITY } from "../runtime_parallelism.ts";
++import { readVfsMemorySnapshot } from "../vfs_memory_measurements.ts";
+ 
+ import thread_spawn_path from "./vfs_bindings/thread_spawn.ts?worker&url";
+ import worker_background_worker_url from "./vfs_bindings/worker_background_worker.ts?worker&url";
+@@ -34,6 +35,7 @@ await set_fake_worker();
+ import { dispatchSpecialInput, routeTerminalWrite } from "./lsp_dispatch.ts";
+ 
+ const shared: SharedObject[] = [];
++let stopMemoryMeasurements: (() => void) | undefined;
+ 
+ const utilityWorker = createUtilityWorkerStateMachine({
+   prepareAnimal: prepareUtilityAnimal,
+@@ -41,6 +43,8 @@ const utilityWorker = createUtilityWorkerStateMachine({
+   startGuest: startUtilityGuest,
+   postMessage: (message) => globalThis.postMessage(message),
+   onFailure: () => {
++    stopMemoryMeasurements?.();
++    stopMemoryMeasurements = undefined;
+     for (const object of shared.splice(0)) object.bc.close();
+   },
+ });
+@@ -481,6 +485,7 @@ async function startUtilityGuest(
+   };
+   const sharedMemory = animal.get_share_memory();
+   prebindWasiMemory(animal, sharedMemory.memory);
++  let diagnosticExports: WebAssembly.Exports | undefined;
+   const vfs_root = await custom_instantiate(
+     vfs_wasm,
+     animal.wasiImport as any,
+@@ -504,8 +509,29 @@ async function startUtilityGuest(
+       }
+       return animal.call_unknown_fn(idx, unknown);
+     },
++    debugTraceEnabled ? (exports) => { diagnosticExports = exports; } : undefined,
+   );
++  stopMemoryMeasurements?.();
++  stopMemoryMeasurements = undefined;
++  const reportMemory = (stage: string) => {
++    if (!diagnosticExports) return;
++    let snapshot: Record<string, unknown>;
++    try {
++      snapshot = readVfsMemorySnapshot(diagnosticExports, sharedMemory.memory);
++    } catch (error) {
++      snapshot = { status: "error", error: String(error) };
++    }
++    console.info(`[startup-memory] ${JSON.stringify({
++      stage, workerTimeOrigin: performance.timeOrigin,
++      epochMs: performance.timeOrigin + performance.now(), ...snapshot,
++    })}`);
++  };
+   if (debugTraceEnabled) {
++    // Sample from independent JS boundaries/timers only, never host callbacks.
++    reportMemory("after-instantiation");
++    const timer = setInterval(() => reportMemory("poll"), 5000);
++    const end = setTimeout(() => stopMemoryMeasurements?.(), 10 * 60_000);
++    stopMemoryMeasurements = () => { clearInterval(timer); clearTimeout(end); };
+     startVfsDebugTracePump({
+       root: vfs_root,
+       memory: sharedMemory.memory,
+@@ -517,6 +543,7 @@ async function startUtilityGuest(
+ 
+   // Initialize VFS component (runs its main function which sets up thread pool etc.)
+   animal.start(vfs_root as any);
++  if (debugTraceEnabled) reportMemory("after-vfs-main");
+ 
+   // Initialize main session
+   vfs_root.dispatch(0, 3, 0, 0);
+@@ -650,6 +677,12 @@ async function startUtilityGuest(
+     new SharedObject(
+       createStartupSysrootStatusEndpoint(vfs_root, {
+         timeoutMs: STARTUP_SYSROOT_TIMEOUT_MS,
++        ...(import.meta.env.VITE_RUBRC_LSP_TEST === "1" ? {
++          onReady: (kind: 0 | 1) => console.info(`[startup-sysroot] ${JSON.stringify({
++            kind: kind === 0 ? "rust-src" : "target-sysroot",
++            epochMs: performance.timeOrigin + performance.now(),
++          })}`),
++        } : {}),
+       }),
+       ctx.install_startup_sysroots_id,
+     ),
+diff --git a/vendor/am-fs-squashfs/VENDORED.md b/vendor/am-fs-squashfs/VENDORED.md
+new file mode 100644
+index 00000000..0d4d7bf6
+--- /dev/null
++++ b/vendor/am-fs-squashfs/VENDORED.md
+@@ -0,0 +1,19 @@
++# Vendored am-fs-squashfs 0.1.3
++
++This is the unchanged library source from the previously locked crates.io release.
++Fresh CI stopped resolving `am-fs-squashfs` after its index/API became unavailable
++(404); the static archive endpoint also returned 403. Avoid an unrelated filesystem
++implementation upgrade while validating startup changes.
++
++- Upstream: https://github.com/antimatter-studios/rust-fs-squashfs
++- Published source commit: `f88738951f576e4882c514991b27fef8cc543494`
++- Original archive: `am-fs-squashfs-0.1.3.crate`
++- Archive SHA-256: `21c43fbe11c700efcd4ce9cba92f66886addc0b660e3e032cac3e4bcecf116ab`
++- License: MIT, preserved in `LICENSE`.
++
++Recovered from a cached archive whose SHA-256 matches the existing committed
++Cargo.lock checksum. The normalized published Cargo.toml is used, preserving
++registry dependencies rather than the upstream development-only sibling path.
++Library/CLI source, tests, fixture, header and release metadata are preserved.
++Upstream Git hooks, CI automation and toolchain overrides are not installed.
++No library source edits were made as part of vendoring.

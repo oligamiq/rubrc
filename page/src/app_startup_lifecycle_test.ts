@@ -1,3 +1,17 @@
+import { useSingleProjectInitialization } from "./app_startup_lifecycle.ts";
+
+Deno.test("single project initialization requires exact opt-in and installed sysroots", () => {
+  for (const flag of [undefined, "", "0", "true", "1"]) {
+    for (const sysrootsReady of [false, true]) {
+      assert(
+        useSingleProjectInitialization(flag, { sysrootsReady }) ===
+          (flag === "1" && sysrootsReady),
+        `unexpected single-init selection for ${flag}/${sysrootsReady}`,
+      );
+    }
+  }
+});
+
 const assert = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message);
 };

@@ -818,6 +818,76 @@ Deno.test("dispose reports late session cleanup failure", async () => {
   );
 });
 
+Deno.test("coordinator conveys sysrootsReady only after successful cached install", async () => {
+  const entered = deferred<void>();
+  const installed = deferred<void>();
+  let initializations = 0;
+  let activations = 0;
+  const coordinator = new StartupCoordinator({
+    ...immediateDependencies(),
+    prepareStdlibCache: async () => true,
+    installSysroots: async () => {
+      entered.resolve();
+      await installed.promise;
+    },
+    initializeAnalyzer: async (_model, _signal, context) => {
+      initializations++;
+      assert(
+        context.sysrootsReady,
+        "successful cached install lost capability",
+      );
+      return fakeSession([], {
+        activateProject: async () => {
+          activations++;
+        },
+      });
+    },
+  });
+  const model = { getValue: () => "edited" };
+  const startup = coordinator.start(model);
+  await entered.promise;
+  assert(
+    initializations === 0,
+    "analyzer started before install acknowledgement",
+  );
+  installed.resolve();
+  await startup;
+  await coordinator.start(model);
+  assert(
+    initializations === 1 && activations === 1,
+    "startup was not exactly once",
+  );
+  await coordinator.dispose();
+});
+
+for (const failure of ["install", "abort", "cache"] as const) {
+  Deno.test(`cached startup never initializes after ${failure} failure`, async () => {
+    const reason = new Error(failure);
+    let initializations = 0;
+    const coordinator = new StartupCoordinator({
+      ...immediateDependencies(),
+      prepareStdlibCache: async () => {
+        if (failure === "cache") throw reason;
+        return true;
+      },
+      installSysroots: async () => {
+        if (failure === "abort") coordinator.abort(reason);
+        else throw reason;
+      },
+      initializeAnalyzer: async () => {
+        initializations++;
+        return fakeSession();
+      },
+    });
+    const result = await coordinator.start({ getValue: () => "text" }).catch(
+      (e) => e,
+    );
+    assert(result === reason, "startup failure reason changed");
+    assert(initializations === 0, "failed install advertised ready sysroots");
+    await coordinator.dispose();
+  });
+}
+
 Deno.test("coordinator supports cache-enabled startup ordering", async () => {
   const order: string[] = [];
   const coordinator = new StartupCoordinator({
@@ -827,7 +897,12 @@ Deno.test("coordinator supports cache-enabled startup ordering", async () => {
     prefetchSysroots: async () => {
       order.push("prefetch");
     },
-    initializeAnalyzer: async () => {
+    initializeAnalyzer: async (_model, _signal, context) => {
+      assertEquals(
+        context.sysrootsReady,
+        order.includes("install"),
+        "incorrect sysroot capability",
+      );
       order.push("analyzer");
       return fakeSession(order);
     },
@@ -857,7 +932,12 @@ Deno.test("coordinator falls back to original order when cache is unavailable", 
     prefetchSysroots: async () => {
       order.push("prefetch");
     },
-    initializeAnalyzer: async () => {
+    initializeAnalyzer: async (_model, _signal, context) => {
+      assertEquals(
+        context.sysrootsReady,
+        order.includes("install"),
+        "incorrect sysroot capability",
+      );
       order.push("analyzer");
       return fakeSession(order);
     },

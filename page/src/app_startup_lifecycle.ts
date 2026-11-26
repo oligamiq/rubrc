@@ -1,3 +1,12 @@
+// Keep experiment selection at the runtime caller; lower layers receive only
+// the selected mode. Installed sysroots do not imply RA accepted the cache.
+export function useSingleProjectInitialization(
+  flag: string | undefined,
+  context: import("./startup_coordinator.ts").AnalyzerInitializationContext,
+): boolean {
+  return flag === "1" && context.sysrootsReady;
+}
+
 export function createAdditionalTargetLoader(dependencies: {
   prefetch(triples: readonly string[], signal: AbortSignal): Promise<void>;
   load(triple: string): Promise<unknown>;

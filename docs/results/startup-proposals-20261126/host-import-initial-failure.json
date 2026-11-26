@@ -1,0 +1,19 @@
+{
+  "status": "fail",
+  "scope": "instrumented diagnostic; not acceptance timing",
+  "startedAt": "2026-11-26T11:22:48.309Z",
+  "source": "/home/oligami/projects/rubrc/target/startup-js-boundary-20261126/preview",
+  "errors": [],
+  "console": [
+    {
+      "type": "log",
+      "text": "loading virtualized vfs component"
+    }
+  ],
+  "snapshots": [],
+  "url": "http://127.0.0.1:35897/",
+  "browser": "Chrome/157.0.8103.78",
+  "isolation": true,
+  "error": "Error: Waiting failed",
+  "finishedAt": "2026-11-26T11:24:13.493Z"
+}

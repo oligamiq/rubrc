@@ -11,6 +11,7 @@ import { createProductionRuntimeDependencies } from "./production_runtime.ts";
 import { mountRuntimeApplication } from "./runtime_entrypoint.ts";
 import { RuntimeCreationFailure } from "./RuntimeCreationFailure.tsx";
 import { startRustLspClient } from "./rust_lsp_client.ts";
+import { useSingleProjectInitialization } from "./app_startup_lifecycle.ts";
 import {
   installRuntimeRemountTestControl,
   recordRuntimeRemountDisposalFailure,
@@ -104,8 +105,13 @@ const mountGeneration = () =>
           registerRemountPreparation={(prepare) => {
             prepareMountedAppForRemount = prepare;
           }}
-          startLspClient={(monaco, model) =>
-            startRustLspClient(runtime.lspDependencies, monaco, model)}
+          startLspClient={(monaco, model, context) =>
+            startRustLspClient(runtime.lspDependencies, monaco, model, undefined, {
+              singleProjectInitialization: useSingleProjectInitialization(
+                import.meta.env.VITE_RUBRC_RA_SINGLE_PROJECT_INIT,
+                context,
+              ),
+            })}
         />
       ),
       root,

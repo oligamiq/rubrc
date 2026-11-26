@@ -1,0 +1,278 @@
+{
+  "status": "fail",
+  "scope": "instrumented diagnostic; not acceptance timing",
+  "startedAt": "2026-11-26T11:25:19.759Z",
+  "source": "/home/oligami/projects/rubrc/target/startup-js-boundary-20261126/preview",
+  "errors": [],
+  "console": [
+    {
+      "type": "log",
+      "text": "loading virtualized vfs component"
+    },
+    {
+      "type": "info",
+      "text": "[startup-memory] {\"stage\":\"after-instantiation\",\"workerTimeOrigin\":1795692329835.65,\"epochMs\":1795692346916.265,\"status\":\"ready\",\"combinedBytes\":603127808,\"hostLogicalPages\":8210,\"guestBaseBytes\":{\"cargo_opt\":598605824,\"llvm_opt\":538050560,\"lsp_opt\":595656704,\"rustc_opt\":569507840,\"vfs_shell\":601620480,\"vfs_external_memory_manager\":0},\"hostLogicalBytes\":538050560,\"hostPhysicalBytes\":538050560}"
+    },
+    {
+      "type": "log",
+      "text": "vfs component instantiated [object Object]"
+    },
+    {
+      "type": "debug",
+      "text": "thread_spawn worker 1 start"
+    },
+    {
+      "type": "log",
+      "text": "[WASI wasi_thread_start] tid 1 arg 3224520"
+    },
+    {
+      "type": "debug",
+      "text": "thread_spawn worker 2 start"
+    },
+    {
+      "type": "log",
+      "text": "[WASI wasi_thread_start] tid 2 arg 5322824"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "debug",
+      "text": "thread_spawn worker 3 start"
+    },
+    {
+      "type": "log",
+      "text": "[WASI wasi_thread_start] tid 3 arg 7421832"
+    },
+    {
+      "type": "debug",
+      "text": "thread_spawn worker 4 start"
+    },
+    {
+      "type": "log",
+      "text": "[WASI wasi_thread_start] tid 4 arg 9519816"
+    },
+    {
+      "type": "debug",
+      "text": "thread_spawn worker 5 start"
+    },
+    {
+      "type": "log",
+      "text": "[WASI wasi_thread_start] tid 5 arg 11617784"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "debug",
+      "text": "thread_spawn worker 6 start"
+    },
+    {
+      "type": "log",
+      "text": "[WASI wasi_thread_start] tid 6 arg 13715976"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "debug",
+      "text": "thread_spawn worker 7 start"
+    },
+    {
+      "type": "log",
+      "text": "[WASI wasi_thread_start] tid 7 arg 15813832"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "debug",
+      "text": "thread_spawn worker 8 start"
+    },
+    {
+      "type": "log",
+      "text": "[WASI wasi_thread_start] tid 8 arg 17911880"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "notify number is 0. ref is late?"
+    },
+    {
+      "type": "warn",
+      "text": "invoke_func_loop is late"
+    },
+    {
+      "type": "log",
+      "text": "[WASI main] done."
+    },
+    {
+      "type": "info",
+      "text": "[startup-memory] {\"stage\":\"after-vfs-main\",\"workerTimeOrigin\":1795692329835.65,\"epochMs\":1795692347774.89,\"status\":\"ready\",\"combinedBytes\":670236672,\"hostLogicalPages\":8210,\"guestBaseBytes\":{\"cargo_opt\":598605824,\"llvm_opt\":538050560,\"lsp_opt\":595656704,\"rustc_opt\":569507840,\"vfs_shell\":601620480,\"vfs_external_memory_manager\":0},\"hostLogicalBytes\":538050560,\"hostPhysicalBytes\":538050560}"
+    },
+    {
+      "type": "debug",
+      "text": "[vfs-stall-trace] \r\n[vfs-debug] pool:init\r\n\r\n[vfs-debug] pool:capacity capacity=1\r\n\r\n[vfs-debug] pool:flush-return capacity=1\r\n\r\n[vfs-debug] pool:capacity capacity=2\r\n\r\n[vfs-debug] pool:flush-return capacity=2\r\n\r\n[vfs-debug] pool:capacity capacity=3\r\n\r\n[vfs-debug] pool:flush-return capacity=3\r\n\r\n[vfs-debug] pool:capacity capacity=4\r\n\r\n[vfs-debug] pool:flush-return capacity=4\r\n\r\n[vfs-debug] pool:capacity capacity=5\r\n\r\n[vfs-debug] pool:flush-return capacity=5\r\n\r\n[vfs-debug] pool:capacity capacity=6\r\n\r\n[vfs-debug] pool:flush-return capacity=6\r\n\r\n[vfs-debug] pool:capacity capacity=7\r\n\r\n[vfs-debug] pool:flush-return capacity=7\r\n\r\n[vfs-debug] pool:capacity capacity=8\r\n\r\n[vfs-debug] pool:flush-return capacity=8\r\n\r\n[vfs-debug] memory:target=vfs_shell action=reserve current=23 minimum=1024 requested=1024 result=23\r\n"
+    }
+  ],
+  "snapshots": [],
+  "url": "http://127.0.0.1:40985/",
+  "browser": "Chrome/157.0.8103.78",
+  "actualHardwareConcurrency": 4,
+  "reportedHardwareConcurrency": 4,
+  "isolation": true,
+  "error": "Error: Waiting failed",
+  "pageClosed": true,
+  "browserExit": {
+    "code": 0,
+    "signal": null
+  },
+  "finishedAt": "2026-11-26T11:25:57.551Z"
+}

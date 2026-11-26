@@ -1,6 +1,4 @@
-import {
-  RUST_ANALYZER_MAIN_LOOP_THREADS_WASI,
-} from "./runtime_parallelism.ts";
+import { RUST_ANALYZER_MAIN_LOOP_THREADS_WASI } from "./runtime_parallelism.ts";
 
 export function createRustAnalyzerLightweightOptions(
   numThreads = RUST_ANALYZER_MAIN_LOOP_THREADS_WASI,
@@ -54,18 +52,33 @@ export function createRustAnalyzerProjectSettings(
   };
 }
 
+const freezeConfiguration = <T extends object>(value: T): T => {
+  for (const child of Object.values(value)) {
+    if (child !== null && typeof child === "object") freezeConfiguration(child);
+  }
+  return Object.freeze(value);
+};
+
 export function createRustAnalyzerConfigurationState(
   numThreads = RUST_ANALYZER_MAIN_LOOP_THREADS_WASI,
+  singleProjectInitialization = false,
 ) {
-  let settings:
-    | ReturnType<typeof createRustAnalyzerLightweightOptions>
-    | ReturnType<typeof createRustAnalyzerProjectSettings> =
-      createRustAnalyzerLightweightOptions(numThreads);
+  // One immutable full snapshot preserves project identity and selected threads
+  // across initialization, configuration responses, and legacy activation.
+  const projectSettings = freezeConfiguration(
+    createRustAnalyzerProjectSettings(numThreads),
+  );
+  const initializationOptions = singleProjectInitialization
+    ? projectSettings
+    : freezeConfiguration(createRustAnalyzerLightweightOptions(numThreads));
+  let settings = initializationOptions;
 
   return {
-    initializationOptions: () => settings,
+    initializationOptions: () => initializationOptions,
     activateProject: () => {
-      settings = createRustAnalyzerProjectSettings(numThreads);
+      if (singleProjectInitialization) return null;
+      settings = projectSettings;
+      return projectSettings;
     },
     response: (items: readonly { section?: string | null }[]) =>
       items.map((item) => item.section === "rust-analyzer" ? settings : null),
