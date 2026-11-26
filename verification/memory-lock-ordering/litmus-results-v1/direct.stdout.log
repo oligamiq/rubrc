@@ -1,0 +1,1 @@
+{"expectedOutcomeObserved":true,"maxBranches":1000,"maxPermutations":null,"modelExecutionsStarted":63,"mutation":false,"panic":null,"preemptionBound":null,"scenario":"direct","scope":"finite one-shot handwritten litmus, Loom model only; no wait/notify","successfulAcquisitionObservations":42}
