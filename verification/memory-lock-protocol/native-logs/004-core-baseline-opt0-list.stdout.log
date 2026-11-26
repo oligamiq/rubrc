@@ -1,0 +1,10 @@
+memory_lock::tests::multiple_waiting_writers_complete: test
+memory_lock::tests::notification_before_actual_park_is_not_lost: test
+memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves: test
+memory_lock::tests::parked_writer_is_woken_by_the_last_reader: test
+memory_lock::tests::reader_count_aba_still_wakes_the_writer: test
+memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload: test
+memory_lock::tests::spurious_wait_return_retries_acquisition: test
+memory_lock::tests::writer_release_broadcasts_to_a_reader: test
+
+8 tests, 0 benchmarks

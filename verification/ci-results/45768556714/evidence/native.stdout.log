@@ -1,0 +1,9 @@
+{
+  "variant_count": 8,
+  "test_process_runs": 16,
+  "successful_test_process_runs": 16,
+  "successful_test_executions": 152,
+  "timeout_count": 0,
+  "outcome": "PASS"
+}
+Evidence: /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-results.json

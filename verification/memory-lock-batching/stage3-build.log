@@ -1,0 +1,10 @@
+     Locking 34 packages to latest Rust 1.98.1 compatible versions
+      Adding log v0.4.29 (available: v0.4.35)
+      Adding serde_json v1.0.149 (available: v1.0.154)
+      Adding wasm-encoder v0.252.0 (available: v0.256.0)
+      Adding wasmparser v0.252.0 (available: v0.256.0)
+      Adding wat v1.252.0 (available: v1.256.0)
+error: failed to download `log v0.4.29`
+
+Caused by:
+  attempting to make an HTTP request, but --offline was specified

@@ -1,0 +1,9 @@
+{
+  "runId": 45768075263,
+  "hostedConclusion": "success",
+  "artifactIntegrity": "two command-log hash mismatches",
+  "affected": ["correspondence.stdout.log", "correspondence.stderr.log"],
+  "cause": "run_checks.py recorded the wrapper stdout/stderr digests, then copied the underlying Cargo/harness logs onto the same two filenames. Test results passed but saved command-log digests no longer matched those two files.",
+  "fix": "Preserve wrapper command logs unchanged; copy underlying logs as correspondence-raw.stdout.log and correspondence-raw.stderr.log. Require a new hosted run and artifact validation before closing objective.",
+  "scope": "Evidence plumbing bug, not detected production lock or Wasm failure. Do not claim this bundle fully passes integrity checks."
+}

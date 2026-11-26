@@ -1,0 +1,37 @@
+; benchmark generated from python API
+(set-info :status unknown)
+(declare-fun logical_size () (_ BitVec 32))
+(declare-fun addr () (_ BitVec 32))
+(declare-fun base () (_ BitVec 32))
+(declare-fun query () (_ BitVec 32))
+(declare-fun physical () (Array (_ BitVec 32) (_ BitVec 8)))
+(declare-fun logical () (Array (_ BitVec 32) (_ BitVec 8)))
+(declare-fun value () (_ BitVec 64))
+(assert
+ (let ((?x15 ((_ zero_extend 32) logical_size)))
+ (bvsle (bvadd ((_ zero_extend 32) addr) (_ bv4 64)) ?x15)))
+(assert
+ (bvsle (bvadd ((_ zero_extend 32) base) ((_ zero_extend 32) logical_size)) (_ bv4294967296 64)))
+(assert
+ (bvult query logical_size))
+(assert
+ (= (select logical query) (select physical (bvadd base query))))
+(assert
+ (let ((?x90 (bvadd base query)))
+(let ((?x74 ((_ extract 31 24) value)))
+(let ((?x24 (bvadd base addr)))
+(let ((?x294 (bvadd ?x24 (_ bv3 32))))
+(let ((?x91 ((_ extract 23 16) value)))
+(let ((?x165 (bvadd ?x24 (_ bv2 32))))
+(let ((?x1358 ((_ extract 15 8) value)))
+(let ((?x725 (bvadd ?x24 (_ bv1 32))))
+(let ((?x158 (store (store physical (bvadd ?x24 (_ bv0 32)) ((_ extract 7 0) value)) ?x725 ?x1358)))
+(let ((?x59 (store (store ?x158 ?x165 ?x91) ?x294 ?x74)))
+(let ((?x1511 ((_ extract 7 0) (bvudiv value (_ bv16777216 64)))))
+(let ((?x145 (bvadd addr (_ bv3 32))))
+(let ((?x50 (bvadd addr (_ bv2 32))))
+(let ((?x147 (bvadd addr (_ bv1 32))))
+(let ((?x54 (store (store logical (bvadd addr (_ bv0 32)) ((_ extract 7 0) (bvudiv value (_ bv1 64)))) ?x147 ((_ extract 7 0) (bvudiv value (_ bv256 64))))))
+(let ((?x132 (store (store ?x54 ?x50 ((_ extract 7 0) (bvudiv value (_ bv65536 64)))) ?x145 ?x1511)))
+(and (distinct (select ?x132 query) (select ?x59 ?x90)) true))))))))))))))))))
+(check-sat)

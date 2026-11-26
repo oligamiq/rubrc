@@ -1,0 +1,488 @@
+{
+  "startedAt": "2026-11-26T06:25:47.947865+00:00",
+  "passed": true,
+  "scope": "finite/model-bounded regression gates, not whole-program proof",
+  "partial": false,
+  "commands": [
+    {
+      "name": "source-revision",
+      "argv": [
+        "git",
+        "-C",
+        "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+        "rev-parse",
+        "HEAD"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.003846465000002297,
+      "stdout": {
+        "file": "source-revision.stdout.log",
+        "sha256": "043e60a086744d43f46fb90498e60ff5773c3fa666545c603af533ff5a25e400"
+      },
+      "stderr": {
+        "file": "source-revision.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "source-status",
+      "argv": [
+        "git",
+        "-C",
+        "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+        "status",
+        "--porcelain",
+        "--untracked-files=no"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.21429715500000412,
+      "stdout": {
+        "file": "source-status.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "source-status.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "rubrc-revision",
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.0038520840000018097,
+      "stdout": {
+        "file": "rubrc-revision.stdout.log",
+        "sha256": "84d3445a6a23e6ba0d3646495b2e650a29140a79776324b7c331b31c36ff9856"
+      },
+      "stderr": {
+        "file": "rubrc-revision.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "python-version",
+      "argv": [
+        "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+        "--version"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.003622716999998943,
+      "stdout": {
+        "file": "python-version.stdout.log",
+        "sha256": "9d0ae83e540febd225949f3df4aba97c7a9f79fcf745d6c835780f52a57b50cf"
+      },
+      "stderr": {
+        "file": "python-version.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "rustc-version",
+      "argv": [
+        "rustc",
+        "-vV"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.015894434999999874,
+      "stdout": {
+        "file": "rustc-version.stdout.log",
+        "sha256": "778fbc643a806f0dd123c056e66201d7e8a56a61928ec0a33171be8d6c2d5a37"
+      },
+      "stderr": {
+        "file": "rustc-version.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "node-version",
+      "argv": [
+        "node",
+        "--version"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.0036625909999941086,
+      "stdout": {
+        "file": "node-version.stdout.log",
+        "sha256": "6a0cec2e157365c1a8ac6d1715733b7c3321a7c5565862a701ca71ef00359d04"
+      },
+      "stderr": {
+        "file": "node-version.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "validator-unit-tests",
+      "argv": [
+        "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "verification",
+        "-p",
+        "test_run_checks.py",
+        "-v"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.21430307500000367,
+      "stdout": {
+        "file": "validator-unit-tests.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "validator-unit-tests.stderr.log",
+        "sha256": "7f953d23d70cb201fe30b9804876e9ef33afa98d7e4e4f1a5b663b5a80ef82c7"
+      }
+    },
+    {
+      "name": "batch-model",
+      "argv": [
+        "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-batching/model_check.py",
+        "--output",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/batch-model.json"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.31467892899999583,
+      "stdout": {
+        "file": "batch-model.stdout.log",
+        "sha256": "14907ed948d0239901e9c01660824f1e95b34eda36c5b969482cb1eb73b14f4b"
+      },
+      "stderr": {
+        "file": "batch-model.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "semantic",
+      "argv": [
+        "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-batching/semantic_check.py",
+        "--output",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/semantic.json"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 17.759956806999995,
+      "stdout": {
+        "file": "semantic.stdout.log",
+        "sha256": "7e2e46d16356fc3b205d9e111487fc447cc12f1cc43430a04049d12f90028e23"
+      },
+      "stderr": {
+        "file": "semantic.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "smt",
+      "argv": [
+        "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-batching/smt_check.py",
+        "--output-dir",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/smt"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 5.728927587000001,
+      "stdout": {
+        "file": "smt.stdout.log",
+        "sha256": "43f38e2647e949e321a470db5a7ee66fa084e264657ffba85b3bec1198ebf327"
+      },
+      "stderr": {
+        "file": "smt.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "protocol",
+      "argv": [
+        "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-protocol/protocol_check.py",
+        "--output",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/protocol.json"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 1.0166141610000068,
+      "stdout": {
+        "file": "protocol.stdout.log",
+        "sha256": "3225a232685c3988224ac4b18264cd5c462d99a715d27ad4c3123679f94456db"
+      },
+      "stderr": {
+        "file": "protocol.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "native",
+      "argv": [
+        "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-protocol/native_regression.py",
+        "--output-dir",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native",
+        "--repetitions",
+        "2"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 3.941668059999998,
+      "stdout": {
+        "file": "native.stdout.log",
+        "sha256": "8e342b5e67397070006745bc4b774697187408383a0d8e967a340b7ecf384079"
+      },
+      "stderr": {
+        "file": "native.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "correspondence-prepare",
+      "argv": [
+        "cargo",
+        "build",
+        "--locked",
+        "--manifest-path",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-batching/stage3-harness/Cargo.toml"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 13.804573825000006,
+      "stdout": {
+        "file": "correspondence-prepare.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "correspondence-prepare.stderr.log",
+        "sha256": "9961a889374f8960090573dc205cb1cf4250edf2fce2b1ea49af95c4a4ee4dec"
+      }
+    },
+    {
+      "name": "litmus-prepare",
+      "argv": [
+        "cargo",
+        "build",
+        "--locked",
+        "--manifest-path",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-ordering/litmus-harness/Cargo.toml"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 9.54122246,
+      "stdout": {
+        "file": "litmus-prepare.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "litmus-prepare.stderr.log",
+        "sha256": "fbb75706ce23528031f65ee4f68f787708da6ea1de901b1e96a739d52ee7363c"
+      }
+    },
+    {
+      "name": "correspondence",
+      "argv": [
+        "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-batching/run_correspondence.py",
+        "ci-20261126T062640530489"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.26458305399999915,
+      "stdout": {
+        "file": "correspondence.stdout.log",
+        "sha256": "8c7e18f945cbbfd1f6e5e23432c50992f5c654bb4016516702073593103fcf43"
+      },
+      "stderr": {
+        "file": "correspondence.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "litmus",
+      "argv": [
+        "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-ordering/run_litmus.py",
+        "--output-dir",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/litmus"
+      ],
+      "timeoutSeconds": 300,
+      "exitCode": 0,
+      "elapsedSeconds": 5.677796384000004,
+      "stdout": {
+        "file": "litmus.stdout.log",
+        "sha256": "cc9adb616f63abaf3f764992ff6c2400896fcf6360a72a9209a9231ceb603fe4"
+      },
+      "stderr": {
+        "file": "litmus.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "actual-legacy-prepare",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--no-run",
+        "--manifest-path",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-ordering/actual-harness/Cargo.toml"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 7.836086804000004,
+      "stdout": {
+        "file": "actual-legacy-prepare.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "actual-legacy-prepare.stderr.log",
+        "sha256": "16f66f8a429d2fa8ffc6850cea008ce28123d25f13679b5fa38697a5310ae4fd"
+      }
+    },
+    {
+      "name": "actual-waiter-aware-prepare",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--no-run",
+        "--manifest-path",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-ordering/actual-harness/Cargo.toml",
+        "--features",
+        "waiter-aware-memory-lock"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 0.5154068079999945,
+      "stdout": {
+        "file": "actual-waiter-aware-prepare.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "actual-waiter-aware-prepare.stderr.log",
+        "sha256": "a1fc98e29302871959287d4211a61c444b3f1fa246d118a39d0fc8e77a682342"
+      }
+    },
+    {
+      "name": "actual-loom",
+      "argv": [
+        "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-ordering/actual_runner.py",
+        "--max-permutations",
+        "10000",
+        "--max-duration",
+        "30",
+        "--test-timeout",
+        "60"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 1.3167352379999926,
+      "stdout": {
+        "file": "actual-loom.stdout.log",
+        "sha256": "e8c207687341e2096bf216e0abdb8c6831d0484fb6bc7eb9cd1e23623f97e829"
+      },
+      "stderr": {
+        "file": "actual-loom.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "wasm",
+      "argv": [
+        "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+        "/home/runner/work/rubrc/rubrc/verification/memory-lock-wasm/run.py",
+        "--output-dir",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/wasm",
+        "--source-root",
+        "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 14.456141484,
+      "stdout": {
+        "file": "wasm.stdout.log",
+        "sha256": "319e35989b2bbbf12a1f379a83cb33ce5fa151720ecf6b02c2910f9500847944"
+      },
+      "stderr": {
+        "file": "wasm.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "source-revision-after",
+      "argv": [
+        "git",
+        "-C",
+        "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+        "rev-parse",
+        "HEAD"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.003898989999996161,
+      "stdout": {
+        "file": "source-revision-after.stdout.log",
+        "sha256": "043e60a086744d43f46fb90498e60ff5773c3fa666545c603af533ff5a25e400"
+      },
+      "stderr": {
+        "file": "source-revision-after.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "source-status-after",
+      "argv": [
+        "git",
+        "-C",
+        "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+        "status",
+        "--porcelain",
+        "--untracked-files=no"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.007833165999997505,
+      "stdout": {
+        "file": "source-status-after.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "source-status-after.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "validations": [
+    "pinned WVL revision",
+    "production checkout clean",
+    "batch model 997 cases and six detected mutants",
+    "semantic full recorded domain",
+    "SMT all24 expected outcomes",
+    "protocol20 scenarios complete reachability six mutants",
+    "native exact inventories and all152 tests successful",
+    "actual emitter66 outputs23 scalars",
+    "Loom five expected nonvacuous cases",
+    "actual Loom exactly one result directory",
+    "actual Loom exact identities test counts hashes and expanded coverage",
+    "actual Wasm lowering and parked-worker witnesses",
+    "production checkout remains pinned and clean"
+  ],
+  "targetRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+  "rubrcRevision": "5588750fc686863a62cd4e9e8db2c22c806f8070",
+  "correspondenceArtifact": "verification/memory-lock-batching/ci-20261126T062640530489.json",
+  "actualLoomArtifact": "verification/memory-lock-ordering/results/actual-20261126T062654.869659Z",
+  "runnerSha256": "9b4d2ceed184c96ff0e2827eb6661fdf8fedf1e800c8f99b8967846c0cd739ad",
+  "finishedAt": "2026-11-26T06:27:10.627067+00:00"
+}

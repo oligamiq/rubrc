@@ -1,0 +1,394 @@
+{
+  "stage": "4a",
+  "passed": true,
+  "model": "finite SC atomic-word protocol with atomic compare-and-park",
+  "counterBits": 2,
+  "marker": 4,
+  "cases": [
+    {
+      "roles": "R",
+      "operations": [
+        2
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 9,
+      "transitions": 10,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 2,
+      "waitMismatchTransitions": 0
+    },
+    {
+      "roles": "W",
+      "operations": [
+        2
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 7,
+      "transitions": 6,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 0,
+      "waitMismatchTransitions": 0
+    },
+    {
+      "roles": "RW",
+      "operations": [
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 29,
+      "transitions": 46,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 4,
+      "waitMismatchTransitions": 4
+    },
+    {
+      "roles": "RRW",
+      "operations": [
+        1,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 226,
+      "transitions": 549,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 90,
+      "waitMismatchTransitions": 48
+    },
+    {
+      "roles": "RWW",
+      "operations": [
+        1,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 209,
+      "transitions": 458,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 25,
+      "waitMismatchTransitions": 62
+    },
+    {
+      "roles": "RRWW",
+      "operations": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 1842,
+      "transitions": 5490,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 650,
+      "waitMismatchTransitions": 738
+    },
+    {
+      "roles": "RW",
+      "operations": [
+        2,
+        2
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 101,
+      "transitions": 178,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 16,
+      "waitMismatchTransitions": 18
+    },
+    {
+      "roles": "RRW",
+      "operations": [
+        2,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 447,
+      "transitions": 1137,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 202,
+      "waitMismatchTransitions": 104
+    },
+    {
+      "roles": "RWW",
+      "operations": [
+        2,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 426,
+      "transitions": 979,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 65,
+      "waitMismatchTransitions": 146
+    },
+    {
+      "roles": "RRRRW",
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 16396,
+      "transitions": 67361,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 17816,
+      "waitMismatchTransitions": 5244
+    },
+    {
+      "roles": "R",
+      "operations": [
+        2
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 7,
+      "transitions": 8,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 2,
+      "waitMismatchTransitions": 0
+    },
+    {
+      "roles": "W",
+      "operations": [
+        2
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 9,
+      "transitions": 10,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 2,
+      "waitMismatchTransitions": 0
+    },
+    {
+      "roles": "RW",
+      "operations": [
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 38,
+      "transitions": 67,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 13,
+      "waitMismatchTransitions": 4
+    },
+    {
+      "roles": "RRW",
+      "operations": [
+        1,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 352,
+      "transitions": 905,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 246,
+      "waitMismatchTransitions": 56
+    },
+    {
+      "roles": "RWW",
+      "operations": [
+        1,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 376,
+      "transitions": 932,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 200,
+      "waitMismatchTransitions": 86
+    },
+    {
+      "roles": "RRWW",
+      "operations": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 4466,
+      "transitions": 14638,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 4192,
+      "waitMismatchTransitions": 1340
+    },
+    {
+      "roles": "RW",
+      "operations": [
+        2,
+        2
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 158,
+      "transitions": 322,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 74,
+      "waitMismatchTransitions": 20
+    },
+    {
+      "roles": "RRW",
+      "operations": [
+        2,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 768,
+      "transitions": 2102,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 629,
+      "waitMismatchTransitions": 128
+    },
+    {
+      "roles": "RWW",
+      "operations": [
+        2,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 898,
+      "transitions": 2402,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 612,
+      "waitMismatchTransitions": 224
+    },
+    {
+      "roles": "RRRRW",
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 40421,
+      "transitions": 170708,
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 65716,
+      "waitMismatchTransitions": 9444
+    }
+  ],
+  "negativeControls": {
+    "split_wait": {
+      "roles": "RW",
+      "operations": [
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": false,
+      "invariant": "all_remaining_parked_deadlock",
+      "states": 44,
+      "trace": [
+        "1W.load_free",
+        "1W.acquire_success",
+        "0R.load_writer",
+        "0R.broken_wait_compare",
+        "1W.writer_release_store",
+        "1W.notify_all",
+        "0R.broken_wait_register",
+        "all_remaining_parked_deadlock"
+      ]
+    },
+    "mark_store": {
+      "roles": "RW",
+      "operations": [
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": false,
+      "invariant": "reader_count",
+      "states": 28,
+      "trace": [
+        "0R.load_reader_count",
+        "0R.acquire_success",
+        "1W.load_need_mark",
+        "0R.read_release",
+        "1W.broken_mark_store",
+        "reader_count"
+      ]
+    },
+    "omit_reader_notify": {
+      "roles": "RW",
+      "operations": [
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": false,
+      "invariant": "all_remaining_parked_deadlock",
+      "states": 32,
+      "trace": [
+        "0R.load_reader_count",
+        "0R.acquire_success",
+        "1W.load_need_mark",
+        "1W.mark_success",
+        "1W.atomic_compare_and_park",
+        "0R.read_release",
+        "all_remaining_parked_deadlock"
+      ]
+    },
+    "writer_notify_one": {
+      "roles": "RWW",
+      "operations": [
+        1,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": false,
+      "invariant": "all_remaining_parked_deadlock",
+      "states": 385,
+      "trace": [
+        "1W.load_free",
+        "1W.acquire_success",
+        "0R.load_writer",
+        "0R.atomic_compare_and_park",
+        "2W.load_wait",
+        "2W.atomic_compare_and_park",
+        "1W.writer_release_store",
+        "1W.notify_one_0",
+        "0R.load_reader_count",
+        "0R.acquire_success",
+        "0R.read_release",
+        "all_remaining_parked_deadlock"
+      ]
+    }
+  },
+  "checkerSha256": "72f0180c8335f713d1c3f6f4ada3279a279349389db1ee121c2ba65945c3fa0c",
+  "python": "3.14.4",
+  "elapsedSeconds": 0.42211975999816786
+}

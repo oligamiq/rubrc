@@ -1,0 +1,13 @@
+{
+  "date": "2026-11-26 JST",
+  "targetRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+  "sourceSha256": {
+    "wasi_virt_layer/src/memory_lock.rs": "d9c08f4561376fbe356d67ca8451e99fcdb9c79c29d78bbf7bb82a651a896961",
+    "wasi_virt_layer/src/shared_global.rs": "d79c006d0ce5859f225fc8b8918f638eea2b8f9c582eba997ac79868527b24bb"
+  },
+  "platform": "Linux-7.0.0-44-generic-x86_64-with-glibc2.43",
+  "command": "python3 verification/memory-lock-protocol/protocol_check.py --output verification/memory-lock-protocol/protocol-results-v2.json",
+  "exitCode": 0,
+  "nativeRawStreamsVerified": 360,
+  "scope": "SC finite protocol, shrunk counter; not weak-memory verification"
+}

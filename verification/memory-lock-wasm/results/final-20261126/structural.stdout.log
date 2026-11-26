@@ -1,0 +1,141 @@
+{
+  "cases": [
+    {
+      "file": "lowered.wasm",
+      "structure": {
+        "functions": [
+          {
+            "export": "wait32",
+            "function_index": 2,
+            "operators": [
+              "LocalGet { local_index: 0 }",
+              "LocalGet { local_index: 1 }",
+              "LocalGet { local_index: 2 }",
+              "MemoryAtomicWait32 { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }",
+              "End"
+            ],
+            "params": "[I32, I32, I64]",
+            "results": "[I32]"
+          },
+          {
+            "export": "notify",
+            "function_index": 3,
+            "operators": [
+              "LocalGet { local_index: 0 }",
+              "LocalGet { local_index: 1 }",
+              "MemoryAtomicNotify { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }",
+              "End"
+            ],
+            "params": "[I32, I32]",
+            "results": "[I32]"
+          },
+          {
+            "export": "wait_via_call",
+            "function_index": 0,
+            "operators": [
+              "LocalGet { local_index: 0 }",
+              "LocalGet { local_index: 1 }",
+              "LocalGet { local_index: 2 }",
+              "Call { function_index: 2 }",
+              "End"
+            ],
+            "params": "[I32, I32, I64]",
+            "results": "[I32]"
+          },
+          {
+            "export": "notify_via_call",
+            "function_index": 1,
+            "operators": [
+              "LocalGet { local_index: 0 }",
+              "LocalGet { local_index: 1 }",
+              "Call { function_index: 3 }",
+              "End"
+            ],
+            "params": "[I32, I32]",
+            "results": "[I32]"
+          }
+        ],
+        "imports": [
+          "env::memory"
+        ],
+        "shared_memory": {
+          "index": 0,
+          "initial": 1,
+          "maximum": 1
+        }
+      },
+      "threads": true
+    },
+    {
+      "file": "lowered-no-threads.wasm",
+      "structure": {
+        "functions": [
+          {
+            "export": "wait32",
+            "function_index": 2,
+            "operators": [
+              "LocalGet { local_index: 0 }",
+              "LocalGet { local_index: 1 }",
+              "LocalGet { local_index: 2 }",
+              "MemoryAtomicWait32 { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }",
+              "End"
+            ],
+            "params": "[I32, I32, I64]",
+            "results": "[I32]"
+          },
+          {
+            "export": "notify",
+            "function_index": 3,
+            "operators": [
+              "LocalGet { local_index: 0 }",
+              "LocalGet { local_index: 1 }",
+              "MemoryAtomicNotify { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }",
+              "End"
+            ],
+            "params": "[I32, I32]",
+            "results": "[I32]"
+          },
+          {
+            "export": "wait_via_call",
+            "function_index": 0,
+            "operators": [
+              "LocalGet { local_index: 0 }",
+              "LocalGet { local_index: 1 }",
+              "LocalGet { local_index: 2 }",
+              "Call { function_index: 2 }",
+              "End"
+            ],
+            "params": "[I32, I32, I64]",
+            "results": "[I32]"
+          },
+          {
+            "export": "notify_via_call",
+            "function_index": 1,
+            "operators": [
+              "LocalGet { local_index: 0 }",
+              "LocalGet { local_index: 1 }",
+              "Call { function_index: 3 }",
+              "End"
+            ],
+            "params": "[I32, I32]",
+            "results": "[I32]"
+          }
+        ],
+        "imports": [
+          "env::memory"
+        ],
+        "shared_memory": {
+          "index": 0,
+          "initial": 1,
+          "maximum": 1
+        }
+      },
+      "threads": false
+    }
+  ],
+  "mode": "actual-production-source-imports",
+  "negative_controls": {
+    "wrong_timeout_type_rejected": true
+  },
+  "status": "pass"
+}

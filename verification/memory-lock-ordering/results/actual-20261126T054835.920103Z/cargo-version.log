@@ -1,0 +1,4 @@
+COMMAND ["cargo", "--version"]
+cargo 1.98.1 (797e8a9bc 2026-08-05)
+
+RUNNER exit_code=0 timeout=False

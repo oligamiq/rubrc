@@ -1,0 +1,128 @@
+warning: unreachable pattern
+    --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/multi_memory_lowering.rs:1247:33
+     |
+1107 | ...                   _ => {
+     |                       - matches any value
+...
+1247 | ...                   wasmparser::Operator::Call { function_index } => {
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no value can reach this
+     |
+     = note: `#[warn(unreachable_patterns)]` (part of `#[warn(unused)]`) on by default
+
+warning: unreachable pattern
+    --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/multi_memory_lowering.rs:1278:33
+     |
+1278 | ...                   _ => {
+     |                       ^ no value can reach this
+     |
+note: multiple earlier patterns match some of the same values
+    --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/multi_memory_lowering.rs:1278:33
+     |
+ 897 | ...                   wasmparser::Operator::MemorySize { mem, .. } => {
+     |                       -------------------------------------------- matches some of the same values
+...
+ 902 | ...                   wasmparser::Operator::MemoryGrow { mem, .. } => {
+     |                       -------------------------------------------- matches some of the same values
+...
+ 913 | ...                   wasmparser::Operator::MemoryCopy { dst_mem, src_mem } => {
+     |                       ----------------------------------------------------- matches some of the same values
+...
+ 988 | ...                   wasmparser::Operator::MemoryFill { mem } => {
+     |                       ---------------------------------------- matches some of the same values
+...
+1278 | ...                   _ => {
+     |                       ^ ...and 2 other patterns collectively make this unreachable
+
+warning: variable `data_count` is assigned to, but never used
+  --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/multi_memory_lowering.rs:83:13
+   |
+83 |         let mut data_count = 0;
+   |             ^^^^^^^^^^^^^^
+   |
+   = note: consider using `_data_count` instead
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `final_set_size_type_idx`
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/multi_memory_lowering.rs:424:13
+    |
+424 |         let final_set_size_type_idx = set_size_type_idx.unwrap_or(types.len() as u32 + added_types);
+    |             ^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_final_set_size_type_idx`
+
+warning: value assigned to `data_count` is never read
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/multi_memory_lowering.rs:230:21
+    |
+230 |                     data_count = s.count();
+    |                     ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: `wvl-batching-correspondence` (bin "wvl-batching-correspondence") generated 5 warnings (run `cargo fix --bin "wvl-batching-correspondence" -p wvl-batching-correspondence` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running `target/verification-tools/stage3-cargo/debug/wvl-batching-correspondence`
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":1,"elidedAcquires":1,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":1,"elidedAcquires":1,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":1,"elidedAcquires":1,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":1,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":1}
+[wvl-memory-lock-batching] {"acquires":1,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":1}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":1,"elidedAcquires":1,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":21,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":21}
+[wvl-memory-lock-batching] {"acquires":1,"elidedAcquires":20,"enabled":true,"maxBatchOperators":64,"scalarAccesses":21}
+[wvl-memory-lock-batching] {"acquires":22,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":22}
+[wvl-memory-lock-batching] {"acquires":1,"elidedAcquires":21,"enabled":true,"maxBatchOperators":64,"scalarAccesses":22}
+[wvl-memory-lock-batching] {"acquires":23,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":23}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":21,"enabled":true,"maxBatchOperators":64,"scalarAccesses":23}
+[wvl-memory-lock-batching] {"acquires":63,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":63}
+[wvl-memory-lock-batching] {"acquires":3,"elidedAcquires":60,"enabled":true,"maxBatchOperators":64,"scalarAccesses":63}
+[wvl-memory-lock-batching] {"acquires":64,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":64}
+[wvl-memory-lock-batching] {"acquires":3,"elidedAcquires":61,"enabled":true,"maxBatchOperators":64,"scalarAccesses":64}
+[wvl-memory-lock-batching] {"acquires":65,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":65}
+[wvl-memory-lock-batching] {"acquires":3,"elidedAcquires":62,"enabled":true,"maxBatchOperators":64,"scalarAccesses":65}
+[wvl-memory-lock-batching] {"acquires":129,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":129}
+[wvl-memory-lock-batching] {"acquires":6,"elidedAcquires":123,"enabled":true,"maxBatchOperators":64,"scalarAccesses":129}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":0,"enabled":true,"maxBatchOperators":64,"scalarAccesses":2}
+[wvl-memory-lock-batching] {"acquires":23,"elidedAcquires":0,"enabled":false,"maxBatchOperators":64,"scalarAccesses":23}
+[wvl-memory-lock-batching] {"acquires":2,"elidedAcquires":21,"enabled":true,"maxBatchOperators":64,"scalarAccesses":23}

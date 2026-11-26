@@ -1,0 +1,192 @@
+{
+  "status": "pass",
+  "started_at_utc": "2026-11-26T06:19:07.071109+00:00",
+  "source_root": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+  "output_dir": "/home/oligami/projects/rubrc/verification/memory-lock-wasm/results/initial-20261126",
+  "commands": [
+    {
+      "label": "source-version",
+      "argv": [
+        "git",
+        "-C",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+        "rev-parse",
+        "HEAD"
+      ],
+      "cwd": "/home/oligami/projects/rubrc",
+      "timeout_s": 10,
+      "stdout": "source-version.stdout.log",
+      "stderr": "source-version.stderr.log",
+      "exit_code": 0,
+      "elapsed_s": 0.0055
+    },
+    {
+      "label": "source-status",
+      "argv": [
+        "git",
+        "-C",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+        "status",
+        "--porcelain"
+      ],
+      "cwd": "/home/oligami/projects/rubrc",
+      "timeout_s": 10,
+      "stdout": "source-status.stdout.log",
+      "stderr": "source-status.stderr.log",
+      "exit_code": 0,
+      "elapsed_s": 0.0174
+    },
+    {
+      "label": "version-cargo",
+      "argv": [
+        "cargo",
+        "--version"
+      ],
+      "cwd": "/home/oligami/projects/rubrc",
+      "timeout_s": 10,
+      "stdout": "version-cargo.stdout.log",
+      "stderr": "version-cargo.stderr.log",
+      "exit_code": 0,
+      "elapsed_s": 0.0187
+    },
+    {
+      "label": "version-rustc",
+      "argv": [
+        "rustc",
+        "--version"
+      ],
+      "cwd": "/home/oligami/projects/rubrc",
+      "timeout_s": 10,
+      "stdout": "version-rustc.stdout.log",
+      "stderr": "version-rustc.stderr.log",
+      "exit_code": 0,
+      "elapsed_s": 0.0334
+    },
+    {
+      "label": "version-node",
+      "argv": [
+        "node",
+        "--version"
+      ],
+      "cwd": "/home/oligami/projects/rubrc",
+      "timeout_s": 10,
+      "stdout": "version-node.stdout.log",
+      "stderr": "version-node.stderr.log",
+      "exit_code": 0,
+      "elapsed_s": 0.0094
+    },
+    {
+      "label": "build",
+      "argv": [
+        "cargo",
+        "build",
+        "--locked",
+        "--manifest-path",
+        "/home/oligami/projects/rubrc/verification/memory-lock-wasm/harness/Cargo.toml",
+        "--target-dir",
+        "/home/oligami/projects/rubrc/verification/memory-lock-wasm/.target",
+        "--offline"
+      ],
+      "cwd": "/home/oligami/projects/rubrc",
+      "timeout_s": 240,
+      "stdout": "build.stdout.log",
+      "stderr": "build.stderr.log",
+      "exit_code": 0,
+      "elapsed_s": 1.4812
+    },
+    {
+      "label": "structural",
+      "argv": [
+        "/home/oligami/projects/rubrc/verification/memory-lock-wasm/.target/debug/wvl-wasm-wait-correspondence",
+        "/home/oligami/projects/rubrc/verification/memory-lock-wasm/results/initial-20261126"
+      ],
+      "cwd": "/home/oligami/projects/rubrc",
+      "timeout_s": 20,
+      "stdout": "structural.stdout.log",
+      "stderr": "structural.stderr.log",
+      "exit_code": 0,
+      "elapsed_s": 0.0095
+    },
+    {
+      "label": "workers",
+      "argv": [
+        "node",
+        "/home/oligami/projects/rubrc/verification/memory-lock-wasm/worker-tests.mjs",
+        "/home/oligami/projects/rubrc/verification/memory-lock-wasm/results/initial-20261126/lowered.wasm",
+        "/home/oligami/projects/rubrc/verification/memory-lock-wasm/results/initial-20261126/runtime.json"
+      ],
+      "cwd": "/home/oligami/projects/rubrc",
+      "timeout_s": 30,
+      "stdout": "workers.stdout.log",
+      "stderr": "workers.stderr.log",
+      "exit_code": 0,
+      "elapsed_s": 0.6208
+    }
+  ],
+  "limits": {
+    "cargo_build_jobs": 2,
+    "rayon_threads": 2,
+    "build_timeout_s": 240,
+    "harness_timeout_s": 20,
+    "node_timeout_s": 30,
+    "subprocess_cpu_s": 240
+  },
+  "environment": {
+    "platform": "Linux-7.0.0-44-generic-x86_64-with-glibc2.43",
+    "python": "3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]",
+    "cargo_home": "/home/oligami/.cargo"
+  },
+  "source_commit": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+  "source_status": "",
+  "source_sha256": {
+    "abi.rs": "07cf16d116158e371c7037a3571bcda9893f310003c63e66b11620ae31ff6c2a",
+    "wasm_stream/pipeline.rs": "7682adce58e548b3d664b2e3e6de06ff90e5f0383c39f8a3d68a3f61d2767635",
+    "wasm_stream/translator.rs": "74a2eff3b5656993ae711b05d1003a5dba50d581a4bd01d43405e4f74604d7c6",
+    "wasm_stream/mem_info.rs": "6b32f5b4f9aaa34879c094bb4d84d035058ff438337cc4376a667b78c11a49d4",
+    "wasm_stream/own_memory_abi.rs": "2d2f6e0845a733cbeca11fc91adbc67a9a086847582d81a89503f2e75ea30ece",
+    "wasm_stream/passes/post_combine.rs": "1b27827958fad66c881d8f5f687cbae812c4bb1ea896ed212a4ceed6c02c7f38",
+    "wasm_stream/passes/fn_in_starts.rs": "a7c19f977bfa9fc0b02a7dff7ef1caf3b8db95b9f6799f63e862a580cb91bd0a",
+    "wasm_stream/passes/reactor_initialize.rs": "b2e20e5bcfd8f186fc5196545045f9c943d75d5bdd7e53db79525ee0e1b866d0"
+  },
+  "versions": {
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "node": "v24.22.2"
+  },
+  "harness_sha256": {
+    "run.py": "a12ccd6cd4a7ffe1344576a204dbee279e3d2f6d812a9d2b01fa90492c693c4d",
+    "worker-tests.mjs": "500ca6c8da2b3b186de60ab1327ab23244ece45836e047d12029c9678ecb23f5",
+    "harness/Cargo.toml": "902ed6e33c8487b7c8b085cd2f0b0080e2d2ee0b3c5744b52ed76c360e2fff1f",
+    "harness/Cargo.lock": "119bff0badd5fac56a7044a6aa10cc4df6f723bc0981628586d69187b7234072",
+    "harness/build.rs": "5e2a71819617047f6c524efc7459edaebdfd01d7e413973c1dac2623c93d41df",
+    "harness/src/main.rs": "55865b61a10921306cd7d1d1888d934ae2ac031a79e961741b60f3420d9dcafa"
+  },
+  "executable_sha256": "195822310b05bab2edb0a853cb776ce2b34633409ca8241a75bacf0938478898",
+  "structural": "structural.json",
+  "runtime": "runtime.json",
+  "finished_at_utc": "2026-11-26T06:19:09.339566+00:00",
+  "artifact_sha256": {
+    "build.stderr.log": "b3c642ccd00e83e42052aeea9138d8788ba333e27f26b5937c17e01324df14f4",
+    "build.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "input.wasm": "9c7bcdf3132fe681e6adcf44191fe7af2d1b5c986648d6cca66514540bc5b673",
+    "input.wat": "1731538e6c88b5509d15884490b675b0f1f248b242f695648d63833387d86b21",
+    "lowered-no-threads.wasm": "7b6bedfeab524089043ef1a700653bcfb23610e9e856c9a5829721cb0adf1109",
+    "lowered.wasm": "46303d79f70958841795e5c4cb66bf3d00ed1f397ef12500ac1bc215a43e598a",
+    "runtime.json": "ce6039b6acdf2d40f0eb6d04489e3d3e93b532825624588b0c15550a25651593",
+    "source-status.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-status.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-version.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-version.stdout.log": "043e60a086744d43f46fb90498e60ff5773c3fa666545c603af533ff5a25e400",
+    "structural.json": "618269126050d7b26757aa02a6193c98dfbc6c94031f351be2974889f64f9b25",
+    "structural.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "structural.stdout.log": "0664655fbc78d559e754ebd1c61e9e22db24bc7189bdeee92f6419a5270cb596",
+    "version-cargo.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "version-cargo.stdout.log": "9950bbb2d5c3417b1a068f0e81f6d3cac991a363193bdf2a22d447f5acf8b503",
+    "version-node.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "version-node.stdout.log": "6a0cec2e157365c1a8ac6d1715733b7c3321a7c5565862a701ca71ef00359d04",
+    "version-rustc.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "version-rustc.stdout.log": "2073de5abf149185c2f4d7473dc833bc921b99135560d24ae7b2293f33a9c376",
+    "workers.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "workers.stdout.log": "37d40083ebfa242092dbadc0b883f5cd7392b5bc55cf821ce28d3b0251e690c1"
+  }
+}

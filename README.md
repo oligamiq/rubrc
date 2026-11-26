@@ -6,6 +6,15 @@ Rubrc runs a WebAssembly-hosted Rust toolchain directly inside a browser worker.
 
 **Live Demo:** [Rubrc](https://rubrc.pages.dev/) (v1 is available at [Rubrc v1](https://rubrc.pages.dev/v1/))
 
+## Public demo and `main` are different revisions
+
+> [!IMPORTANT]
+> The deployed public page and the latest `main` commit are **not synchronized**. The live demo is a separately published build; merging changes into `main` does not mean those changes are running on the public page. In particular, the memory-lock verification CI and its results on `main` do not imply that the experimental optimization has been enabled or deployed. Check the deployment/build metadata when comparing public-page behavior with a source commit; do not assume the demo represents `main` HEAD.
+>
+> 公開ページと `main` は異なるコミットです。`main` への取り込みと公開版の更新は別であり、検証CIの成功は公開ページの更新や高速化の有効化を意味しません。
+
+The [memory-lock verification guide](verification/CI.md) documents the pinned source, scope, evidence, and limitations. The `Memory lock verification gate` check runs on every pull request targeting `main` (including documentation-only changes), without path filters. It is a bounded regression gate, not a full application proof.
+
 ## Features
 
 > [!WARNING]

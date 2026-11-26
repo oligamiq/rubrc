@@ -1,0 +1,1 @@
+{"expectedOutcomeObserved":true,"maxBranches":1000,"maxPermutations":null,"modelExecutionsStarted":19,"mutation":true,"panic":"assertion `left == right` failed: STALE_PAYLOAD\n  left: 0\n right: 42","preemptionBound":null,"scenario":"marker_store","scope":"finite one-shot handwritten litmus, Loom model only; no wait/notify","successfulAcquisitionObservations":1}

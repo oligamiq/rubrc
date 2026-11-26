@@ -1,0 +1,104 @@
+   Compiling wvl-wasm-wait-correspondence v0.0.0 (/home/oligami/projects/rubrc/verification/memory-lock-wasm/harness)
+warning: variable `type_count` is assigned to, but never used
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:189:13
+    |
+189 |         let mut type_count = 0;
+    |             ^^^^^^^^^^^^^^
+    |
+    = note: consider using `_type_count` instead
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable `memory_count` is assigned to, but never used
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:191:13
+    |
+191 |         let mut memory_count = 0;
+    |             ^^^^^^^^^^^^^^^^
+    |
+    = note: consider using `_memory_count` instead
+
+warning: variable `memory_import_count` is assigned to, but never used
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:192:13
+    |
+192 |         let mut memory_import_count = 0;
+    |             ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: consider using `_memory_import_count` instead
+
+warning: variable `data_count` is assigned to, but never used
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:499:13
+    |
+499 |         let mut data_count = 0;
+    |             ^^^^^^^^^^^^^^
+    |
+    = note: consider using `_data_count` instead
+
+warning: value assigned to `type_count` is never read
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:289:29
+    |
+289 | ...                   type_count += 1;
+    |                       ^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `memory_count` is never read
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:281:33
+    |
+281 |                                 memory_count += 1;
+    |                                 ^^^^^^^^^^^^^^^^^ this value is reassigned later and never used
+...
+300 |                         memory_count += 1;
+    |                         ----------------- `memory_count` is overwritten here before the previous value is read
+
+warning: value assigned to `memory_count` is never read
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:300:25
+    |
+300 |                         memory_count += 1;
+    |                         ^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `memory_import_count` is never read
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:280:33
+    |
+280 | ...                   memory_import_count += 1;
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `data_count` is never read
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:951:21
+    |
+951 |                     data_count = count; // original count
+    |                     ^^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `current_new_idx` is never read
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:591:9
+    |
+591 |         current_new_idx += 1;
+    |         ^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `type_count` is never read
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:719:25
+    |
+671 |                         type_count += 1;
+    |                         --------------- `type_count` is overwritten here before the previous value is read
+...
+719 |                         type_count += 1;
+    |                         ^^^^^^^^^^^^^^^ this value is reassigned later and never used
+
+warning: value assigned to `funcs_vec` is never read
+   --> /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:904:45
+    |
+904 |                         let mut funcs_vec = Vec::new();
+    |                                             ^^^^^^^^^^ this value is reassigned later and never used
+...
+907 |                                 funcs_vec = f
+    |                                 --------- `funcs_vec` is overwritten here before the previous value is read
+
+warning: `wvl-wasm-wait-correspondence` (bin "wvl-wasm-wait-correspondence") generated 12 warnings
+    Finished `dev` profile [unoptimized] target(s) in 1.43s

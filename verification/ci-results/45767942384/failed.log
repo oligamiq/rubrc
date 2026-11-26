@@ -1,0 +1,83 @@
+verify	Run actions/checkout@v4	﻿2026-11-26T06:24:17.3671695Z ##[group]Run actions/checkout@v4
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3673044Z with:
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3673763Z   submodules: false
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3674700Z   persist-credentials: false
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3675569Z   repository: oligamiq/rubrc
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3682497Z   token: ***
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3683260Z   ssh-strict: true
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3683998Z   ssh-user: git
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3684683Z   clean: true
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3685448Z   sparse-checkout-cone-mode: true
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3686300Z   fetch-depth: 1
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3687071Z   fetch-tags: false
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3687949Z   show-progress: true
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3688708Z   lfs: false
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3689463Z   set-safe-directory: true
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3690287Z   allow-unsafe-pr-checkout: false
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3691365Z env:
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3692042Z   CARGO_BUILD_JOBS: 2
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3692785Z   CARGO_INCREMENTAL: 0
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3693550Z   PYTHONDONTWRITEBYTECODE: 1
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3694477Z   WVL_REVISION: 77f45543eb976e4e7843e78fcd67bd837acac6bd
+verify	Run actions/checkout@v4	2026-11-26T06:24:17.3695537Z ##[endgroup]
+verify	Run actions/checkout@v4	2026-11-26T06:24:19.7371089Z Syncing repository: oligamiq/rubrc
+verify	Run actions/checkout@v4	2026-11-26T06:24:19.7372355Z ##[group]Getting Git version info
+verify	Run actions/checkout@v4	2026-11-26T06:24:19.7372804Z Working directory is '/home/runner/work/rubrc/rubrc'
+verify	Run actions/checkout@v4	2026-11-26T06:24:19.7373453Z [command]/usr/bin/git version
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0000487Z git version 2.56.1
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0014605Z ##[endgroup]
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0025459Z Temporarily overriding HOME='/home/runner/work/_temp/a17116ad-454d-4670-b5b4-036b4a13c793' before making global git config changes
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0029196Z Adding repository directory to the temporary git global config as a safe directory
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0029811Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/rubrc/rubrc
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0405308Z Deleting the contents of '/home/runner/work/rubrc/rubrc'
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0408269Z ##[group]Initializing the repository
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0411509Z [command]/usr/bin/git init /home/runner/work/rubrc/rubrc
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0949704Z hint: Using 'master' as the name for the initial branch. This default branch name
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0950556Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0951060Z hint: to use in all of your new repositories, which will suppress this warning,
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0951590Z hint: call:
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0951891Z hint:
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0952250Z hint: 	git config --global init.defaultBranch <name>
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0952591Z hint:
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0952967Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0953428Z hint: 'development'. The just-created branch can be renamed via this command:
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0953836Z hint:
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0954084Z hint: 	git branch -m <name>
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0954332Z hint:
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0954744Z hint: Disable this message with "git config set advice.defaultBranchName false"
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0962223Z Initialized empty Git repository in /home/runner/work/rubrc/rubrc/.git/
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.0969361Z [command]/usr/bin/git remote add origin https://github.com/oligamiq/rubrc
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.1013840Z ##[endgroup]
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.1014369Z ##[group]Disabling automatic garbage collection
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.1017364Z [command]/usr/bin/git config --local gc.auto 0
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.1039852Z ##[endgroup]
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.1040509Z ##[group]Setting up auth
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.1045214Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.1070477Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.4986859Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.5011664Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.5160461Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.5185392Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.5333557Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.5359031Z ##[endgroup]
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.5359514Z ##[group]Fetching the repository
+verify	Run actions/checkout@v4	2026-11-26T06:24:20.5370659Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +5348a26dedb6d4c285a62d8b436c6ad985a38c63:refs/remotes/origin/perf/memory-lock-batching
+verify	Run actions/checkout@v4	2026-11-26T06:24:26.0976398Z From https://github.com/oligamiq/rubrc
+verify	Run actions/checkout@v4	2026-11-26T06:24:26.0977438Z  * [new ref]         5348a26dedb6d4c285a62d8b436c6ad985a38c63 -> origin/perf/memory-lock-batching
+verify	Run actions/checkout@v4	2026-11-26T06:24:26.0980387Z ##[endgroup]
+verify	Run actions/checkout@v4	2026-11-26T06:24:26.0981025Z ##[group]Determining the checkout info
+verify	Run actions/checkout@v4	2026-11-26T06:24:26.0982936Z ##[endgroup]
+verify	Run actions/checkout@v4	2026-11-26T06:24:26.0989074Z [command]/usr/bin/git sparse-checkout disable
+verify	Run actions/checkout@v4	2026-11-26T06:24:26.1053752Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+verify	Run actions/checkout@v4	2026-11-26T06:24:26.1087433Z ##[group]Checking out the ref
+verify	Run actions/checkout@v4	2026-11-26T06:24:26.1091071Z [command]/usr/bin/git checkout --progress --force -B perf/memory-lock-batching refs/remotes/origin/perf/memory-lock-batching
+verify	Run actions/checkout@v4	2026-11-26T06:24:27.0836515Z Switched to a new branch 'perf/memory-lock-batching'
+verify	Run actions/checkout@v4	2026-11-26T06:24:27.0842254Z branch 'perf/memory-lock-batching' set up to track 'origin/perf/memory-lock-batching'.
+verify	Run actions/checkout@v4	2026-11-26T06:24:27.0858063Z ##[endgroup]
+verify	Run actions/checkout@v4	2026-11-26T06:24:27.0896369Z [command]/usr/bin/git log -1 --format=%H
+verify	Run actions/checkout@v4	2026-11-26T06:24:27.0917486Z 5348a26dedb6d4c285a62d8b436c6ad985a38c63
+verify	Run actions/checkout@v4	2026-11-26T06:24:27.0924701Z ##[group]Removing auth
+verify	Run actions/checkout@v4	2026-11-26T06:24:27.0927912Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+verify	Run actions/checkout@v4	2026-11-26T06:24:27.0951468Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+verify	Run actions/checkout@v4	2026-11-26T06:24:27.1115201Z ##[error]fatal: No url found for submodule path 'test_repo' in .gitmodules
+verify	Run actions/checkout@v4	2026-11-26T06:24:27.1136587Z ##[error]The process '/usr/bin/git' failed with exit code 128

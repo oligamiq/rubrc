@@ -1,0 +1,10 @@
+# Rebuilt native binaries are local artifacts; logs, hashes and wrappers remain evidence.
+native-artifacts/core-baseline-opt0
+native-artifacts/core-baseline-opt3
+native-artifacts/core-waiter-opt0
+native-artifacts/core-waiter-opt3
+native-artifacts/exports-baseline-opt0
+native-artifacts/exports-baseline-opt3
+native-artifacts/exports-waiter-opt0
+native-artifacts/exports-waiter-opt3
+__pycache__/

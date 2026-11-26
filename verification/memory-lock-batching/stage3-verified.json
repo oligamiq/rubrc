@@ -1,0 +1,442 @@
+{
+  "cases": [
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "bridge-gap-0",
+      "eventCount": 13
+    },
+    {
+      "acquisitions": 1,
+      "batching": true,
+      "case": "bridge-gap-0",
+      "eventCount": 11
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "bridge-gap-59",
+      "eventCount": 72
+    },
+    {
+      "acquisitions": 1,
+      "batching": true,
+      "case": "bridge-gap-59",
+      "eventCount": 70
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "bridge-gap-60",
+      "eventCount": 73
+    },
+    {
+      "acquisitions": 1,
+      "batching": true,
+      "case": "bridge-gap-60",
+      "eventCount": 71
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "bridge-gap-61",
+      "eventCount": 74
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "bridge-gap-61",
+      "eventCount": 74
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "bridge-gap-62",
+      "eventCount": 75
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "bridge-gap-62",
+      "eventCount": 75
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "bridge-gap-63",
+      "eventCount": 76
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "bridge-gap-63",
+      "eventCount": 76
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "bridge-gap-64",
+      "eventCount": 77
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "bridge-gap-64",
+      "eventCount": 77
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "bridge-gap-65",
+      "eventCount": 78
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "bridge-gap-65",
+      "eventCount": 78
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "bridge-gap-126",
+      "eventCount": 139
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "bridge-gap-126",
+      "eventCount": 139
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "bridge-gap-127",
+      "eventCount": 140
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "bridge-gap-127",
+      "eventCount": 140
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "bridge-gap-128",
+      "eventCount": 141
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "bridge-gap-128",
+      "eventCount": 141
+    },
+    {
+      "acquisitions": 1,
+      "batching": false,
+      "case": "scalar-run-1",
+      "eventCount": 7
+    },
+    {
+      "acquisitions": 1,
+      "batching": true,
+      "case": "scalar-run-1",
+      "eventCount": 7
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "scalar-run-2",
+      "eventCount": 13
+    },
+    {
+      "acquisitions": 1,
+      "batching": true,
+      "case": "scalar-run-2",
+      "eventCount": 11
+    },
+    {
+      "acquisitions": 21,
+      "batching": false,
+      "case": "scalar-run-21",
+      "eventCount": 127
+    },
+    {
+      "acquisitions": 1,
+      "batching": true,
+      "case": "scalar-run-21",
+      "eventCount": 87
+    },
+    {
+      "acquisitions": 22,
+      "batching": false,
+      "case": "scalar-run-22",
+      "eventCount": 133
+    },
+    {
+      "acquisitions": 1,
+      "batching": true,
+      "case": "scalar-run-22",
+      "eventCount": 91
+    },
+    {
+      "acquisitions": 23,
+      "batching": false,
+      "case": "scalar-run-23",
+      "eventCount": 139
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "scalar-run-23",
+      "eventCount": 97
+    },
+    {
+      "acquisitions": 63,
+      "batching": false,
+      "case": "scalar-run-63",
+      "eventCount": 379
+    },
+    {
+      "acquisitions": 3,
+      "batching": true,
+      "case": "scalar-run-63",
+      "eventCount": 259
+    },
+    {
+      "acquisitions": 64,
+      "batching": false,
+      "case": "scalar-run-64",
+      "eventCount": 385
+    },
+    {
+      "acquisitions": 3,
+      "batching": true,
+      "case": "scalar-run-64",
+      "eventCount": 263
+    },
+    {
+      "acquisitions": 65,
+      "batching": false,
+      "case": "scalar-run-65",
+      "eventCount": 391
+    },
+    {
+      "acquisitions": 3,
+      "batching": true,
+      "case": "scalar-run-65",
+      "eventCount": 267
+    },
+    {
+      "acquisitions": 129,
+      "batching": false,
+      "case": "scalar-run-129",
+      "eventCount": 775
+    },
+    {
+      "acquisitions": 6,
+      "batching": true,
+      "case": "scalar-run-129",
+      "eventCount": 529
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-0",
+      "eventCount": 14
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-0",
+      "eventCount": 14
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-1",
+      "eventCount": 15
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-1",
+      "eventCount": 15
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-2",
+      "eventCount": 15
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-2",
+      "eventCount": 15
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-3",
+      "eventCount": 15
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-3",
+      "eventCount": 15
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-4",
+      "eventCount": 15
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-4",
+      "eventCount": 15
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-5",
+      "eventCount": 17
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-5",
+      "eventCount": 17
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-6",
+      "eventCount": 17
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-6",
+      "eventCount": 17
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-7",
+      "eventCount": 17
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-7",
+      "eventCount": 17
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-8",
+      "eventCount": 16
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-8",
+      "eventCount": 16
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-9",
+      "eventCount": 16
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-9",
+      "eventCount": 16
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-10",
+      "eventCount": 14
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-10",
+      "eventCount": 14
+    },
+    {
+      "acquisitions": 2,
+      "batching": false,
+      "case": "barrier-11",
+      "eventCount": 14
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "barrier-11",
+      "eventCount": 14
+    },
+    {
+      "acquisitions": 23,
+      "batching": false,
+      "case": "all23-scalars-mixed-guests",
+      "eventCount": 139
+    },
+    {
+      "acquisitions": 2,
+      "batching": true,
+      "case": "all23-scalars-mixed-guests",
+      "eventCount": 97
+    }
+  ],
+  "claim": "selected actual-pass emitted-event correspondence, not full pipeline proof",
+  "eventMutationControls": {
+    "omitBase": true,
+    "omitRelease": true,
+    "wrongGuestBase": true
+  },
+  "passed": true,
+  "scalarKinds": 23,
+  "stage": "3a",
+  "validatedOutputs": 66,
+  "provenance": {
+    "targetRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+    "command": [
+      "cargo",
+      "run",
+      "--offline",
+      "--locked",
+      "--manifest-path",
+      "verification/memory-lock-batching/stage3-harness/Cargo.toml"
+    ],
+    "CARGO_TARGET_DIR": "/home/oligami/projects/rubrc/target/verification-tools/stage3-cargo",
+    "exitCode": 0,
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "python": "3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]",
+    "platform": "Linux-7.0.0-44-generic-x86_64-with-glibc2.43",
+    "sourceSha256": {
+      ".worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/pipeline.rs": "7682adce58e548b3d664b2e3e6de06ff90e5f0383c39f8a3d68a3f61d2767635",
+      ".worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/translator.rs": "74a2eff3b5656993ae711b05d1003a5dba50d581a4bd01d43405e4f74604d7c6",
+      ".worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/mem_info.rs": "6b32f5b4f9aaa34879c094bb4d84d035058ff438337cc4376a667b78c11a49d4",
+      ".worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/own_memory_abi.rs": "2d2f6e0845a733cbeca11fc91adbc67a9a086847582d81a89503f2e75ea30ece",
+      ".worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/memory_lock_batching.rs": "d0c4b7cb905078c4f67f8ace65cdaf594b6f0fcb22b4c8f2c46ebdb0d9252edf",
+      ".worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/multi_memory_lowering.rs": "861e10ebbfce994e6765680654c55a279a29ab6132bcae4193db94aa0733d656",
+      "verification/memory-lock-batching/stage3-harness/Cargo.toml": "c114e822f04a0d726d04678537224cc7efe07d614a0c0c8730069c3e5b5e50c3",
+      "verification/memory-lock-batching/stage3-harness/Cargo.lock": "9fb20fa63b59e97e56646312998034058e00e7d1ffa6ddd6ee6a7853d6b8cad1",
+      "verification/memory-lock-batching/stage3-harness/build.rs": "17bf4a77eec5f9e6b0971352f8d2da048a806224e3d48915207833034273f2f6",
+      "verification/memory-lock-batching/stage3-harness/src/main.rs": "4bb7d096e8fc0bbac820a9ef2ba9beb5666709ee31e9efa684977de92f570db0",
+      "verification/memory-lock-batching/run_correspondence.py": "6b54bd181176231dea24a8af213929dd7e1f8df90ec6b8c2d3e2da0a840f93c5"
+    },
+    "stdout": "verification/memory-lock-batching/stage3-verified.stdout.log",
+    "stderr": "verification/memory-lock-batching/stage3-verified.stderr.log"
+  }
+}

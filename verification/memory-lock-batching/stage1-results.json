@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "model": "finite atomic-RW-lock abstraction",
+  "passed": true,
+  "coverage": {
+    "cases": 997,
+    "states": 52810,
+    "edges": 87420
+  },
+  "negativeControls": {
+    "omit_acquire": {
+      "passed": false,
+      "invariant": "base_without_lock",
+      "trace": [
+        "reader0.base"
+      ],
+      "states": 2
+    },
+    "hold_boundary": {
+      "passed": false,
+      "invariant": "held_across_boundary",
+      "trace": [
+        "reader0.acquire",
+        "reader0.base",
+        "reader0.access",
+        "reader0.barrier"
+      ],
+      "states": 8
+    },
+    "writer_ignores_readers": {
+      "passed": false,
+      "invariant": "writer_reader_exclusion",
+      "trace": [
+        "reader0.acquire",
+        "writer.acquire",
+        "violation"
+      ],
+      "states": 7
+    },
+    "stale_base": {
+      "passed": false,
+      "invariant": "stale_base",
+      "trace": [
+        "reader0.acquire",
+        "reader0.base",
+        "reader0.access",
+        "reader0.release",
+        "writer.acquire",
+        "writer.relocate_and_release",
+        "reader0.barrier",
+        "reader0.acquire",
+        "reader0.access"
+      ],
+      "states": 23
+    }
+  },
+  "limitations": [
+    "No fairness/liveness proof",
+    "No proof of CAS/wait implementation",
+    "No Wasm traps, memory contents, or operand stack in this stage",
+    "Finite chosen programs/readers/one relocation only; not an unbounded theorem"
+  ],
+  "checkerSha256": "63c74d8f91e3adcef6fe6b5862172a5c69d0894fd2cba17e850233fed1d2e5a6"
+}
