@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "mainCommit": "8c012fc2db16782271a8b91def1ccca8d117b057",
+  "baseCommit": "58a2d87836a1bcb46bafaecf4d03ca78e45db88c",
+  "onlyVerificationWorkflowReadmeChanged": true,
+  "readmeNoticePresent": true,
+  "changedFiles": 878
+}

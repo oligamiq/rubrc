@@ -1,0 +1,11 @@
+{
+  "required_status_checks": {
+    "strict": true,
+    "checks": [{"context": "Memory lock verification gate", "app_id": 15368}]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
