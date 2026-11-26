@@ -1,0 +1,265 @@
+verify	Set up job	﻿2026-11-26T06:29:39.4970295Z Current runner version: '2.338.2'
+verify	Set up job	2026-11-26T06:29:39.4996340Z ##[group]Runner Image Provisioner
+verify	Set up job	2026-11-26T06:29:39.4997355Z Hosted Compute Agent
+verify	Set up job	2026-11-26T06:29:39.4998147Z Version: 20261111.635
+verify	Set up job	2026-11-26T06:29:39.4998871Z Commit: b8a594ea514ff44cadb5342986c68b1eac6e22ed
+verify	Set up job	2026-11-26T06:29:39.4999712Z Build Date: 2026-11-11T01:49:01Z
+verify	Set up job	2026-11-26T06:29:39.5000518Z Worker ID: {90147921-235d-4618-b4e7-d681c9b3cb6b}
+verify	Set up job	2026-11-26T06:29:39.5001840Z Region: westus3
+verify	Set up job	2026-11-26T06:29:39.5002549Z Cloud: Azure
+verify	Set up job	2026-11-26T06:29:39.5003174Z ##[endgroup]
+verify	Set up job	2026-11-26T06:29:39.5005042Z ##[group]Operating System
+verify	Set up job	2026-11-26T06:29:39.5005939Z Ubuntu
+verify	Set up job	2026-11-26T06:29:39.5006546Z 24.04.5
+verify	Set up job	2026-11-26T06:29:39.5007180Z LTS
+verify	Set up job	2026-11-26T06:29:39.5008039Z ##[endgroup]
+verify	Set up job	2026-11-26T06:29:39.5008806Z ##[group]Runner Image
+verify	Set up job	2026-11-26T06:29:39.5009996Z Image: ubuntu-24.04
+verify	Set up job	2026-11-26T06:29:39.5010646Z Version: 20261116.376.1
+verify	Set up job	2026-11-26T06:29:39.5012131Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261116.376/images/ubuntu/Ubuntu2404-Readme.md
+verify	Set up job	2026-11-26T06:29:39.5014039Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261116.376
+verify	Set up job	2026-11-26T06:29:39.5015218Z ##[endgroup]
+verify	Set up job	2026-11-26T06:29:39.5016473Z ##[group]GITHUB_TOKEN Permissions
+verify	Set up job	2026-11-26T06:29:39.5018894Z Contents: read
+verify	Set up job	2026-11-26T06:29:39.5019595Z Metadata: read
+verify	Set up job	2026-11-26T06:29:39.5020305Z ##[endgroup]
+verify	Set up job	2026-11-26T06:29:39.5022916Z Secret source: Actions
+verify	Set up job	2026-11-26T06:29:39.5024053Z Cache mode: write
+verify	Set up job	2026-11-26T06:29:39.5025084Z Prepare workflow directory
+verify	Set up job	2026-11-26T06:29:39.5427721Z Prepare all required actions
+verify	Set up job	2026-11-26T06:29:39.5476720Z Getting action download info
+verify	Set up job	2026-11-26T06:29:39.8714067Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+verify	Set up job	2026-11-26T06:29:40.0385855Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+verify	Set up job	2026-11-26T06:29:40.1322651Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+verify	Set up job	2026-11-26T06:29:40.3465033Z Complete job name: verify
+verify	Checkout exact verification source	﻿2026-11-26T06:29:40.4220599Z ##[group]Run git init .
+verify	Checkout exact verification source	2026-11-26T06:29:40.4221409Z [36;1mgit init .[0m
+verify	Checkout exact verification source	2026-11-26T06:29:40.4222090Z [36;1mgit remote add origin https://github.com/oligamiq/rubrc.git[0m
+verify	Checkout exact verification source	2026-11-26T06:29:40.4222945Z [36;1mgit fetch --no-tags --depth=1 origin "$SOURCE_SHA"[0m
+verify	Checkout exact verification source	2026-11-26T06:29:40.4223626Z [36;1mgit checkout --detach FETCH_HEAD[0m
+verify	Checkout exact verification source	2026-11-26T06:29:40.4224278Z [36;1mtest "$(git rev-parse HEAD)" = "$SOURCE_SHA"[0m
+verify	Checkout exact verification source	2026-11-26T06:29:40.4249046Z shell: /usr/bin/bash -e {0}
+verify	Checkout exact verification source	2026-11-26T06:29:40.4249787Z env:
+verify	Checkout exact verification source	2026-11-26T06:29:40.4250207Z   CARGO_BUILD_JOBS: 2
+verify	Checkout exact verification source	2026-11-26T06:29:40.4250677Z   CARGO_INCREMENTAL: 0
+verify	Checkout exact verification source	2026-11-26T06:29:40.4251335Z   PYTHONDONTWRITEBYTECODE: 1
+verify	Checkout exact verification source	2026-11-26T06:29:40.4251934Z   WVL_REVISION: 77f45543eb976e4e7843e78fcd67bd837acac6bd
+verify	Checkout exact verification source	2026-11-26T06:29:40.4252624Z   SOURCE_SHA: 205db7b2a2db3b91b22a234991856651f7fd16df
+verify	Checkout exact verification source	2026-11-26T06:29:40.4253215Z ##[endgroup]
+verify	Checkout exact verification source	2026-11-26T06:29:40.4538006Z hint: Using 'master' as the name for the initial branch. This default branch name
+verify	Checkout exact verification source	2026-11-26T06:29:40.4539365Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+verify	Checkout exact verification source	2026-11-26T06:29:40.4541090Z hint: to use in all of your new repositories, which will suppress this warning,
+verify	Checkout exact verification source	2026-11-26T06:29:40.4542202Z hint: call:
+verify	Checkout exact verification source	2026-11-26T06:29:40.4542673Z hint:
+verify	Checkout exact verification source	2026-11-26T06:29:40.4543253Z hint: 	git config --global init.defaultBranch <name>
+verify	Checkout exact verification source	2026-11-26T06:29:40.4543995Z hint:
+verify	Checkout exact verification source	2026-11-26T06:29:40.4544640Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+verify	Checkout exact verification source	2026-11-26T06:29:40.4545697Z hint: 'development'. The just-created branch can be renamed via this command:
+verify	Checkout exact verification source	2026-11-26T06:29:40.4546572Z hint:
+verify	Checkout exact verification source	2026-11-26T06:29:40.4547040Z hint: 	git branch -m <name>
+verify	Checkout exact verification source	2026-11-26T06:29:40.4547587Z hint:
+verify	Checkout exact verification source	2026-11-26T06:29:40.4548280Z hint: Disable this message with "git config set advice.defaultBranchName false"
+verify	Checkout exact verification source	2026-11-26T06:29:40.4549410Z Initialized empty Git repository in /home/runner/work/rubrc/rubrc/.git/
+verify	Checkout exact verification source	2026-11-26T06:29:46.4670540Z From https://github.com/oligamiq/rubrc
+verify	Checkout exact verification source	2026-11-26T06:29:46.4672506Z  * branch            205db7b2a2db3b91b22a234991856651f7fd16df -> FETCH_HEAD
+verify	Checkout exact verification source	2026-11-26T06:29:47.5949763Z HEAD is now at 205db7b ci: preserve wrapper logs separately and enforce artifact digest integrity
+verify	Checkout pinned production source	﻿2026-11-26T06:29:47.6101490Z ##[group]Run git init .worktrees/wvl-lock-batching
+verify	Checkout pinned production source	2026-11-26T06:29:47.6102076Z [36;1mgit init .worktrees/wvl-lock-batching[0m
+verify	Checkout pinned production source	2026-11-26T06:29:47.6102956Z [36;1mgit -C .worktrees/wvl-lock-batching remote add origin https://github.com/oligamiq/wasi_virt_layer.git[0m
+verify	Checkout pinned production source	2026-11-26T06:29:47.6103862Z [36;1mgit -C .worktrees/wvl-lock-batching fetch --no-tags --depth=1 origin "$WVL_REVISION"[0m
+verify	Checkout pinned production source	2026-11-26T06:29:47.6104581Z [36;1mgit -C .worktrees/wvl-lock-batching checkout --detach FETCH_HEAD[0m
+verify	Checkout pinned production source	2026-11-26T06:29:47.6105293Z [36;1mtest "$(git -C .worktrees/wvl-lock-batching rev-parse HEAD)" = "$WVL_REVISION"[0m
+verify	Checkout pinned production source	2026-11-26T06:29:47.6127143Z shell: /usr/bin/bash -e {0}
+verify	Checkout pinned production source	2026-11-26T06:29:47.6127505Z env:
+verify	Checkout pinned production source	2026-11-26T06:29:47.6127789Z   CARGO_BUILD_JOBS: 2
+verify	Checkout pinned production source	2026-11-26T06:29:47.6128106Z   CARGO_INCREMENTAL: 0
+verify	Checkout pinned production source	2026-11-26T06:29:47.6128442Z   PYTHONDONTWRITEBYTECODE: 1
+verify	Checkout pinned production source	2026-11-26T06:29:47.6128851Z   WVL_REVISION: 77f45543eb976e4e7843e78fcd67bd837acac6bd
+verify	Checkout pinned production source	2026-11-26T06:29:47.6129305Z ##[endgroup]
+verify	Checkout pinned production source	2026-11-26T06:29:47.6204194Z hint: Using 'master' as the name for the initial branch. This default branch name
+verify	Checkout pinned production source	2026-11-26T06:29:47.6205154Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+verify	Checkout pinned production source	2026-11-26T06:29:47.6205973Z hint: to use in all of your new repositories, which will suppress this warning,
+verify	Checkout pinned production source	2026-11-26T06:29:47.6206490Z hint: call:
+verify	Checkout pinned production source	2026-11-26T06:29:47.6206943Z hint:
+verify	Checkout pinned production source	2026-11-26T06:29:47.6207375Z hint: 	git config --global init.defaultBranch <name>
+verify	Checkout pinned production source	2026-11-26T06:29:47.6207789Z hint:
+verify	Checkout pinned production source	2026-11-26T06:29:47.6208234Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+verify	Checkout pinned production source	2026-11-26T06:29:47.6208866Z hint: 'development'. The just-created branch can be renamed via this command:
+verify	Checkout pinned production source	2026-11-26T06:29:47.6209383Z hint:
+verify	Checkout pinned production source	2026-11-26T06:29:47.6209674Z hint: 	git branch -m <name>
+verify	Checkout pinned production source	2026-11-26T06:29:47.6210148Z hint:
+verify	Checkout pinned production source	2026-11-26T06:29:47.6210710Z hint: Disable this message with "git config set advice.defaultBranchName false"
+verify	Checkout pinned production source	2026-11-26T06:29:47.6211737Z Initialized empty Git repository in /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/.git/
+verify	Checkout pinned production source	2026-11-26T06:29:49.0915889Z From https://github.com/oligamiq/wasi_virt_layer
+verify	Checkout pinned production source	2026-11-26T06:29:49.0916720Z  * branch            77f45543eb976e4e7843e78fcd67bd837acac6bd -> FETCH_HEAD
+verify	Checkout pinned production source	2026-11-26T06:29:49.2257537Z HEAD is now at 77f4554 fix: retain resettable passive data before target optimization
+verify	Run actions/setup-python@v5	﻿2026-11-26T06:29:49.2433077Z ##[group]Run actions/setup-python@v5
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2433474Z with:
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2433746Z   python-version: 3.12
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2434040Z   check-latest: false
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2436895Z   token: ***
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2437174Z   update-environment: true
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2437496Z   allow-prereleases: false
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2437810Z   freethreaded: false
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2438076Z env:
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2438317Z   CARGO_BUILD_JOBS: 2
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2438584Z   CARGO_INCREMENTAL: 0
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2438865Z   PYTHONDONTWRITEBYTECODE: 1
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2439255Z   WVL_REVISION: 77f45543eb976e4e7843e78fcd67bd837acac6bd
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.2439625Z ##[endgroup]
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.5399593Z ##[group]Installed versions
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.5477221Z (node:2186) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.5477991Z (Use `node --trace-deprecation ...` to show where the warning was created)
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.5479025Z Successfully set up CPython (3.12.16)
+verify	Run actions/setup-python@v5	2026-11-26T06:29:49.5480018Z ##[endgroup]
+verify	Run actions/setup-node@v4	﻿2026-11-26T06:29:49.5792060Z ##[group]Run actions/setup-node@v4
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5792389Z with:
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5792604Z   node-version: 24.22.2
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5792841Z   always-auth: false
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5793324Z   check-latest: false
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5795910Z   token: ***
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5796120Z env:
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5796348Z   CARGO_BUILD_JOBS: 2
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5796612Z   CARGO_INCREMENTAL: 0
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5796851Z   PYTHONDONTWRITEBYTECODE: 1
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5797155Z   WVL_REVISION: 77f45543eb976e4e7843e78fcd67bd837acac6bd
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5797546Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5797999Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5798431Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5798811Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5799180Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5799594Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.5799925Z ##[endgroup]
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.7292686Z Attempting to download 24.22.2...
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.7437057Z (node:2195) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+verify	Run actions/setup-node@v4	2026-11-26T06:29:49.7438282Z (Use `node --trace-deprecation ...` to show where the warning was created)
+verify	Run actions/setup-node@v4	2026-11-26T06:29:50.7396951Z Acquiring 24.22.2 - x64 from https://github.com/actions/node-versions/releases/download/24.22.2-40806817314/node-24.22.2-linux-x64.tar.gz
+verify	Run actions/setup-node@v4	2026-11-26T06:29:51.2908851Z Extracting ...
+verify	Run actions/setup-node@v4	2026-11-26T06:29:51.3055823Z [command]/usr/bin/tar xz --strip 1 --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/e7b85f16-96f7-42bc-a6b0-f85845b00b83 -f /home/runner/work/_temp/8d976970-a822-40eb-a8b2-1d3ec950aa79
+verify	Run actions/setup-node@v4	2026-11-26T06:29:52.6522672Z Adding to the cache ...
+verify	Run actions/setup-node@v4	2026-11-26T06:29:54.1473826Z ##[group]Environment details
+verify	Run actions/setup-node@v4	2026-11-26T06:29:54.3834110Z node: v24.22.2
+verify	Run actions/setup-node@v4	2026-11-26T06:29:54.3834574Z npm: 11.19.1
+verify	Run actions/setup-node@v4	2026-11-26T06:29:54.3834883Z yarn: 1.22.22
+verify	Run actions/setup-node@v4	2026-11-26T06:29:54.3835590Z ##[endgroup]
+verify	Install pinned Rust and solver	﻿2026-11-26T06:29:54.4038102Z ##[group]Run rustup toolchain install 1.98.1 --profile minimal
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4038569Z [36;1mrustup toolchain install 1.98.1 --profile minimal[0m
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4038911Z [36;1mrustup default 1.98.1[0m
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4039210Z [36;1mpython -m pip install z3-solver==4.15.4.0[0m
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4068172Z shell: /usr/bin/bash -e {0}
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4068431Z env:
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4068626Z   CARGO_BUILD_JOBS: 2
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4068848Z   CARGO_INCREMENTAL: 0
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4069082Z   PYTHONDONTWRITEBYTECODE: 1
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4069378Z   WVL_REVISION: 77f45543eb976e4e7843e78fcd67bd837acac6bd
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4069762Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4070179Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4070594Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4071215Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4071673Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4072059Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4072372Z ##[endgroup]
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.4531964Z info: syncing channel updates for 1.98.1-x86_64-unknown-linux-gnu
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.6514314Z info: latest update on 2026-09-03 for version 1.98.1 (48a229cea 2026-09-01)
+verify	Install pinned Rust and solver	2026-11-26T06:29:54.6514887Z info: downloading 3 components
+verify	Install pinned Rust and solver	2026-11-26T06:30:02.8985047Z 
+verify	Install pinned Rust and solver	2026-11-26T06:30:02.9063899Z   1.98.1-x86_64-unknown-linux-gnu installed - rustc 1.98.1 (48a229cea 2026-09-01)
+verify	Install pinned Rust and solver	2026-11-26T06:30:02.9064480Z 
+verify	Install pinned Rust and solver	2026-11-26T06:30:02.9233015Z info: using existing install for 1.98.1-x86_64-unknown-linux-gnu
+verify	Install pinned Rust and solver	2026-11-26T06:30:02.9241587Z info: default toolchain set to 1.98.1-x86_64-unknown-linux-gnu
+verify	Install pinned Rust and solver	2026-11-26T06:30:02.9241912Z 
+verify	Install pinned Rust and solver	2026-11-26T06:30:02.9316280Z   1.98.1-x86_64-unknown-linux-gnu unchanged - rustc 1.98.1 (48a229cea 2026-09-01)
+verify	Install pinned Rust and solver	2026-11-26T06:30:02.9316857Z 
+verify	Install pinned Rust and solver	2026-11-26T06:30:03.5948807Z Collecting z3-solver==4.15.4.0
+verify	Install pinned Rust and solver	2026-11-26T06:30:03.6663675Z   Downloading z3_solver-4.15.4.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (602 bytes)
+verify	Install pinned Rust and solver	2026-11-26T06:30:03.6805289Z Downloading z3_solver-4.15.4.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (29.3 MB)
+verify	Install pinned Rust and solver	2026-11-26T06:30:04.1960397Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 29.3/29.3 MB 60.6 MB/s  0:00:00
+verify	Install pinned Rust and solver	2026-11-26T06:30:04.2704828Z Installing collected packages: z3-solver
+verify	Install pinned Rust and solver	2026-11-26T06:30:04.7769884Z Successfully installed z3-solver-4.15.4.0
+verify	Run scoped verification gates	﻿2026-11-26T06:30:04.8303361Z ##[group]Run python verification/run_checks.py --output-dir target/verification-ci
+verify	Run scoped verification gates	2026-11-26T06:30:04.8304001Z [36;1mpython verification/run_checks.py --output-dir target/verification-ci[0m
+verify	Run scoped verification gates	2026-11-26T06:30:04.8326933Z shell: /usr/bin/bash -e {0}
+verify	Run scoped verification gates	2026-11-26T06:30:04.8327194Z env:
+verify	Run scoped verification gates	2026-11-26T06:30:04.8327396Z   CARGO_BUILD_JOBS: 2
+verify	Run scoped verification gates	2026-11-26T06:30:04.8327625Z   CARGO_INCREMENTAL: 0
+verify	Run scoped verification gates	2026-11-26T06:30:04.8327875Z   PYTHONDONTWRITEBYTECODE: 1
+verify	Run scoped verification gates	2026-11-26T06:30:04.8328178Z   WVL_REVISION: 77f45543eb976e4e7843e78fcd67bd837acac6bd
+verify	Run scoped verification gates	2026-11-26T06:30:04.8328589Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Run scoped verification gates	2026-11-26T06:30:04.8329018Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+verify	Run scoped verification gates	2026-11-26T06:30:04.8329439Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Run scoped verification gates	2026-11-26T06:30:04.8329826Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Run scoped verification gates	2026-11-26T06:30:04.8330211Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Run scoped verification gates	2026-11-26T06:30:04.8330602Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+verify	Run scoped verification gates	2026-11-26T06:30:04.8331134Z ##[endgroup]
+verify	Run scoped verification gates	2026-11-26T06:30:04.8862042Z source-revision: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:05.1014163Z source-status: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:05.1060464Z rubrc-revision: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:05.1103132Z python-version: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:05.1267447Z rustc-version: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:05.1350701Z node-version: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:05.3000378Z validator-unit-tests: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:05.6156421Z batch-model: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:23.0151907Z semantic: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:28.5944042Z smt: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:29.6122907Z protocol: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:33.7211807Z native: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:47.3764933Z correspondence-prepare: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:56.7160713Z litmus-prepare: PASS
+verify	Run scoped verification gates	2026-11-26T06:30:56.9814317Z correspondence: PASS
+verify	Run scoped verification gates	2026-11-26T06:31:02.3605542Z litmus: PASS
+verify	Run scoped verification gates	2026-11-26T06:31:10.1474446Z actual-legacy-prepare: PASS
+verify	Run scoped verification gates	2026-11-26T06:31:10.6636424Z actual-waiter-aware-prepare: PASS
+verify	Run scoped verification gates	2026-11-26T06:31:11.9308810Z actual-loom: PASS
+verify	Run scoped verification gates	2026-11-26T06:31:26.8923457Z wasm: PASS
+verify	Run scoped verification gates	2026-11-26T06:31:26.8977795Z source-revision-after: PASS
+verify	Run scoped verification gates	2026-11-26T06:31:26.9063023Z source-status-after: PASS
+verify	Preserve evidence even on failure	﻿2026-11-26T06:31:26.9245039Z ##[group]Run actions/upload-artifact@v4
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9245345Z with:
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9245596Z   name: memory-lock-verification-45768556714-1
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9246360Z   path: target/verification-ci/
+verify	Preserve evidence even on failure	verification/memory-lock-batching/ci-*.json
+verify	Preserve evidence even on failure	verification/memory-lock-batching/ci-*.log
+verify	Preserve evidence even on failure	verification/memory-lock-ordering/results/actual-*/
+verify	Preserve evidence even on failure	
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9247099Z   if-no-files-found: warn
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9247348Z   retention-days: 30
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9247570Z   compression-level: 6
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9247793Z   overwrite: false
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9248013Z   include-hidden-files: false
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9248254Z env:
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9248458Z   CARGO_BUILD_JOBS: 2
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9248669Z   CARGO_INCREMENTAL: 0
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9248899Z   PYTHONDONTWRITEBYTECODE: 1
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9249191Z   WVL_REVISION: 77f45543eb976e4e7843e78fcd67bd837acac6bd
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9249572Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9250016Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9250479Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9250857Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9251452Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9252019Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+verify	Preserve evidence even on failure	2026-11-26T06:31:26.9252339Z ##[endgroup]
+verify	Preserve evidence even on failure	2026-11-26T06:31:27.0984031Z (node:5154) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+verify	Preserve evidence even on failure	2026-11-26T06:31:27.0985745Z (Use `node --trace-deprecation ...` to show where the warning was created)
+verify	Preserve evidence even on failure	2026-11-26T06:31:27.1562341Z Multiple search paths detected. Calculating the least common ancestor of all paths
+verify	Preserve evidence even on failure	2026-11-26T06:31:27.1564725Z The least common ancestor is /home/runner/work/rubrc/rubrc. This will be the root directory of the artifact
+verify	Preserve evidence even on failure	2026-11-26T06:31:27.1565785Z With the provided path, there will be 293 files uploaded
+verify	Preserve evidence even on failure	2026-11-26T06:31:27.1566627Z Artifact name is valid!
+verify	Preserve evidence even on failure	2026-11-26T06:31:27.1567074Z Root directory input is valid!
+verify	Preserve evidence even on failure	2026-11-26T06:31:27.4982699Z Beginning upload of artifact content to blob storage
+verify	Preserve evidence even on failure	2026-11-26T06:31:28.4165065Z (node:5154) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+verify	Preserve evidence even on failure	2026-11-26T06:31:29.1693493Z Uploaded bytes 8388608
+verify	Preserve evidence even on failure	2026-11-26T06:31:29.7147509Z Uploaded bytes 16324773
+verify	Preserve evidence even on failure	2026-11-26T06:31:29.7722859Z Finished uploading artifact content to blob storage!
+verify	Preserve evidence even on failure	2026-11-26T06:31:29.7726479Z SHA256 digest of uploaded artifact zip is 5fe71e99b1465ec910bd8d249593c0729d00c0587c4c2343aa6acf4fc58e04de
+verify	Preserve evidence even on failure	2026-11-26T06:31:29.7728335Z Finalizing artifact upload
+verify	Preserve evidence even on failure	2026-11-26T06:31:30.1947400Z Artifact memory-lock-verification-45768556714-1.zip successfully finalized. Artifact ID 15093570472
+verify	Preserve evidence even on failure	2026-11-26T06:31:30.1949281Z Artifact memory-lock-verification-45768556714-1 has been successfully uploaded! Final size is 16324773 bytes. Artifact ID is 15093570472
+verify	Preserve evidence even on failure	2026-11-26T06:31:30.1955416Z Artifact download URL: https://github.com/oligamiq/rubrc/actions/runs/45768556714/artifacts/15093570472
+verify	Post Run actions/setup-node@v4	﻿2026-11-26T06:31:30.2207031Z Post job cleanup.
+verify	Post Run actions/setup-node@v4	2026-11-26T06:31:30.3529837Z (node:5167) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+verify	Post Run actions/setup-node@v4	2026-11-26T06:31:30.3531627Z (Use `node --trace-deprecation ...` to show where the warning was created)
+verify	Post Run actions/setup-python@v5	﻿2026-11-26T06:31:30.3745675Z Post job cleanup.
+verify	Post Run actions/setup-python@v5	2026-11-26T06:31:30.5133855Z (node:5175) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+verify	Post Run actions/setup-python@v5	2026-11-26T06:31:30.5135293Z (Use `node --trace-deprecation ...` to show where the warning was created)
+verify	Complete job	﻿2026-11-26T06:31:30.5382458Z Cleaning up orphan processes
+verify	Complete job	2026-11-26T06:31:30.5829569Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/setup-node@v4, actions/setup-python@v5, actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

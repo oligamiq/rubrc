@@ -1,0 +1,93 @@
+{
+  "status": "pass",
+  "engine": "v24.22.2",
+  "wasmPath": "/home/oligami/projects/rubrc/verification/memory-lock-wasm/results/initial-20261126/lowered.wasm",
+  "waitImplementation": "generated WebAssembly memory.atomic.wait32",
+  "notifyImplementation": "generated WebAssembly memory.atomic.notify",
+  "limits": {
+    "workerWaitNs": "5000000000",
+    "phaseMs": 8000,
+    "globalMs": 30000,
+    "maxAttemptsPerCohort": 100000
+  },
+  "cases": [
+    {
+      "name": "notify-one",
+      "status": "pass",
+      "workers": 1,
+      "notifyCount": 1,
+      "parkedWitness": {
+        "singleNotifyReturn": 1,
+        "requestedCount": 1
+      },
+      "notifyAttempts": 1,
+      "partialWakeups": 0,
+      "drainNotified": 0,
+      "events": [
+        {
+          "type": "ready",
+          "id": 0,
+          "mismatch": 1,
+          "zeroTimeout": 2
+        },
+        {
+          "type": "done",
+          "id": 0,
+          "wakes": 1,
+          "result": 0
+        }
+      ]
+    },
+    {
+      "name": "notify-all-u32-max",
+      "status": "pass",
+      "workers": 3,
+      "notifyCount": -1,
+      "parkedWitness": {
+        "singleNotifyReturn": 3,
+        "requestedCount": -1
+      },
+      "notifyAttempts": 1,
+      "partialWakeups": 0,
+      "drainNotified": 0,
+      "events": [
+        {
+          "type": "ready",
+          "id": 1,
+          "mismatch": 1,
+          "zeroTimeout": 2
+        },
+        {
+          "type": "ready",
+          "id": 0,
+          "mismatch": 1,
+          "zeroTimeout": 2
+        },
+        {
+          "type": "ready",
+          "id": 2,
+          "mismatch": 1,
+          "zeroTimeout": 2
+        },
+        {
+          "type": "done",
+          "id": 1,
+          "wakes": 1,
+          "result": 0
+        },
+        {
+          "type": "done",
+          "id": 2,
+          "wakes": 1,
+          "result": 0
+        },
+        {
+          "type": "done",
+          "id": 0,
+          "wakes": 1,
+          "result": 0
+        }
+      ]
+    }
+  ]
+}

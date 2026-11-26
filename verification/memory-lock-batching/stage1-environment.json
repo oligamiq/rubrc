@@ -1,0 +1,14 @@
+{
+  "date": "2026-11-26",
+  "python": "3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]",
+  "platform": "Linux-7.0.0-44-generic-x86_64-with-glibc2.43",
+  "wvlRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+  "sourceSha256": {
+    "wasi_virt_layer-cli/src/wasm_stream/passes/memory_lock_batching.rs": "d0c4b7cb905078c4f67f8ace65cdaf594b6f0fcb22b4c8f2c46ebdb0d9252edf",
+    "wasi_virt_layer-cli/src/wasm_stream/passes/multi_memory_lowering.rs": "861e10ebbfce994e6765680654c55a279a29ab6132bcae4193db94aa0733d656"
+  },
+  "command": "python3 verification/memory-lock-batching/model_check.py --output verification/memory-lock-batching/stage1-results.json",
+  "exitCode": 0,
+  "reviewStatus": "independent review pending",
+  "scope": "finite atomic-lock abstraction, not verified executable refinement"
+}

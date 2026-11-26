@@ -1,0 +1,4 @@
+COMMAND ["git", "-C", "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching", "rev-parse", "HEAD"]
+77f45543eb976e4e7843e78fcd67bd837acac6bd
+
+RUNNER exit_code=0 timeout=False

@@ -1,0 +1,1082 @@
+{
+  "schema_version": 1,
+  "objective": "Empirical regression tests of actual unchanged memory_lock.rs and existing native export harness; not formal verification",
+  "started_at_utc": "2026-11-26T05:14:39.884134+00:00",
+  "invocation": [
+    "/usr/bin/python3",
+    "verification/memory-lock-protocol/native_regression.py",
+    "--output-dir",
+    "target/verification-tools/protocol-native-parent",
+    "--repetitions",
+    "2"
+  ],
+  "working_directory": "/home/oligami/projects/rubrc",
+  "source_root": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+  "output_directory": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent",
+  "expected_commit": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+  "environment": {
+    "platform": "Linux-7.0.0-44-generic-x86_64-with-glibc2.43",
+    "machine": "x86_64",
+    "python": "3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]",
+    "rustc_path": "/home/oligami/.cargo/bin/rustc",
+    "RUSTUP_TOOLCHAIN": null,
+    "RUSTFLAGS": null,
+    "note": "Direct rustc commands do not consume Cargo RUSTFLAGS; inherited environment except RUST_BACKTRACE=1"
+  },
+  "configuration": {
+    "source_root": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+    "output_dir": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent",
+    "repetitions": 2,
+    "test_timeout": 20,
+    "compile_timeout": 60
+  },
+  "source_hashes_before": {
+    "wasi_virt_layer/src/memory_lock.rs": "d9c08f4561376fbe356d67ca8451e99fcdb9c79c29d78bbf7bb82a651a896961",
+    "wasi_virt_layer/tests/support/memory_lock_cases.rs": "6d67a702d7b910d6c8880b07ddc4a3febfc10375a16eb3ba175796e747b7cd6a",
+    "wasi_virt_layer/src/shared_global.rs": "d79c006d0ce5859f225fc8b8918f638eea2b8f9c582eba997ac79868527b24bb",
+    "wasi_virt_layer/tests/memory_lock_protocol.rs": "d2932de16445785865064dac1f2a565c9f1cfd79c319064afd23318eb95e2d18"
+  },
+  "runner_sha256": "19bc759a83285b3d20261be40123123ea70a0ce562523a0ed24470084348f828",
+  "commands": [
+    {
+      "label": "git-head",
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "shell_command": "git rev-parse HEAD",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 10,
+      "started_at_utc": "2026-11-26T05:14:39.893419+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0037090719997650012,
+      "stdout_path": "native-logs/000-git-head.stdout.log",
+      "stdout_sha256": "043e60a086744d43f46fb90498e60ff5773c3fa666545c603af533ff5a25e400",
+      "stderr_path": "native-logs/000-git-head.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "git-status-before",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1"
+      ],
+      "shell_command": "git status --porcelain=v1",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 10,
+      "started_at_utc": "2026-11-26T05:14:39.897428+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.007971661005285569,
+      "stdout_path": "native-logs/001-git-status-before.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/001-git-status-before.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "rustc-version",
+      "argv": [
+        "rustc",
+        "-vV"
+      ],
+      "shell_command": "rustc -vV",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 30,
+      "started_at_utc": "2026-11-26T05:14:39.905708+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.027835405999212526,
+      "stdout_path": "native-logs/002-rustc-version.stdout.log",
+      "stdout_sha256": "778fbc643a806f0dd123c056e66201d7e8a56a61928ec0a33171be8d6c2d5a37",
+      "stderr_path": "native-logs/002-rustc-version.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt0-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/actual_source_wrapper.rs",
+        "-C",
+        "opt-level=0",
+        "-o",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt0"
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/actual_source_wrapper.rs -C opt-level=0 -o /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt0",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T05:14:39.933956+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.32202604299527593,
+      "stdout_path": "native-logs/003-core-baseline-opt0-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/003-core-baseline-opt0-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt0-list",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt0",
+        "--list"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt0 --list",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:40.275225+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0025344280002173036,
+      "stdout_path": "native-logs/004-core-baseline-opt0-list.stdout.log",
+      "stdout_sha256": "61169e3a348847745cf7d39b8cc36d661fa937a711f1947140a3236f52b9b7e5",
+      "stderr_path": "native-logs/004-core-baseline-opt0-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt0-run01",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt0",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt0 --nocapture --test-threads=1",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:40.278054+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.023057172002154402,
+      "stdout_path": "native-logs/005-core-baseline-opt0-run01.stdout.log",
+      "stdout_sha256": "a432dd203753fecc25ab4907ddcaff7210ba8acc6555e41f8a4d022b55459c68",
+      "stderr_path": "native-logs/005-core-baseline-opt0-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt0-run02",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt0",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt0 --nocapture --test-threads=4",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:40.301595+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.005455281003378332,
+      "stdout_path": "native-logs/006-core-baseline-opt0-run02.stdout.log",
+      "stdout_sha256": "203d94d3d1c1a586ff8c30fa0f2acea4ea30a73cd12caa0798f997e0c1240fe2",
+      "stderr_path": "native-logs/006-core-baseline-opt0-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt3-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/actual_source_wrapper.rs",
+        "-C",
+        "opt-level=3",
+        "-o",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt3"
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/actual_source_wrapper.rs -C opt-level=3 -o /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt3",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T05:14:40.307452+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 1.059180076001212,
+      "stdout_path": "native-logs/007-core-baseline-opt3-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/007-core-baseline-opt3-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt3-list",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt3",
+        "--list"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt3 --list",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:41.402779+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0039922659925650805,
+      "stdout_path": "native-logs/008-core-baseline-opt3-list.stdout.log",
+      "stdout_sha256": "61169e3a348847745cf7d39b8cc36d661fa937a711f1947140a3236f52b9b7e5",
+      "stderr_path": "native-logs/008-core-baseline-opt3-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt3-run01",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt3",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt3 --nocapture --test-threads=1",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:41.407059+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.02837430700310506,
+      "stdout_path": "native-logs/009-core-baseline-opt3-run01.stdout.log",
+      "stdout_sha256": "a432dd203753fecc25ab4907ddcaff7210ba8acc6555e41f8a4d022b55459c68",
+      "stderr_path": "native-logs/009-core-baseline-opt3-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt3-run02",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt3",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-baseline-opt3 --nocapture --test-threads=4",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:41.435794+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.01600320899160579,
+      "stdout_path": "native-logs/010-core-baseline-opt3-run02.stdout.log",
+      "stdout_sha256": "1f75f1966666b8748215060a5a912e9bff6bae4914f5e6fe8353d2180df2926d",
+      "stderr_path": "native-logs/010-core-baseline-opt3-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt0-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/actual_source_wrapper.rs",
+        "-C",
+        "opt-level=0",
+        "-o",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt0",
+        "--cfg",
+        "feature=\"waiter-aware-memory-lock\""
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/actual_source_wrapper.rs -C opt-level=0 -o /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt0 --cfg 'feature=\"waiter-aware-memory-lock\"'",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T05:14:41.452096+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.4094195020006737,
+      "stdout_path": "native-logs/011-core-waiter-opt0-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/011-core-waiter-opt0-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt0-list",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt0",
+        "--list"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt0 --list",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:41.919787+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.004070732000400312,
+      "stdout_path": "native-logs/012-core-waiter-opt0-list.stdout.log",
+      "stdout_sha256": "1670427ee5ed3098c7fe5cbdfde328cd253610c509570040699f8a3ac8a620bc",
+      "stderr_path": "native-logs/012-core-waiter-opt0-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt0-run01",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt0",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt0 --nocapture --test-threads=1",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:41.924157+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.029859852002118714,
+      "stdout_path": "native-logs/013-core-waiter-opt0-run01.stdout.log",
+      "stdout_sha256": "a43e6b75f0471cececbea8b4f4cd200535546b45bc9a6b3ebd823b178dde3f68",
+      "stderr_path": "native-logs/013-core-waiter-opt0-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt0-run02",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt0",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt0 --nocapture --test-threads=4",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:41.954301+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.014173895993735641,
+      "stdout_path": "native-logs/014-core-waiter-opt0-run02.stdout.log",
+      "stdout_sha256": "4835f2158f97d16ad0a3842fade3bca586f1d33e639331c043b3c8b5ffd3c381",
+      "stderr_path": "native-logs/014-core-waiter-opt0-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt3-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/actual_source_wrapper.rs",
+        "-C",
+        "opt-level=3",
+        "-o",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt3",
+        "--cfg",
+        "feature=\"waiter-aware-memory-lock\""
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/actual_source_wrapper.rs -C opt-level=3 -o /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt3 --cfg 'feature=\"waiter-aware-memory-lock\"'",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T05:14:41.968817+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 1.0598034719878342,
+      "stdout_path": "native-logs/015-core-waiter-opt3-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/015-core-waiter-opt3-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt3-list",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt3",
+        "--list"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt3 --list",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:43.045359+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.004212311003357172,
+      "stdout_path": "native-logs/016-core-waiter-opt3-list.stdout.log",
+      "stdout_sha256": "1670427ee5ed3098c7fe5cbdfde328cd253610c509570040699f8a3ac8a620bc",
+      "stderr_path": "native-logs/016-core-waiter-opt3-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt3-run01",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt3",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt3 --nocapture --test-threads=1",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:43.049860+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.01252196000132244,
+      "stdout_path": "native-logs/017-core-waiter-opt3-run01.stdout.log",
+      "stdout_sha256": "cf23eda6e92bc315863b95660259d023b5b7718e7b10187cb270dda316c8cbf9",
+      "stderr_path": "native-logs/017-core-waiter-opt3-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt3-run02",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt3",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/core-waiter-opt3 --nocapture --test-threads=4",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:43.062719+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0057398950011702254,
+      "stdout_path": "native-logs/018-core-waiter-opt3-run02.stdout.log",
+      "stdout_sha256": "d78945b65dd17bf225324eefce04a84c44d2fdcb1c1059fc5a67f0098f267993",
+      "stderr_path": "native-logs/018-core-waiter-opt3-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt0-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs",
+        "-C",
+        "opt-level=0",
+        "-o",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt0"
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs -C opt-level=0 -o /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt0",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T05:14:43.068781+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.2945423950004624,
+      "stdout_path": "native-logs/019-exports-baseline-opt0-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/019-exports-baseline-opt0-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt0-list",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt0",
+        "--list"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt0 --list",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:43.380585+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.002476279012626037,
+      "stdout_path": "native-logs/020-exports-baseline-opt0-list.stdout.log",
+      "stdout_sha256": "52dacae3eddcfefa55d3cd483c302582842b950d33a36b8f96e28077104a0502",
+      "stderr_path": "native-logs/020-exports-baseline-opt0-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt0-run01",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt0",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt0 --nocapture --test-threads=1",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:43.383393+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0047815879952395335,
+      "stdout_path": "native-logs/021-exports-baseline-opt0-run01.stdout.log",
+      "stdout_sha256": "d148dbd9d1c779dc28362d0eeaa1798e778c59c477a4c92d9c0bda1eefc24f4d",
+      "stderr_path": "native-logs/021-exports-baseline-opt0-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt0-run02",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt0",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt0 --nocapture --test-threads=4",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:43.388506+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.008287568998639472,
+      "stdout_path": "native-logs/022-exports-baseline-opt0-run02.stdout.log",
+      "stdout_sha256": "164c48ea16bf79622d9b4c99cfbb42fb4fe057e9f5e7705b4ca8b01327e3a09c",
+      "stderr_path": "native-logs/022-exports-baseline-opt0-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt3-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs",
+        "-C",
+        "opt-level=3",
+        "-o",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt3"
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs -C opt-level=3 -o /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt3",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T05:14:43.397251+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.8194882380048512,
+      "stdout_path": "native-logs/023-exports-baseline-opt3-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/023-exports-baseline-opt3-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt3-list",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt3",
+        "--list"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt3 --list",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:44.252603+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.003007345992955379,
+      "stdout_path": "native-logs/024-exports-baseline-opt3-list.stdout.log",
+      "stdout_sha256": "52dacae3eddcfefa55d3cd483c302582842b950d33a36b8f96e28077104a0502",
+      "stderr_path": "native-logs/024-exports-baseline-opt3-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt3-run01",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt3",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt3 --nocapture --test-threads=1",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:44.255886+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.024025393009651452,
+      "stdout_path": "native-logs/025-exports-baseline-opt3-run01.stdout.log",
+      "stdout_sha256": "a3abe52c632e01425a39f833432090aa078a139d9a9546e84f3745ef0550dd85",
+      "stderr_path": "native-logs/025-exports-baseline-opt3-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt3-run02",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt3",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-baseline-opt3 --nocapture --test-threads=4",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:44.280212+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.011619871002039872,
+      "stdout_path": "native-logs/026-exports-baseline-opt3-run02.stdout.log",
+      "stdout_sha256": "5ec717855e08958cca245a35d85201118ad0f63b6f3d895f4476c0e4c20c38f6",
+      "stderr_path": "native-logs/026-exports-baseline-opt3-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt0-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs",
+        "-C",
+        "opt-level=0",
+        "-o",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt0",
+        "--cfg",
+        "feature=\"waiter-aware-memory-lock\""
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs -C opt-level=0 -o /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt0 --cfg 'feature=\"waiter-aware-memory-lock\"'",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T05:14:44.292139+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.37966741000127513,
+      "stdout_path": "native-logs/027-exports-waiter-opt0-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/027-exports-waiter-opt0-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt0-list",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt0",
+        "--list"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt0 --list",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:44.688422+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.001479107013437897,
+      "stdout_path": "native-logs/028-exports-waiter-opt0-list.stdout.log",
+      "stdout_sha256": "24b9fb6e7d580b6051d1593808785a7c6d43eaae18e666b052081287096bb276",
+      "stderr_path": "native-logs/028-exports-waiter-opt0-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt0-run01",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt0",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt0 --nocapture --test-threads=1",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:44.690178+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.006991321992245503,
+      "stdout_path": "native-logs/029-exports-waiter-opt0-run01.stdout.log",
+      "stdout_sha256": "72c8acbd4116d80cc33425e697b282a69e8f6f981e2e7b1974cdfc3e1d17bf82",
+      "stderr_path": "native-logs/029-exports-waiter-opt0-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt0-run02",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt0",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt0 --nocapture --test-threads=4",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:44.697443+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.003467776987235993,
+      "stdout_path": "native-logs/030-exports-waiter-opt0-run02.stdout.log",
+      "stdout_sha256": "c512798205e5f41ad04197c37766fc3c47c699570dadc6aed4303916ddd82fdc",
+      "stderr_path": "native-logs/030-exports-waiter-opt0-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt3-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs",
+        "-C",
+        "opt-level=3",
+        "-o",
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt3",
+        "--cfg",
+        "feature=\"waiter-aware-memory-lock\""
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs -C opt-level=3 -o /home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt3 --cfg 'feature=\"waiter-aware-memory-lock\"'",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T05:14:44.701209+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.8390935889910907,
+      "stdout_path": "native-logs/031-exports-waiter-opt3-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/031-exports-waiter-opt3-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt3-list",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt3",
+        "--list"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt3 --list",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:45.560289+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0024737399944569916,
+      "stdout_path": "native-logs/032-exports-waiter-opt3-list.stdout.log",
+      "stdout_sha256": "24b9fb6e7d580b6051d1593808785a7c6d43eaae18e666b052081287096bb276",
+      "stderr_path": "native-logs/032-exports-waiter-opt3-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt3-run01",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt3",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt3 --nocapture --test-threads=1",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:45.563127+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.009151563004706986,
+      "stdout_path": "native-logs/033-exports-waiter-opt3-run01.stdout.log",
+      "stdout_sha256": "5a79c4f3855500fa66d33065ae5954a26c5e06053fa384dc9b6362cb73475ace",
+      "stderr_path": "native-logs/033-exports-waiter-opt3-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt3-run02",
+      "argv": [
+        "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt3",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/oligami/projects/rubrc/target/verification-tools/protocol-native-parent/native-artifacts/exports-waiter-opt3 --nocapture --test-threads=4",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T05:14:45.572599+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.004042610002215952,
+      "stdout_path": "native-logs/034-exports-waiter-opt3-run02.stdout.log",
+      "stdout_sha256": "3bbb651fef5c38d891d444cda85f6d9cb783e68d09fe167bffd35df7639e780f",
+      "stderr_path": "native-logs/034-exports-waiter-opt3-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "git-status-after",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1"
+      ],
+      "shell_command": "git status --porcelain=v1",
+      "cwd": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 10,
+      "started_at_utc": "2026-11-26T05:14:45.577069+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.007495541998650879,
+      "stdout_path": "native-logs/035-git-status-after.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/035-git-status-after.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "variants": [
+    {
+      "label": "core-baseline-opt0",
+      "harness": "core",
+      "feature_enabled": false,
+      "optimization": 0,
+      "expected_test_count": 8,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 5,
+          "passed": true,
+          "passed_test_count": 8
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 6,
+          "passed": true,
+          "passed_test_count": 8
+        }
+      ],
+      "compile_command_index": 3,
+      "binary_sha256": "3bd673afd2c7d30450e0b50357013c0a282f9a8f65b2534ad37c3055ac016e93",
+      "test_names": [
+        "memory_lock::tests::multiple_waiting_writers_complete",
+        "memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "memory_lock::tests::writer_release_broadcasts_to_a_reader"
+      ]
+    },
+    {
+      "label": "core-baseline-opt3",
+      "harness": "core",
+      "feature_enabled": false,
+      "optimization": 3,
+      "expected_test_count": 8,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 9,
+          "passed": true,
+          "passed_test_count": 8
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 10,
+          "passed": true,
+          "passed_test_count": 8
+        }
+      ],
+      "compile_command_index": 7,
+      "binary_sha256": "ec35b023340a080c0bbc209b5eaddef985b2c395f29ed37f55dac38226716ee1",
+      "test_names": [
+        "memory_lock::tests::multiple_waiting_writers_complete",
+        "memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "memory_lock::tests::writer_release_broadcasts_to_a_reader"
+      ]
+    },
+    {
+      "label": "core-waiter-opt0",
+      "harness": "core",
+      "feature_enabled": true,
+      "optimization": 0,
+      "expected_test_count": 10,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 13,
+          "passed": true,
+          "passed_test_count": 10
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 14,
+          "passed": true,
+          "passed_test_count": 10
+        }
+      ],
+      "compile_command_index": 11,
+      "binary_sha256": "d81bd71d1082cc7f50f9c3d604d4896b0df7081f72e85029349c60d7fa8020e2",
+      "test_names": [
+        "memory_lock::tests::last_reader_leaves_before_writer_registration",
+        "memory_lock::tests::multiple_waiting_writers_complete",
+        "memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "memory_lock::tests::saturated_readers_do_not_overflow_the_marker",
+        "memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "memory_lock::tests::writer_release_broadcasts_to_a_reader"
+      ]
+    },
+    {
+      "label": "core-waiter-opt3",
+      "harness": "core",
+      "feature_enabled": true,
+      "optimization": 3,
+      "expected_test_count": 10,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 17,
+          "passed": true,
+          "passed_test_count": 10
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 18,
+          "passed": true,
+          "passed_test_count": 10
+        }
+      ],
+      "compile_command_index": 15,
+      "binary_sha256": "186c064a23030a024403829292eddc370daea8585f82046a1661c5991c8e1356",
+      "test_names": [
+        "memory_lock::tests::last_reader_leaves_before_writer_registration",
+        "memory_lock::tests::multiple_waiting_writers_complete",
+        "memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "memory_lock::tests::saturated_readers_do_not_overflow_the_marker",
+        "memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "memory_lock::tests::writer_release_broadcasts_to_a_reader"
+      ]
+    },
+    {
+      "label": "exports-baseline-opt0",
+      "harness": "exports",
+      "feature_enabled": false,
+      "optimization": 0,
+      "expected_test_count": 9,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 21,
+          "passed": true,
+          "passed_test_count": 9
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 22,
+          "passed": true,
+          "passed_test_count": 9
+        }
+      ],
+      "compile_command_index": 19,
+      "binary_sha256": "84abc6c06f2075180ffe21a9950b0910f23dffb76a7151c108c446871cbc79bf",
+      "test_names": [
+        "original_lock::memory_lock::tests::multiple_waiting_writers_complete",
+        "original_lock::memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "original_lock::memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "original_lock::memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "original_lock::memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "original_lock::memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "original_lock::memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "original_lock::memory_lock::tests::writer_release_broadcasts_to_a_reader",
+        "uncontended_readers_notify_only_in_baseline"
+      ]
+    },
+    {
+      "label": "exports-baseline-opt3",
+      "harness": "exports",
+      "feature_enabled": false,
+      "optimization": 3,
+      "expected_test_count": 9,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 25,
+          "passed": true,
+          "passed_test_count": 9
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 26,
+          "passed": true,
+          "passed_test_count": 9
+        }
+      ],
+      "compile_command_index": 23,
+      "binary_sha256": "6afa566b671347c2c6817c6c9623bae66af0f4213659899b134001f54c51a90f",
+      "test_names": [
+        "original_lock::memory_lock::tests::multiple_waiting_writers_complete",
+        "original_lock::memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "original_lock::memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "original_lock::memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "original_lock::memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "original_lock::memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "original_lock::memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "original_lock::memory_lock::tests::writer_release_broadcasts_to_a_reader",
+        "uncontended_readers_notify_only_in_baseline"
+      ]
+    },
+    {
+      "label": "exports-waiter-opt0",
+      "harness": "exports",
+      "feature_enabled": true,
+      "optimization": 0,
+      "expected_test_count": 11,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 29,
+          "passed": true,
+          "passed_test_count": 11
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 30,
+          "passed": true,
+          "passed_test_count": 11
+        }
+      ],
+      "compile_command_index": 27,
+      "binary_sha256": "7c6a3fe03b0b568958b9a4c71c89a6e332ea0d590d2e3dc361a34f1a42a02d2d",
+      "test_names": [
+        "original_lock::memory_lock::tests::last_reader_leaves_before_writer_registration",
+        "original_lock::memory_lock::tests::multiple_waiting_writers_complete",
+        "original_lock::memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "original_lock::memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "original_lock::memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "original_lock::memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "original_lock::memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "original_lock::memory_lock::tests::saturated_readers_do_not_overflow_the_marker",
+        "original_lock::memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "original_lock::memory_lock::tests::writer_release_broadcasts_to_a_reader",
+        "uncontended_readers_notify_only_in_baseline"
+      ]
+    },
+    {
+      "label": "exports-waiter-opt3",
+      "harness": "exports",
+      "feature_enabled": true,
+      "optimization": 3,
+      "expected_test_count": 11,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 33,
+          "passed": true,
+          "passed_test_count": 11
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 34,
+          "passed": true,
+          "passed_test_count": 11
+        }
+      ],
+      "compile_command_index": 31,
+      "binary_sha256": "bf0a98a1b3b8a45aa49c75cb43aa2375e40ba0e4638a7f4a5a882df8124c30e6",
+      "test_names": [
+        "original_lock::memory_lock::tests::last_reader_leaves_before_writer_registration",
+        "original_lock::memory_lock::tests::multiple_waiting_writers_complete",
+        "original_lock::memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "original_lock::memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "original_lock::memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "original_lock::memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "original_lock::memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "original_lock::memory_lock::tests::saturated_readers_do_not_overflow_the_marker",
+        "original_lock::memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "original_lock::memory_lock::tests::writer_release_broadcasts_to_a_reader",
+        "uncontended_readers_notify_only_in_baseline"
+      ]
+    }
+  ],
+  "failures": [],
+  "observed_commit": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+  "source_status_before": "",
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+  "wrapper_path": "native-artifacts/actual_source_wrapper.rs",
+  "wrapper_sha256": "1b53cbc90f3a5579761c4bf9c6164662f63fa0dd67d3c460da5981c267065919",
+  "source_hashes_after": {
+    "wasi_virt_layer/src/memory_lock.rs": "d9c08f4561376fbe356d67ca8451e99fcdb9c79c29d78bbf7bb82a651a896961",
+    "wasi_virt_layer/tests/support/memory_lock_cases.rs": "6d67a702d7b910d6c8880b07ddc4a3febfc10375a16eb3ba175796e747b7cd6a",
+    "wasi_virt_layer/src/shared_global.rs": "d79c006d0ce5859f225fc8b8918f638eea2b8f9c582eba997ac79868527b24bb",
+    "wasi_virt_layer/tests/memory_lock_protocol.rs": "d2932de16445785865064dac1f2a565c9f1cfd79c319064afd23318eb95e2d18"
+  },
+  "sources_unchanged": true,
+  "source_status_after": "",
+  "finished_at_utc": "2026-11-26T05:14:45.584821+00:00",
+  "summary": {
+    "variant_count": 8,
+    "test_process_runs": 16,
+    "successful_test_process_runs": 16,
+    "successful_test_executions": 152,
+    "timeout_count": 0,
+    "outcome": "PASS"
+  }
+}

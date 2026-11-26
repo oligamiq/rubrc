@@ -1,0 +1,20 @@
+; benchmark generated from python API
+(set-info :status unknown)
+(declare-fun offset () (_ BitVec 32))
+(declare-fun y () (_ BitVec 32))
+(declare-fun x () (_ BitVec 32))
+(declare-fun base () (_ BitVec 32))
+(assert
+ (let ((?x105 ((_ zero_extend 32) offset)))
+ (let ((?x1252 (bvadd ((_ zero_extend 32) (bvadd x y)) ?x105)))
+ (let ((?x17 ((_ zero_extend 32) base)))
+ (let ((?x407 (bvadd ?x17 ?x1252)))
+ (bvslt ?x407 (_ bv4294967296 64)))))))
+(assert
+ (let ((?x105 ((_ zero_extend 32) offset)))
+(let ((?x1252 (bvadd ((_ zero_extend 32) (bvadd x y)) ?x105)))
+(let ((?x17 ((_ zero_extend 32) base)))
+(let ((?x407 (bvadd ?x17 ?x1252)))
+(let ((?x480 (bvadd ((_ zero_extend 32) (bvadd base (bvadd x y))) ?x105)))
+(and (distinct ?x480 ?x407) true)))))))
+(check-sat)

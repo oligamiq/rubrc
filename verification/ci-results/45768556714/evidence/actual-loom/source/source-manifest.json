@@ -1,0 +1,22 @@
+{
+  "source": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/src/memory_lock.rs",
+  "source_sha256": "d9c08f4561376fbe356d67ca8451e99fcdb9c79c29d78bbf7bb82a651a896961",
+  "instrumented_sha256": "dd97b92d0feba42220492da94c3a3246f9a3337b4366db95b4f33cd9e60fc1c9",
+  "replacements": [
+    {
+      "old": "use core::sync::atomic::{AtomicI32, Ordering};",
+      "new": "use loom::sync::atomic::{AtomicI32, Ordering};",
+      "matches": 1
+    },
+    {
+      "old": "pub(super) const fn new() -> Self {",
+      "new": "pub(super) fn new() -> Self {",
+      "matches": 1
+    },
+    {
+      "old": "#[cfg(test)]\n#[path = \"../tests/support/memory_lock_cases.rs\"]\nmod tests;\n",
+      "new": "",
+      "matches": 1
+    }
+  ]
+}

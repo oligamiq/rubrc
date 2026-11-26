@@ -1,0 +1,53 @@
+COMMAND ["cargo", "test", "--locked", "--no-run", "--features", "waiter-aware-memory-lock"]
+   Compiling memory-lock-actual-ordering v0.1.0 (/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness)
+warning: constant `WAITING` is never used
+  --> /home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness/target/debug/build/memory-lock-actual-ordering-c4862b5f5c0f6039/out/memory_lock_instrumented.rs:11:7
+   |
+11 | const WAITING: i32 = if cfg!(feature = "waiter-aware-memory-lock") {
+   |       ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `MAX_READERS` is never used
+  --> /home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness/target/debug/build/memory-lock-actual-ordering-c4862b5f5c0f6039/out/memory_lock_instrumented.rs:17:7
+   |
+17 | const MAX_READERS: i32 = WAITING - 1;
+   |       ^^^^^^^^^^^
+
+warning: trait `WaitNotify` is never used
+  --> /home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness/target/debug/build/memory-lock-actual-ordering-c4862b5f5c0f6039/out/memory_lock_instrumented.rs:20:18
+   |
+20 | pub(super) trait WaitNotify {
+   |                  ^^^^^^^^^^
+
+warning: struct `MemoryAccessLock` is never constructed
+  --> /home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness/target/debug/build/memory-lock-actual-ordering-c4862b5f5c0f6039/out/memory_lock_instrumented.rs:32:19
+   |
+32 | pub(super) struct MemoryAccessLock {
+   |                   ^^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `read_acquire`, `read_release`, `write_acquire`, and `write_release` are never used
+   --> /home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness/target/debug/build/memory-lock-actual-ordering-c4862b5f5c0f6039/out/memory_lock_instrumented.rs:37:19
+    |
+ 36 | impl MemoryAccessLock {
+    | --------------------- associated items in this implementation
+ 37 |     pub(super) fn new() -> Self {
+    |                   ^^^
+...
+ 44 |     pub(super) fn read_acquire(&self, backend: &impl WaitNotify) {
+    |                   ^^^^^^^^^^^^
+...
+ 69 |     pub(super) fn read_release(&self, backend: &impl WaitNotify) {
+    |                   ^^^^^^^^^^^^
+...
+ 76 |     pub(super) fn write_acquire(&self, backend: &impl WaitNotify) {
+    |                   ^^^^^^^^^^^^^
+...
+130 |     pub(super) fn write_release(&self, backend: &impl WaitNotify) {
+    |                   ^^^^^^^^^^^^^
+
+warning: `memory-lock-actual-ordering` (lib) generated 5 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+  Executable unittests src/lib.rs (target/debug/deps/memory_lock_actual_ordering-454206ad072d5ddb)
+
+RUNNER exit_code=0 timeout=False

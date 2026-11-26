@@ -1,0 +1,25 @@
+test_actual_duplicate_command (test_run_checks.Contracts.test_actual_duplicate_command) ... ok
+test_actual_swapped_feature_identity (test_run_checks.Contracts.test_actual_swapped_feature_identity) ... ok
+test_actual_truncated_but_successful_model (test_run_checks.Contracts.test_actual_truncated_but_successful_model) ... ok
+test_actual_valid (test_run_checks.Contracts.test_actual_valid) ... ok
+test_actual_wrong_source_hash (test_run_checks.Contracts.test_actual_wrong_source_hash) ... ok
+test_actual_zero_rust_tests (test_run_checks.Contracts.test_actual_zero_rust_tests) ... ok
+test_correspondence_empty_controls (test_run_checks.Contracts.test_correspondence_empty_controls) ... ok
+test_litmus_wrong_identity (test_run_checks.Contracts.test_litmus_wrong_identity) ... ok
+test_native_empty_variants (test_run_checks.Contracts.test_native_empty_variants) ... ok
+test_semantic_empty_controls (test_run_checks.Contracts.test_semantic_empty_controls) ... ok
+test_semantic_truncated_count (test_run_checks.Contracts.test_semantic_truncated_count) ... ok
+test_semantic_valid (test_run_checks.Contracts.test_semantic_valid) ... ok
+test_semantic_wrong_program (test_run_checks.Contracts.test_semantic_wrong_program) ... ok
+test_smt_duplicate_identity (test_run_checks.Contracts.test_smt_duplicate_identity) ... ok
+test_smt_forged_expected_unknown (test_run_checks.Contracts.test_smt_forged_expected_unknown) ... ok
+test_smt_valid (test_run_checks.Contracts.test_smt_valid) ... ok
+test_wasm_duplicate_ready_event (test_run_checks.Contracts.test_wasm_duplicate_ready_event) ... ok
+test_wasm_empty_controls (test_run_checks.Contracts.test_wasm_empty_controls) ... ok
+test_wasm_no_parked_witness (test_run_checks.Contracts.test_wasm_no_parked_witness) ... ok
+test_wasm_valid (test_run_checks.Contracts.test_wasm_valid) ... ok
+
+----------------------------------------------------------------------
+Ran 20 tests in 0.002s
+
+OK

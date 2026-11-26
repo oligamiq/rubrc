@@ -1,0 +1,6 @@
+COMMAND ["cargo", "generate-lockfile"]
+    Updating crates.io index
+     Locking 39 packages to latest compatible versions
+      Adding loom v0.7.2 (available: v0.7.3)
+
+RUNNER exit_code=0 timeout=False

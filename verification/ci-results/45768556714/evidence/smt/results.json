@@ -1,0 +1,157 @@
+{
+  "stage": "2b",
+  "passed": true,
+  "solver": "4.15.4.0",
+  "python": "3.12.16",
+  "queries": [
+    {
+      "name": "i32_1bytes_load_u",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "073a80e1e3420c0ca397dcdb59340839d7021db86da932d4bad2b6921d452448"
+    },
+    {
+      "name": "i32_1bytes_load_s",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "772a42c8cd89254f306b471c4dd75ddbcea9594cc452e984113e262ddf36a480"
+    },
+    {
+      "name": "i32_1bytes_store_projection",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "dfbfad182df4582aabab09056c7d168808d5e666cc9baf8f86eefa5d9566fd92"
+    },
+    {
+      "name": "i32_1bytes_mutant_signed_unsigned",
+      "expected": "sat",
+      "result": "sat",
+      "querySha256": "3f558a8fcd6d408dbf0d1f89dc09993f38c433d0c00238390289932e567c50b7",
+      "counterexample": "[logical_size = 4294967295,\n base = 1,\n addr = 0,\n logical = K(BitVec(32), 128),\n physical = K(BitVec(32), 128)]"
+    },
+    {
+      "name": "i32_2bytes_load_u",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "67e3a4aecb397b093791c4cb347633bbf52a1f807d38df99822c48e3016457aa"
+    },
+    {
+      "name": "i32_2bytes_load_s",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "e115a689e8590d54dedf128f14bc8c39e40436753ec30a4976c15b92bb7e8b57"
+    },
+    {
+      "name": "i32_2bytes_store_projection",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "c38581d2979390854c5084c683d3781132498c6ef0b69c72f08b36041f308468"
+    },
+    {
+      "name": "i32_4bytes_load_u",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "ac86a92abae9d75b418bc1d84e5ed428e97b7a3f0b610f0ffa60d5b63373b16d"
+    },
+    {
+      "name": "i32_4bytes_store_projection",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "f2c320b0c54e96dd3027050d8c9d09b4d615b4720bc0e26c8af625f46248aef3"
+    },
+    {
+      "name": "i64_1bytes_load_u",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "7ed0ac0f6f92f6bac10b683c99fb8af6722e072b9870cd615cd7fe7f5c7ca638"
+    },
+    {
+      "name": "i64_1bytes_load_s",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "2efb561bab660ae01eb8409ddd642776dba04ad511d7328a19f6caf70bdf8b29"
+    },
+    {
+      "name": "i64_1bytes_store_projection",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "5a984ec73d6fff22ddbd49cce88620c83c333cf5b5f469852f94b00536785a33"
+    },
+    {
+      "name": "i64_1bytes_mutant_signed_unsigned",
+      "expected": "sat",
+      "result": "sat",
+      "querySha256": "78ffbe3b3d346977806720255f33ca5d9c62b8e72d2a73c683c9fb400553ff62",
+      "counterexample": "[logical_size = 3221225472,\n base = 1073741824,\n addr = 2,\n logical = K(BitVec(32), 128),\n physical = K(BitVec(32), 128)]"
+    },
+    {
+      "name": "i64_2bytes_load_u",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "4c0bbc11df3ae454b3eeab5676c8bc2b8e173f04ec43d49707feb2569457b0bd"
+    },
+    {
+      "name": "i64_2bytes_load_s",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "28f29660c5bf0ae8e5d18d185ef3279e60cc129766ffdc1d3af4c961ceebf7da"
+    },
+    {
+      "name": "i64_2bytes_store_projection",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "3591f52deeabdbeb57c1e559b53e0e7144e094d99519536bd8cd67bd0d09902c"
+    },
+    {
+      "name": "i64_4bytes_load_u",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "a4f89505acd54b4b60d6b72d663cb7f8e62b367bcd0580557d71e26a0b98d5e2"
+    },
+    {
+      "name": "i64_4bytes_load_s",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "1524af5637c6333332866014e926eb5e1d69b56e402f497c8dbcd8750406e5d1"
+    },
+    {
+      "name": "i64_4bytes_store_projection",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "35ef6344c784fc3cac2a28cf965155d800695590c9ff228e3ddd16da01bd280d"
+    },
+    {
+      "name": "i64_8bytes_load_u",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "4104647d48b5b081bf5c6efba329d18d54df9ed417cfa6477b05550435dbb23b"
+    },
+    {
+      "name": "i64_8bytes_store_projection",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "e998882844e04bc10a0231e6757ee5c227f52d0b8020b53ebfe0a04f978d980a"
+    },
+    {
+      "name": "i32_address_plus_memarg",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "b0fca3a41726ed6d8156f4667a4813f840f61a9c0bb3ba7f986f82eea748c6d8"
+    },
+    {
+      "name": "store_spill_restore_stack",
+      "expected": "unsat",
+      "result": "unsat",
+      "querySha256": "1d87dccb042971480ca8a54cdbdfcd986e54833f48c088add669460adb266815"
+    },
+    {
+      "name": "mutant_store_spill_swap",
+      "expected": "sat",
+      "result": "sat",
+      "querySha256": "7aed54f770b33a93a052962c1d3205e34e444ff1742342010eaaa4eefd712567",
+      "counterexample": "[stack_value = 18446744073709551615, stack_addr = 0]"
+    }
+  ],
+  "checkerSha256": "f72ed566b66942ffbfef36bdb16279a54985c3e689295e40649846c00ece9987",
+  "claim": "Local full-width integer load/store/address/stack lemmas under explicit relation and no-overflow assumptions; not actual generated-code or whole-program verification"
+}

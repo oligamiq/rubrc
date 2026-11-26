@@ -1,0 +1,221 @@
+{
+  "utc": "20261126T055136.995248Z",
+  "source": {
+    "source": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/src/memory_lock.rs",
+    "source_sha256": "d9c08f4561376fbe356d67ca8451e99fcdb9c79c29d78bbf7bb82a651a896961",
+    "instrumented_sha256": "dd97b92d0feba42220492da94c3a3246f9a3337b4366db95b4f33cd9e60fc1c9",
+    "replacements": [
+      {
+        "old": "use core::sync::atomic::{AtomicI32, Ordering};",
+        "new": "use loom::sync::atomic::{AtomicI32, Ordering};",
+        "matches": 1
+      },
+      {
+        "old": "pub(super) const fn new() -> Self {",
+        "new": "pub(super) fn new() -> Self {",
+        "matches": 1
+      },
+      {
+        "old": "#[cfg(test)]\n#[path = \"../tests/support/memory_lock_cases.rs\"]\nmod tests;\n",
+        "new": "",
+        "matches": 1
+      }
+    ]
+  },
+  "environment": {
+    "CARGO_HOME": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness/.cargo-home",
+    "CARGO_TARGET_DIR": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness/target",
+    "WVL_VERIFICATION_MAX_PERMUTATIONS": "10000",
+    "WVL_VERIFICATION_MAX_DURATION_S": "30"
+  },
+  "limits": {
+    "prepare_lock": false,
+    "build_timeout": 120,
+    "test_timeout": 60,
+    "max_permutations": 10000,
+    "max_duration": 30
+  },
+  "commands": [
+    {
+      "label": "rustc-version",
+      "command": [
+        "rustc",
+        "--version",
+        "--verbose"
+      ],
+      "cwd": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness",
+      "timeout_s": 10,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_s": 0.016,
+      "log": "results/actual-20261126T055136.995248Z/rustc-version.log"
+    },
+    {
+      "label": "cargo-version",
+      "command": [
+        "cargo",
+        "--version"
+      ],
+      "cwd": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness",
+      "timeout_s": 10,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_s": 0.016,
+      "log": "results/actual-20261126T055136.995248Z/cargo-version.log"
+    },
+    {
+      "label": "source-commit",
+      "command": [
+        "git",
+        "-C",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+        "rev-parse",
+        "HEAD"
+      ],
+      "cwd": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness",
+      "timeout_s": 10,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_s": 0.004,
+      "log": "results/actual-20261126T055136.995248Z/source-commit.log"
+    },
+    {
+      "label": "source-status",
+      "command": [
+        "git",
+        "-C",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+        "status",
+        "--short"
+      ],
+      "cwd": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness",
+      "timeout_s": 10,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_s": 0.064,
+      "log": "results/actual-20261126T055136.995248Z/source-status.log"
+    },
+    {
+      "label": "legacy-build",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--no-run"
+      ],
+      "cwd": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness",
+      "timeout_s": 120,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_s": 0.917,
+      "log": "results/actual-20261126T055136.995248Z/legacy-build.log"
+    },
+    {
+      "label": "legacy-writer_release_to_reader_payload",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "tests::writer_release_to_reader_payload",
+        "--",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness",
+      "timeout_s": 60,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_s": 0.164,
+      "log": "results/actual-20261126T055136.995248Z/legacy-writer_release_to_reader_payload.log"
+    },
+    {
+      "label": "legacy-readers_release_to_writer_disjoint_payloads",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "tests::readers_release_to_writer_disjoint_payloads",
+        "--",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness",
+      "timeout_s": 60,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_s": 0.265,
+      "log": "results/actual-20261126T055136.995248Z/legacy-readers_release_to_writer_disjoint_payloads.log"
+    },
+    {
+      "label": "waiter-aware-build",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--no-run",
+        "--features",
+        "waiter-aware-memory-lock"
+      ],
+      "cwd": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness",
+      "timeout_s": 120,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_s": 0.617,
+      "log": "results/actual-20261126T055136.995248Z/waiter-aware-build.log"
+    },
+    {
+      "label": "waiter-aware-writer_release_to_reader_payload",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--features",
+        "waiter-aware-memory-lock",
+        "tests::writer_release_to_reader_payload",
+        "--",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness",
+      "timeout_s": 60,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_s": 0.07,
+      "log": "results/actual-20261126T055136.995248Z/waiter-aware-writer_release_to_reader_payload.log"
+    },
+    {
+      "label": "waiter-aware-readers_release_to_writer_disjoint_payloads",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--features",
+        "waiter-aware-memory-lock",
+        "tests::readers_release_to_writer_disjoint_payloads",
+        "--",
+        "--exact",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness",
+      "timeout_s": 60,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_s": 0.566,
+      "log": "results/actual-20261126T055136.995248Z/waiter-aware-readers_release_to_writer_disjoint_payloads.log"
+    }
+  ],
+  "harness_hashes": {
+    "actual-harness/Cargo.toml": "66425c8bda169c445587cc301c015518a25012d00372623983375fd5a6f51bf8",
+    "actual-harness/build.rs": "a0419326657fe86a1653879736ba2c36748226a3ae604251ef0e97c959014103",
+    "actual-harness/source_transform.py": "7a61ed3329505beaf5116b6eadc1969961499ca3bd412d4f5ea67b4b341fd567",
+    "actual-harness/src/lib.rs": "5fa0c31e78525e4b18376299813fea8b19e8df08e4981a6ffc22e5d5b9e348a0",
+    "actual_runner.py": "40a268d7896f09b542322e99fa7453f24c6a02f0e622ac87a36904e9ad168d62"
+  },
+  "cargo_lock_sha256": "3b90c0fdd7e323c9797fbf022153a6f6d5e98d269fac9566cba3ab508fa1b937",
+  "all_invocations_passed": true,
+  "interpretation": "Only bounded model executions; passes do not establish arbitrary-execution correctness, wait/notify correctness, or liveness. Inspect model counters and cap terminations."
+}

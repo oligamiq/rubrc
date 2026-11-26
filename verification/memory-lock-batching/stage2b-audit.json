@@ -1,0 +1,232 @@
+{
+  "objective": "Read-only independent audit: replay original SMT files, reproduce generator, check assumption satisfiability, bounds/relation ablations and tautology simplification",
+  "utc": "2026-11-25T16:35:59.767855+00:00",
+  "command": [
+    "/usr/bin/python3",
+    "verification/memory-lock-batching/smt_check.py",
+    "--output-dir",
+    "target/stage2b-smt-readonly-audit-20261125T1634Z/reproduced"
+  ],
+  "environment": {
+    "python": "3.14.4",
+    "z3": "4.15.4.0",
+    "PYTHONPATH": "target/verification-tools/z3-packages",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "gitHead": "cdbe7f2bc99ba20b2f40782989b0624f1cfc1e22",
+  "checkerSha256Matches": true,
+  "reproducedQueryHashesMatch": true,
+  "reproducedCounts": {
+    "unsat": 21,
+    "sat": 3
+  },
+  "rows": [
+    {
+      "name": "i32_1bytes_load_u",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(logical[addr] == physical[base + addr])",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i32_1bytes_load_s",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(If(Extract(7, 7, logical[addr]) == 1,\n       Concat(16777215, logical[addr]),\n       Concat(0, logical[addr])) ==\n    Concat(Extract(7, 7, physical[base + addr]),\n           Extract(7, 7, physical",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i32_1bytes_store_projection",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Store(logical, addr, Extract(7, 0, value))[query] ==\n    Store(physical, base + addr, Extract(7, 0, value))[base +\n      query])",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i32_1bytes_mutant_signed_unsigned",
+      "sha256Matches": true,
+      "replay": "sat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(And(logical[addr] == physical[base + addr],\n        Extract(7, 7, physical[base + addr]) == 0))"
+    },
+    {
+      "name": "i32_2bytes_load_u",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Concat(0, logical[addr]) +\n    256*Concat(0, logical[1 + addr]) ==\n    Concat(0,\n           physical[1 + base + addr],\n           physical[base + addr]))",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i32_2bytes_load_s",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(If(Extract(15,\n               15,\n               Concat(0, logical[addr]) +\n               256*Concat(0, logical[1 + addr])) ==\n       1,\n       Concat(65535,\n              Concat(0, logical[addr]",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i32_2bytes_store_projection",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Store(Store(logical, addr, Extract(7, 0, value)),\n          1 + addr,\n          Extract(15, 8, value))[query] ==\n    Store(Store(physical, base + addr, Extract(7, 0, value)),\n          1 + base + ",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i32_4bytes_load_u",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Concat(0, logical[addr]) +\n    256*Concat(0, logical[1 + addr]) +\n    65536*Concat(0, logical[2 + addr]) +\n    16777216*Concat(0, logical[3 + addr]) ==\n    Concat(physical[3 + base + addr],\n      ",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i32_4bytes_store_projection",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Store(Store(Store(Store(logical,\n                            addr,\n                            Extract(7, 0, value)),\n                      1 + addr,\n                      Extract(15, 8, value)),\n",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i64_1bytes_load_u",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(logical[addr] == physical[base + addr])",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i64_1bytes_load_s",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(If(Extract(7, 7, logical[addr]) == 1,\n       Concat(72057594037927935, logical[addr]),\n       Concat(0, logical[addr])) ==\n    Concat(Extract(7, 7, physical[base + addr]),\n           Extract(7, 7,",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i64_1bytes_store_projection",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Store(logical, addr, Extract(7, 0, value))[query] ==\n    Store(physical, base + addr, Extract(7, 0, value))[base +\n      query])",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i64_1bytes_mutant_signed_unsigned",
+      "sha256Matches": true,
+      "replay": "sat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(And(logical[addr] == physical[base + addr],\n        Extract(7, 7, physical[base + addr]) == 0))"
+    },
+    {
+      "name": "i64_2bytes_load_u",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Concat(0, logical[addr]) +\n    256*Concat(0, logical[1 + addr]) ==\n    Concat(0,\n           physical[1 + base + addr],\n           physical[base + addr]))",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i64_2bytes_load_s",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(If(Extract(15,\n               15,\n               Concat(0, logical[addr]) +\n               256*Concat(0, logical[1 + addr])) ==\n       1,\n       Concat(281474976710655,\n              Concat(0, log",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i64_2bytes_store_projection",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Store(Store(logical, addr, Extract(7, 0, value)),\n          1 + addr,\n          Extract(15, 8, value))[query] ==\n    Store(Store(physical, base + addr, Extract(7, 0, value)),\n          1 + base + ",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i64_4bytes_load_u",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Concat(0, logical[addr]) +\n    256*Concat(0, logical[1 + addr]) +\n    65536*Concat(0, logical[2 + addr]) +\n    16777216*Concat(0, logical[3 + addr]) ==\n    Concat(0,\n           physical[3 + base +",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i64_4bytes_load_s",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(If(Extract(31,\n               31,\n               Concat(0, logical[addr]) +\n               256*Concat(0, logical[1 + addr]) +\n               65536*Concat(0, logical[2 + addr]) +\n               167",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i64_4bytes_store_projection",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Store(Store(Store(Store(logical,\n                            addr,\n                            Extract(7, 0, value)),\n                      1 + addr,\n                      Extract(15, 8, value)),\n",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i64_8bytes_load_u",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Concat(0, logical[addr]) +\n    256*Concat(0, logical[1 + addr]) +\n    65536*Concat(0, logical[2 + addr]) +\n    16777216*Concat(0, logical[3 + addr]) +\n    4294967296*Concat(0, logical[4 + addr]) +",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i64_8bytes_store_projection",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Store(Store(Store(Store(Store(Store(Store(Store(logical,\n                                        addr,\n                                        Extract(7, 0, value)),\n                              ",
+      "withoutBounds": "unsat",
+      "withoutRelation": "sat"
+    },
+    {
+      "name": "i32_address_plus_memarg",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Concat(0, base + x + y) ==\n    Concat(0, base) + Concat(0, x + y))"
+    },
+    {
+      "name": "store_spill_restore_stack",
+      "sha256Matches": true,
+      "replay": "unsat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "False"
+    },
+    {
+      "name": "mutant_store_spill_swap",
+      "sha256Matches": true,
+      "replay": "sat",
+      "assumptionsOnly": "sat",
+      "differenceSimplifiesTo": "Not(Concat(0, stack_addr) == stack_value)"
+    }
+  ],
+  "limitations": "Handwritten formulas only; does not verify emitted Wasm, stack-machine semantics, trap behavior, concurrency, or arbitrary programs. Assumption ablations diagnose dependencies rather than expand implementation claim."
+}

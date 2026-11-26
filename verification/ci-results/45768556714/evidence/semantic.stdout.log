@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "stage": "2a",
+  "passed": true,
+  "claim": "exhaustive reduced-domain validation for selected templates, not full Wasm proof",
+  "domain": {
+    "cellBits": 2,
+    "wordBits": 4,
+    "guests": 2,
+    "cellsPerGuest": 2,
+    "initialMemoryStates": 256,
+    "storeWords": 16,
+    "addresses": [
+      0,
+      1
+    ],
+    "batchBounds": [
+      1,
+      3,
+      64
+    ],
+    "relocations": 1
+  },
+  "referenceInputs": 24576,
+  "comparisons": 1409024,
+  "candidateRunsWithAcquisitionElision": 704512,
+  "coverage": {
+    "narrow_signed_mixed_guests": {
+      "originalOperators": 14,
+      "comparisons": 491520
+    },
+    "wide_little_endian_live_stack": {
+      "originalOperators": 13,
+      "comparisons": 458752
+    },
+    "bridge_arithmetic_truncation": {
+      "originalOperators": 13,
+      "comparisons": 458752
+    }
+  },
+  "negativeControls": {
+    "stale_base": {
+      "program": "bridge_arithmetic_truncation",
+      "initialCells": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0,
+      "address": 0,
+      "relocationRequestAt": 2,
+      "bound": 3,
+      "detected": true,
+      "reason": "retired or invalid physical cell"
+    },
+    "reverse_store_operands": {
+      "program": "narrow_signed_mixed_guests",
+      "initialCells": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0,
+      "address": 1,
+      "relocationRequestAt": 0,
+      "bound": 3,
+      "detected": true,
+      "reason": "semantic mismatch"
+    }
+  },
+  "targetRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+  "sourceSha256": {
+    "wasi_virt_layer-cli/src/wasm_stream/passes/memory_lock_batching.rs": "d0c4b7cb905078c4f67f8ace65cdaf594b6f0fcb22b4c8f2c46ebdb0d9252edf",
+    "wasi_virt_layer-cli/src/wasm_stream/passes/multi_memory_lowering.rs": "861e10ebbfce994e6765680654c55a279a29ab6132bcae4193db94aa0733d656",
+    "wasi_virt_layer/src/memory_lock.rs": "d9c08f4561376fbe356d67ca8451e99fcdb9c79c29d78bbf7bb82a651a896961"
+  },
+  "checkerSha256": "50f62239c847ef082b733d8d5fe485b9585cfb54ef2bd63f45c41ae2fd407305",
+  "environment": {
+    "python": "3.12.16 (main, Oct 26 2026, 02:50:49) [GCC 13.3.0]",
+    "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39"
+  },
+  "elapsedSeconds": 17.313737333999995
+}

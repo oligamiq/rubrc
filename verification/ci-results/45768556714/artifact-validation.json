@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "bundle": "/home/oligami/projects/rubrc/target/verification-hosted-45768556714/memory-lock-verification-45768556714-1/target/verification-ci",
+  "expectedSource": "205db7b2a2db3b91b22a234991856651f7fd16df",
+  "scope": "Replay existing contracts and digest integrity, not new coverage",
+  "recordedWasmSourceRoot": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+  "gateValidatorsReplayed": 9,
+  "digestsChecked": 184,
+  "runnerSha256": "99a2c271de33fc307977411a77ec53954aefa580c2cbaa4afaa158e9d992ba2d",
+  "pathNormalization": "Only in-memory Wasm source_root rebased to local checkout"
+}
