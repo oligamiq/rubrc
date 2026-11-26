@@ -1,0 +1,3 @@
+COMMAND ["git", "-C", "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching", "status", "--short"]
+
+RUNNER exit_code=0 timeout=False

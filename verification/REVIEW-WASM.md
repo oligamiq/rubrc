@@ -37,4 +37,4 @@ print('Wasm Python AST syntax: PASS')
 PY
 ```
 
-Both syntax checks passed on local Node v24.22.2 and Python 3.14.4. This review does not claim Python 3.12 hosted execution or a fresh end-to-end backend run. Parent is responsible for applying or explicitly resolving the integration findings and running final fresh evidence.
+Both syntax checks passed on local Node v24.22.2 and Python 3.14.4. This review does not claim Python 3.12 hosted execution or a fresh end-to-end backend run. Parent subsequently resolved findings: standalone runner now rejects optimized Python, requires clean pinned source, and records before/after status/hashes; integrated caller passes an explicit root and validates exact command/source/event inventories. Four additional validator unit tests reject missing park witness, duplicate ready IDs, and missing controls. Final standalone result is memory-lock-wasm/results/final-20261126/result.json; fresh full integrated local result is ci-results/local-final/summary.json (PASS). Historical initial result remains unchanged. Hosted evidence is documented in CI.md separately.

@@ -1,0 +1,6 @@
+
+thread 'main' (3939) panicked at src/main.rs:54:17:
+assertion `left == right` failed: STALE_PAYLOAD
+  left: 0
+ right: 42
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

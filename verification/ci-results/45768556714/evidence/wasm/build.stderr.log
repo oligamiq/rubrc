@@ -1,0 +1,149 @@
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded heck v0.5.0
+  Downloaded strum v0.28.0
+  Downloaded quote v1.0.47
+  Downloaded strum_macros v0.28.0
+  Downloaded proc-macro2 v1.0.107
+  Downloaded unicode-ident v1.0.27
+  Downloaded syn v2.0.119
+   Compiling serde_core v1.0.229
+   Compiling proc-macro2 v1.0.107
+   Compiling crossbeam-utils v0.8.23
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling crossbeam-epoch v0.9.21
+   Compiling crossbeam-deque v0.8.8
+   Compiling serde v1.0.229
+   Compiling memchr v2.8.3
+   Compiling foldhash v0.2.0
+   Compiling rayon-core v1.13.0
+   Compiling leb128fmt v0.1.0
+   Compiling zmij v1.0.23
+   Compiling wasm-encoder v0.252.0
+   Compiling hashbrown v0.17.2
+   Compiling syn v2.0.119
+   Compiling eyre v0.6.12
+   Compiling heck v0.5.0
+   Compiling unicode-width v0.2.2
+   Compiling bumpalo v3.20.4
+   Compiling serde_json v1.0.149
+   Compiling equivalent v1.0.3
+   Compiling indexmap v2.14.2
+   Compiling wast v252.0.0
+   Compiling strum_macros v0.28.0
+   Compiling once_cell v1.21.4
+   Compiling itoa v1.0.19
+   Compiling bitflags v2.13.2
+   Compiling semver v1.0.28
+   Compiling indenter v0.3.4
+   Compiling wvl-wasm-wait-correspondence v0.0.0 (/home/runner/work/rubrc/rubrc/verification/memory-lock-wasm/harness)
+   Compiling either v1.19.0
+   Compiling rayon v1.12.0
+   Compiling wat v1.252.0
+   Compiling wasmparser v0.252.0
+   Compiling strum v0.28.0
+   Compiling log v0.4.29
+warning: variable `type_count` is assigned to, but never used
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:189:13
+    |
+189 |         let mut type_count = 0;
+    |             ^^^^^^^^^^^^^^
+    |
+    = note: consider using `_type_count` instead
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable `memory_count` is assigned to, but never used
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:191:13
+    |
+191 |         let mut memory_count = 0;
+    |             ^^^^^^^^^^^^^^^^
+    |
+    = note: consider using `_memory_count` instead
+
+warning: variable `memory_import_count` is assigned to, but never used
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:192:13
+    |
+192 |         let mut memory_import_count = 0;
+    |             ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: consider using `_memory_import_count` instead
+
+warning: variable `data_count` is assigned to, but never used
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:499:13
+    |
+499 |         let mut data_count = 0;
+    |             ^^^^^^^^^^^^^^
+    |
+    = note: consider using `_data_count` instead
+
+warning: value assigned to `type_count` is never read
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:289:29
+    |
+289 | ...                   type_count += 1;
+    |                       ^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `memory_count` is never read
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:281:33
+    |
+281 |                                 memory_count += 1;
+    |                                 ^^^^^^^^^^^^^^^^^ this value is reassigned later and never used
+...
+300 |                         memory_count += 1;
+    |                         ----------------- `memory_count` is overwritten here before the previous value is read
+
+warning: value assigned to `memory_count` is never read
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:300:25
+    |
+300 |                         memory_count += 1;
+    |                         ^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `memory_import_count` is never read
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:280:33
+    |
+280 | ...                   memory_import_count += 1;
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `data_count` is never read
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:951:21
+    |
+951 |                     data_count = count; // original count
+    |                     ^^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `current_new_idx` is never read
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:591:9
+    |
+591 |         current_new_idx += 1;
+    |         ^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `type_count` is never read
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:719:25
+    |
+671 |                         type_count += 1;
+    |                         --------------- `type_count` is overwritten here before the previous value is read
+...
+719 |                         type_count += 1;
+    |                         ^^^^^^^^^^^^^^^ this value is reassigned later and never used
+
+warning: value assigned to `funcs_vec` is never read
+   --> /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer-cli/src/wasm_stream/passes/post_combine.rs:904:45
+    |
+904 |                         let mut funcs_vec = Vec::new();
+    |                                             ^^^^^^^^^^ this value is reassigned later and never used
+...
+907 |                                 funcs_vec = f
+    |                                 --------- `funcs_vec` is overwritten here before the previous value is read
+
+warning: `wvl-wasm-wait-correspondence` (bin "wvl-wasm-wait-correspondence") generated 12 warnings
+    Finished `dev` profile [unoptimized] target(s) in 14.52s

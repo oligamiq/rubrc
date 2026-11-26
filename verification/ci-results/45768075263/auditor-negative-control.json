@@ -1,0 +1,8 @@
+{
+  "passed": false,
+  "bundle": "/home/oligami/projects/rubrc/target/verification-hosted-45768075263/memory-lock-verification-45768075263-1/target/verification-ci",
+  "expectedSource": "5588750fc686863a62cd4e9e8db2c22c806f8070",
+  "scope": "Replay existing contracts and digest integrity, not new coverage",
+  "error": "ValueError('digest mismatch: /home/oligami/projects/rubrc/verification/run_checks.py')",
+  "digestsChecked": 0
+}

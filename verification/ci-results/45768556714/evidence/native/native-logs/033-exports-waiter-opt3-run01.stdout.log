@@ -1,0 +1,16 @@
+
+running 11 tests
+test original_lock::memory_lock::tests::last_reader_leaves_before_writer_registration ... ok
+test original_lock::memory_lock::tests::multiple_waiting_writers_complete ... ok
+test original_lock::memory_lock::tests::notification_before_actual_park_is_not_lost ... ok
+test original_lock::memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves ... ok
+test original_lock::memory_lock::tests::parked_writer_is_woken_by_the_last_reader ... ok
+test original_lock::memory_lock::tests::reader_count_aba_still_wakes_the_writer ... ok
+test original_lock::memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload ... ok
+test original_lock::memory_lock::tests::saturated_readers_do_not_overflow_the_marker ... ok
+test original_lock::memory_lock::tests::spurious_wait_return_retries_acquisition ... ok
+test original_lock::memory_lock::tests::writer_release_broadcasts_to_a_reader ... ok
+test uncontended_readers_notify_only_in_baseline ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

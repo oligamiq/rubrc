@@ -1,0 +1,1082 @@
+{
+  "schema_version": 1,
+  "objective": "Empirical regression tests of actual unchanged memory_lock.rs and existing native export harness; not formal verification",
+  "started_at_utc": "2026-11-26T06:30:29.654404+00:00",
+  "invocation": [
+    "/opt/hostedtoolcache/Python/3.12.16/x64/bin/python",
+    "/home/runner/work/rubrc/rubrc/verification/memory-lock-protocol/native_regression.py",
+    "--output-dir",
+    "/home/runner/work/rubrc/rubrc/target/verification-ci/native",
+    "--repetitions",
+    "2"
+  ],
+  "working_directory": "/home/runner/work/rubrc/rubrc",
+  "source_root": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+  "output_directory": "/home/runner/work/rubrc/rubrc/target/verification-ci/native",
+  "expected_commit": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+  "environment": {
+    "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "python": "3.12.16 (main, Oct 26 2026, 02:50:49) [GCC 13.3.0]",
+    "rustc_path": "/home/runner/.cargo/bin/rustc",
+    "RUSTUP_TOOLCHAIN": null,
+    "RUSTFLAGS": null,
+    "note": "Direct rustc commands do not consume Cargo RUSTFLAGS; inherited environment except RUST_BACKTRACE=1"
+  },
+  "configuration": {
+    "source_root": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+    "output_dir": "/home/runner/work/rubrc/rubrc/target/verification-ci/native",
+    "repetitions": 2,
+    "test_timeout": 20,
+    "compile_timeout": 60
+  },
+  "source_hashes_before": {
+    "wasi_virt_layer/src/memory_lock.rs": "d9c08f4561376fbe356d67ca8451e99fcdb9c79c29d78bbf7bb82a651a896961",
+    "wasi_virt_layer/tests/support/memory_lock_cases.rs": "6d67a702d7b910d6c8880b07ddc4a3febfc10375a16eb3ba175796e747b7cd6a",
+    "wasi_virt_layer/src/shared_global.rs": "d79c006d0ce5859f225fc8b8918f638eea2b8f9c582eba997ac79868527b24bb",
+    "wasi_virt_layer/tests/memory_lock_protocol.rs": "d2932de16445785865064dac1f2a565c9f1cfd79c319064afd23318eb95e2d18"
+  },
+  "runner_sha256": "19bc759a83285b3d20261be40123123ea70a0ce562523a0ed24470084348f828",
+  "commands": [
+    {
+      "label": "git-head",
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "shell_command": "git rev-parse HEAD",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 10,
+      "started_at_utc": "2026-11-26T06:30:29.656055+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0019035040000119352,
+      "stdout_path": "native-logs/000-git-head.stdout.log",
+      "stdout_sha256": "043e60a086744d43f46fb90498e60ff5773c3fa666545c603af533ff5a25e400",
+      "stderr_path": "native-logs/000-git-head.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "git-status-before",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1"
+      ],
+      "shell_command": "git status --porcelain=v1",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 10,
+      "started_at_utc": "2026-11-26T06:30:29.658297+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.008602534999994305,
+      "stdout_path": "native-logs/001-git-status-before.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/001-git-status-before.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "rustc-version",
+      "argv": [
+        "rustc",
+        "-vV"
+      ],
+      "shell_command": "rustc -vV",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 30,
+      "started_at_utc": "2026-11-26T06:30:29.667205+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.013174976000001948,
+      "stdout_path": "native-logs/002-rustc-version.stdout.log",
+      "stdout_sha256": "778fbc643a806f0dd123c056e66201d7e8a56a61928ec0a33171be8d6c2d5a37",
+      "stderr_path": "native-logs/002-rustc-version.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt0-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/actual_source_wrapper.rs",
+        "-C",
+        "opt-level=0",
+        "-o",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt0"
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/actual_source_wrapper.rs -C opt-level=0 -o /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt0",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T06:30:29.680903+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.7359098539999991,
+      "stdout_path": "native-logs/003-core-baseline-opt0-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/003-core-baseline-opt0-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt0-list",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt0",
+        "--list"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt0 --list",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:30.426989+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0015097360000027038,
+      "stdout_path": "native-logs/004-core-baseline-opt0-list.stdout.log",
+      "stdout_sha256": "61169e3a348847745cf7d39b8cc36d661fa937a711f1947140a3236f52b9b7e5",
+      "stderr_path": "native-logs/004-core-baseline-opt0-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt0-run01",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt0",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt0 --nocapture --test-threads=1",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:30.428812+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0032645200000018804,
+      "stdout_path": "native-logs/005-core-baseline-opt0-run01.stdout.log",
+      "stdout_sha256": "0695d2f63542a70fc68a4375f1f780f42ddfc9c03d36b03d77ed99d8584df993",
+      "stderr_path": "native-logs/005-core-baseline-opt0-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt0-run02",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt0",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt0 --nocapture --test-threads=4",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:30.432642+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.002985977999998113,
+      "stdout_path": "native-logs/006-core-baseline-opt0-run02.stdout.log",
+      "stdout_sha256": "6fcc7ce117acea03193be242a48f504e3b397bf930f3f1e5ea9f5d81992c790e",
+      "stderr_path": "native-logs/006-core-baseline-opt0-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt3-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/actual_source_wrapper.rs",
+        "-C",
+        "opt-level=3",
+        "-o",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt3"
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/actual_source_wrapper.rs -C opt-level=3 -o /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt3",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T06:30:30.435968+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.609804331999996,
+      "stdout_path": "native-logs/007-core-baseline-opt3-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/007-core-baseline-opt3-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt3-list",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt3",
+        "--list"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt3 --list",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:31.055300+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.001544487000003869,
+      "stdout_path": "native-logs/008-core-baseline-opt3-list.stdout.log",
+      "stdout_sha256": "61169e3a348847745cf7d39b8cc36d661fa937a711f1947140a3236f52b9b7e5",
+      "stderr_path": "native-logs/008-core-baseline-opt3-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt3-run01",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt3",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt3 --nocapture --test-threads=1",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:31.057225+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.003179286000005277,
+      "stdout_path": "native-logs/009-core-baseline-opt3-run01.stdout.log",
+      "stdout_sha256": "0695d2f63542a70fc68a4375f1f780f42ddfc9c03d36b03d77ed99d8584df993",
+      "stderr_path": "native-logs/009-core-baseline-opt3-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-baseline-opt3-run02",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt3",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-baseline-opt3 --nocapture --test-threads=4",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:31.060736+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.00258362199998885,
+      "stdout_path": "native-logs/010-core-baseline-opt3-run02.stdout.log",
+      "stdout_sha256": "bc344fc35837d186e37bc31728f1ff773126abbfead985124d7abf8ad32b2381",
+      "stderr_path": "native-logs/010-core-baseline-opt3-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt0-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/actual_source_wrapper.rs",
+        "-C",
+        "opt-level=0",
+        "-o",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt0",
+        "--cfg",
+        "feature=\"waiter-aware-memory-lock\""
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/actual_source_wrapper.rs -C opt-level=0 -o /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt0 --cfg 'feature=\"waiter-aware-memory-lock\"'",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T06:30:31.063667+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.21117913700000202,
+      "stdout_path": "native-logs/011-core-waiter-opt0-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/011-core-waiter-opt0-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt0-list",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt0",
+        "--list"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt0 --list",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:31.285247+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0014384210000031317,
+      "stdout_path": "native-logs/012-core-waiter-opt0-list.stdout.log",
+      "stdout_sha256": "1670427ee5ed3098c7fe5cbdfde328cd253610c509570040699f8a3ac8a620bc",
+      "stderr_path": "native-logs/012-core-waiter-opt0-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt0-run01",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt0",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt0 --nocapture --test-threads=1",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:31.287011+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.003264866999998617,
+      "stdout_path": "native-logs/013-core-waiter-opt0-run01.stdout.log",
+      "stdout_sha256": "21bd9c0a3abd5d0e55e3c816e27a688e128989cf46bd88b490eac4dcca7cb216",
+      "stderr_path": "native-logs/013-core-waiter-opt0-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt0-run02",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt0",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt0 --nocapture --test-threads=4",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:31.290634+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.002742944999994279,
+      "stdout_path": "native-logs/014-core-waiter-opt0-run02.stdout.log",
+      "stdout_sha256": "29e99ea914db5db9ec6f9047361299e8fb960800c5949dd51239cf17205ed5c5",
+      "stderr_path": "native-logs/014-core-waiter-opt0-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt3-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/actual_source_wrapper.rs",
+        "-C",
+        "opt-level=3",
+        "-o",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt3",
+        "--cfg",
+        "feature=\"waiter-aware-memory-lock\""
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/actual_source_wrapper.rs -C opt-level=3 -o /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt3 --cfg 'feature=\"waiter-aware-memory-lock\"'",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T06:30:31.293735+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.6205789400000015,
+      "stdout_path": "native-logs/015-core-waiter-opt3-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/015-core-waiter-opt3-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt3-list",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt3",
+        "--list"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt3 --list",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:31.920979+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0015072920000136492,
+      "stdout_path": "native-logs/016-core-waiter-opt3-list.stdout.log",
+      "stdout_sha256": "1670427ee5ed3098c7fe5cbdfde328cd253610c509570040699f8a3ac8a620bc",
+      "stderr_path": "native-logs/016-core-waiter-opt3-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt3-run01",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt3",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt3 --nocapture --test-threads=1",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:31.922821+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0031240550000006806,
+      "stdout_path": "native-logs/017-core-waiter-opt3-run01.stdout.log",
+      "stdout_sha256": "21bd9c0a3abd5d0e55e3c816e27a688e128989cf46bd88b490eac4dcca7cb216",
+      "stderr_path": "native-logs/017-core-waiter-opt3-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "core-waiter-opt3-run02",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt3",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/core-waiter-opt3 --nocapture --test-threads=4",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:31.926312+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.002847219000003065,
+      "stdout_path": "native-logs/018-core-waiter-opt3-run02.stdout.log",
+      "stdout_sha256": "00152410118fcea9fa0a719e11eebeb13fe1ec017176f39d38aa864fe43f2af6",
+      "stderr_path": "native-logs/018-core-waiter-opt3-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt0-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs",
+        "-C",
+        "opt-level=0",
+        "-o",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt0"
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs -C opt-level=0 -o /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt0",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T06:30:31.929521+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.21579980399999954,
+      "stdout_path": "native-logs/019-exports-baseline-opt0-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/019-exports-baseline-opt0-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt0-list",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt0",
+        "--list"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt0 --list",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:32.151698+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0015221539999998868,
+      "stdout_path": "native-logs/020-exports-baseline-opt0-list.stdout.log",
+      "stdout_sha256": "52dacae3eddcfefa55d3cd483c302582842b950d33a36b8f96e28077104a0502",
+      "stderr_path": "native-logs/020-exports-baseline-opt0-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt0-run01",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt0",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt0 --nocapture --test-threads=1",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:32.153552+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0033887830000054464,
+      "stdout_path": "native-logs/021-exports-baseline-opt0-run01.stdout.log",
+      "stdout_sha256": "d148dbd9d1c779dc28362d0eeaa1798e778c59c477a4c92d9c0bda1eefc24f4d",
+      "stderr_path": "native-logs/021-exports-baseline-opt0-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt0-run02",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt0",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt0 --nocapture --test-threads=4",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:32.157290+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.003605312000004801,
+      "stdout_path": "native-logs/022-exports-baseline-opt0-run02.stdout.log",
+      "stdout_sha256": "d104b878e9e0621045d86fdbfa3a9a5284114c62c6c558b102a031a74ab26b41",
+      "stderr_path": "native-logs/022-exports-baseline-opt0-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt3-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs",
+        "-C",
+        "opt-level=3",
+        "-o",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt3"
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs -C opt-level=3 -o /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt3",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T06:30:32.161300+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.6268616199999997,
+      "stdout_path": "native-logs/023-exports-baseline-opt3-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/023-exports-baseline-opt3-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt3-list",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt3",
+        "--list"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt3 --list",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:32.794639+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0015001419999975951,
+      "stdout_path": "native-logs/024-exports-baseline-opt3-list.stdout.log",
+      "stdout_sha256": "52dacae3eddcfefa55d3cd483c302582842b950d33a36b8f96e28077104a0502",
+      "stderr_path": "native-logs/024-exports-baseline-opt3-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt3-run01",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt3",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt3 --nocapture --test-threads=1",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:32.796487+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0032322130000039806,
+      "stdout_path": "native-logs/025-exports-baseline-opt3-run01.stdout.log",
+      "stdout_sha256": "d148dbd9d1c779dc28362d0eeaa1798e778c59c477a4c92d9c0bda1eefc24f4d",
+      "stderr_path": "native-logs/025-exports-baseline-opt3-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-baseline-opt3-run02",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt3",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-baseline-opt3 --nocapture --test-threads=4",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:32.800045+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.002654656000004252,
+      "stdout_path": "native-logs/026-exports-baseline-opt3-run02.stdout.log",
+      "stdout_sha256": "68a3c190e275eb49e8aa35b8ae361eaa4b3139e75d4be294b70be923ce9a27cf",
+      "stderr_path": "native-logs/026-exports-baseline-opt3-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt0-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs",
+        "-C",
+        "opt-level=0",
+        "-o",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt0",
+        "--cfg",
+        "feature=\"waiter-aware-memory-lock\""
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs -C opt-level=0 -o /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt0 --cfg 'feature=\"waiter-aware-memory-lock\"'",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T06:30:32.803056+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.22085165800000084,
+      "stdout_path": "native-logs/027-exports-waiter-opt0-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/027-exports-waiter-opt0-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt0-list",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt0",
+        "--list"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt0 --list",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:33.030653+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0014675039999900719,
+      "stdout_path": "native-logs/028-exports-waiter-opt0-list.stdout.log",
+      "stdout_sha256": "24b9fb6e7d580b6051d1593808785a7c6d43eaae18e666b052081287096bb276",
+      "stderr_path": "native-logs/028-exports-waiter-opt0-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt0-run01",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt0",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt0 --nocapture --test-threads=1",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:33.032464+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0033255649999972547,
+      "stdout_path": "native-logs/029-exports-waiter-opt0-run01.stdout.log",
+      "stdout_sha256": "72c8acbd4116d80cc33425e697b282a69e8f6f981e2e7b1974cdfc3e1d17bf82",
+      "stderr_path": "native-logs/029-exports-waiter-opt0-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt0-run02",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt0",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt0 --nocapture --test-threads=4",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:33.036152+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.002786425000010695,
+      "stdout_path": "native-logs/030-exports-waiter-opt0-run02.stdout.log",
+      "stdout_sha256": "96a44e73efa305ef47598e7d6ec4bcb2f78dd0174cab42308c0661d0daaf9aed",
+      "stderr_path": "native-logs/030-exports-waiter-opt0-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt3-compile",
+      "argv": [
+        "rustc",
+        "--edition=2024",
+        "--test",
+        "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs",
+        "-C",
+        "opt-level=3",
+        "-o",
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt3",
+        "--cfg",
+        "feature=\"waiter-aware-memory-lock\""
+      ],
+      "shell_command": "rustc --edition=2024 --test /home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching/wasi_virt_layer/tests/memory_lock_protocol.rs -C opt-level=3 -o /home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt3 --cfg 'feature=\"waiter-aware-memory-lock\"'",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 60,
+      "started_at_utc": "2026-11-26T06:30:33.039337+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.6433994220000017,
+      "stdout_path": "native-logs/031-exports-waiter-opt3-compile.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/031-exports-waiter-opt3-compile.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt3-list",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt3",
+        "--list"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt3 --list",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:33.689212+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0014844590000109292,
+      "stdout_path": "native-logs/032-exports-waiter-opt3-list.stdout.log",
+      "stdout_sha256": "24b9fb6e7d580b6051d1593808785a7c6d43eaae18e666b052081287096bb276",
+      "stderr_path": "native-logs/032-exports-waiter-opt3-list.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt3-run01",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt3",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt3 --nocapture --test-threads=1",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:33.691039+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0032438610000014023,
+      "stdout_path": "native-logs/033-exports-waiter-opt3-run01.stdout.log",
+      "stdout_sha256": "72c8acbd4116d80cc33425e697b282a69e8f6f981e2e7b1974cdfc3e1d17bf82",
+      "stderr_path": "native-logs/033-exports-waiter-opt3-run01.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "exports-waiter-opt3-run02",
+      "argv": [
+        "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt3",
+        "--nocapture",
+        "--test-threads=4"
+      ],
+      "shell_command": "/home/runner/work/rubrc/rubrc/target/verification-ci/native/native-artifacts/exports-waiter-opt3 --nocapture --test-threads=4",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 20,
+      "started_at_utc": "2026-11-26T06:30:33.694620+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.0026063950000008163,
+      "stdout_path": "native-logs/034-exports-waiter-opt3-run02.stdout.log",
+      "stdout_sha256": "471d415ace54289023bb35d5b31a55d5e3060faf9a477c38c83e629bc1ddd27e",
+      "stderr_path": "native-logs/034-exports-waiter-opt3-run02.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "git-status-after",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1"
+      ],
+      "shell_command": "git status --porcelain=v1",
+      "cwd": "/home/runner/work/rubrc/rubrc/.worktrees/wvl-lock-batching",
+      "timeout_seconds": 10,
+      "started_at_utc": "2026-11-26T06:30:33.697707+00:00",
+      "timed_out": false,
+      "returncode": 0,
+      "duration_seconds": 0.008171412999999461,
+      "stdout_path": "native-logs/035-git-status-after.stdout.log",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": "native-logs/035-git-status-after.stderr.log",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "variants": [
+    {
+      "label": "core-baseline-opt0",
+      "harness": "core",
+      "feature_enabled": false,
+      "optimization": 0,
+      "expected_test_count": 8,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 5,
+          "passed": true,
+          "passed_test_count": 8
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 6,
+          "passed": true,
+          "passed_test_count": 8
+        }
+      ],
+      "compile_command_index": 3,
+      "binary_sha256": "8578de9886d490550c9e63a70e79e313c2d4370fe4cc9e35d69b403f2aa552c9",
+      "test_names": [
+        "memory_lock::tests::multiple_waiting_writers_complete",
+        "memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "memory_lock::tests::writer_release_broadcasts_to_a_reader"
+      ]
+    },
+    {
+      "label": "core-baseline-opt3",
+      "harness": "core",
+      "feature_enabled": false,
+      "optimization": 3,
+      "expected_test_count": 8,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 9,
+          "passed": true,
+          "passed_test_count": 8
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 10,
+          "passed": true,
+          "passed_test_count": 8
+        }
+      ],
+      "compile_command_index": 7,
+      "binary_sha256": "b6f95c8de2f88b99263e99655f2c72575ca2974efade54589122bbc71ab3d3af",
+      "test_names": [
+        "memory_lock::tests::multiple_waiting_writers_complete",
+        "memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "memory_lock::tests::writer_release_broadcasts_to_a_reader"
+      ]
+    },
+    {
+      "label": "core-waiter-opt0",
+      "harness": "core",
+      "feature_enabled": true,
+      "optimization": 0,
+      "expected_test_count": 10,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 13,
+          "passed": true,
+          "passed_test_count": 10
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 14,
+          "passed": true,
+          "passed_test_count": 10
+        }
+      ],
+      "compile_command_index": 11,
+      "binary_sha256": "7fb225126433460502df5798bd34e63d11de67f5c3da953c1447da00c41ef826",
+      "test_names": [
+        "memory_lock::tests::last_reader_leaves_before_writer_registration",
+        "memory_lock::tests::multiple_waiting_writers_complete",
+        "memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "memory_lock::tests::saturated_readers_do_not_overflow_the_marker",
+        "memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "memory_lock::tests::writer_release_broadcasts_to_a_reader"
+      ]
+    },
+    {
+      "label": "core-waiter-opt3",
+      "harness": "core",
+      "feature_enabled": true,
+      "optimization": 3,
+      "expected_test_count": 10,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 17,
+          "passed": true,
+          "passed_test_count": 10
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 18,
+          "passed": true,
+          "passed_test_count": 10
+        }
+      ],
+      "compile_command_index": 15,
+      "binary_sha256": "16e1ab98cf50fabcafbc1dfa3d9c40cb43b46da6419533b072558272f05ceca7",
+      "test_names": [
+        "memory_lock::tests::last_reader_leaves_before_writer_registration",
+        "memory_lock::tests::multiple_waiting_writers_complete",
+        "memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "memory_lock::tests::saturated_readers_do_not_overflow_the_marker",
+        "memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "memory_lock::tests::writer_release_broadcasts_to_a_reader"
+      ]
+    },
+    {
+      "label": "exports-baseline-opt0",
+      "harness": "exports",
+      "feature_enabled": false,
+      "optimization": 0,
+      "expected_test_count": 9,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 21,
+          "passed": true,
+          "passed_test_count": 9
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 22,
+          "passed": true,
+          "passed_test_count": 9
+        }
+      ],
+      "compile_command_index": 19,
+      "binary_sha256": "8bee23880562b20b408fc97245155b45f7ea4032fa6546b9e948df27d845dd0d",
+      "test_names": [
+        "original_lock::memory_lock::tests::multiple_waiting_writers_complete",
+        "original_lock::memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "original_lock::memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "original_lock::memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "original_lock::memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "original_lock::memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "original_lock::memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "original_lock::memory_lock::tests::writer_release_broadcasts_to_a_reader",
+        "uncontended_readers_notify_only_in_baseline"
+      ]
+    },
+    {
+      "label": "exports-baseline-opt3",
+      "harness": "exports",
+      "feature_enabled": false,
+      "optimization": 3,
+      "expected_test_count": 9,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 25,
+          "passed": true,
+          "passed_test_count": 9
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 26,
+          "passed": true,
+          "passed_test_count": 9
+        }
+      ],
+      "compile_command_index": 23,
+      "binary_sha256": "b8181818d18a78a3df992bd861fc2bbea3920a2304543fb44bacda9e50d76d4a",
+      "test_names": [
+        "original_lock::memory_lock::tests::multiple_waiting_writers_complete",
+        "original_lock::memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "original_lock::memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "original_lock::memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "original_lock::memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "original_lock::memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "original_lock::memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "original_lock::memory_lock::tests::writer_release_broadcasts_to_a_reader",
+        "uncontended_readers_notify_only_in_baseline"
+      ]
+    },
+    {
+      "label": "exports-waiter-opt0",
+      "harness": "exports",
+      "feature_enabled": true,
+      "optimization": 0,
+      "expected_test_count": 11,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 29,
+          "passed": true,
+          "passed_test_count": 11
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 30,
+          "passed": true,
+          "passed_test_count": 11
+        }
+      ],
+      "compile_command_index": 27,
+      "binary_sha256": "371562d8e49af2b698ae4f491c8fba157c9a83993902885d09240019a4272c79",
+      "test_names": [
+        "original_lock::memory_lock::tests::last_reader_leaves_before_writer_registration",
+        "original_lock::memory_lock::tests::multiple_waiting_writers_complete",
+        "original_lock::memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "original_lock::memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "original_lock::memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "original_lock::memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "original_lock::memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "original_lock::memory_lock::tests::saturated_readers_do_not_overflow_the_marker",
+        "original_lock::memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "original_lock::memory_lock::tests::writer_release_broadcasts_to_a_reader",
+        "uncontended_readers_notify_only_in_baseline"
+      ]
+    },
+    {
+      "label": "exports-waiter-opt3",
+      "harness": "exports",
+      "feature_enabled": true,
+      "optimization": 3,
+      "expected_test_count": 11,
+      "runs": [
+        {
+          "repetition": 1,
+          "test_threads": 1,
+          "command_index": 33,
+          "passed": true,
+          "passed_test_count": 11
+        },
+        {
+          "repetition": 2,
+          "test_threads": 4,
+          "command_index": 34,
+          "passed": true,
+          "passed_test_count": 11
+        }
+      ],
+      "compile_command_index": 31,
+      "binary_sha256": "3163db2b7255a0bc6925c41bdee5fc0603493d58528056289cb6b356476ae10d",
+      "test_names": [
+        "original_lock::memory_lock::tests::last_reader_leaves_before_writer_registration",
+        "original_lock::memory_lock::tests::multiple_waiting_writers_complete",
+        "original_lock::memory_lock::tests::notification_before_actual_park_is_not_lost",
+        "original_lock::memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves",
+        "original_lock::memory_lock::tests::parked_writer_is_woken_by_the_last_reader",
+        "original_lock::memory_lock::tests::reader_count_aba_still_wakes_the_writer",
+        "original_lock::memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload",
+        "original_lock::memory_lock::tests::saturated_readers_do_not_overflow_the_marker",
+        "original_lock::memory_lock::tests::spurious_wait_return_retries_acquisition",
+        "original_lock::memory_lock::tests::writer_release_broadcasts_to_a_reader",
+        "uncontended_readers_notify_only_in_baseline"
+      ]
+    }
+  ],
+  "failures": [],
+  "observed_commit": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+  "source_status_before": "",
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+  "wrapper_path": "native-artifacts/actual_source_wrapper.rs",
+  "wrapper_sha256": "8d4aabef3ee9a8e4c7594e9bbb10fd6c9fb320bc409532ab1c35d150ee161a03",
+  "source_hashes_after": {
+    "wasi_virt_layer/src/memory_lock.rs": "d9c08f4561376fbe356d67ca8451e99fcdb9c79c29d78bbf7bb82a651a896961",
+    "wasi_virt_layer/tests/support/memory_lock_cases.rs": "6d67a702d7b910d6c8880b07ddc4a3febfc10375a16eb3ba175796e747b7cd6a",
+    "wasi_virt_layer/src/shared_global.rs": "d79c006d0ce5859f225fc8b8918f638eea2b8f9c582eba997ac79868527b24bb",
+    "wasi_virt_layer/tests/memory_lock_protocol.rs": "d2932de16445785865064dac1f2a565c9f1cfd79c319064afd23318eb95e2d18"
+  },
+  "sources_unchanged": true,
+  "source_status_after": "",
+  "finished_at_utc": "2026-11-26T06:30:33.706199+00:00",
+  "summary": {
+    "variant_count": 8,
+    "test_process_runs": 16,
+    "successful_test_process_runs": 16,
+    "successful_test_executions": 152,
+    "timeout_count": 0,
+    "outcome": "PASS"
+  }
+}

@@ -19,6 +19,8 @@ In particular, the atomic lock protocol is ASSUMED by stage1. Its CAS/wait/notif
 
 Follow-up: [internal lock protocol verification](../memory-lock-protocol/README.md) now checks a finite SC-atomic CAS/wait/notify model and actual-source native regressions. It does not remove stage1's abstraction assumption or prove weak-memory/composition/fairness properties.
 
+The [integrated CI gate](../CI.md) runs these checks alongside [Loom visibility checks](../memory-lock-ordering/README.md) and [real Wasm wait/notify correspondence](../memory-lock-wasm/README.md). It is a pinned regression suite, not an end-to-end proof.
+
 Every stage documents its exact domain, oracle, negative controls, commands, environment and source hashes. Original results are never overwritten when a checker changes. Reproduction may produce different timings/platform information, but semantic counts/outcomes and query hashes should agree when source/tool versions agree. Use a new output path for each run.
 
 ## Prepare the pinned source checkout

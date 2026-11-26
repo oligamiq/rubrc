@@ -1,0 +1,61 @@
+COMMAND ["cargo", "test", "--locked", "--no-run"]
+warning: constant `WAITING` is never used
+  --> /home/runner/work/rubrc/rubrc/verification/memory-lock-ordering/actual-harness/target/debug/build/memory-lock-actual-ordering-ac553ad296008846/out/memory_lock_instrumented.rs:11:7
+   |
+11 | const WAITING: i32 = if cfg!(feature = "waiter-aware-memory-lock") {
+   |       ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: trait `WaitNotify` is never used
+  --> /home/runner/work/rubrc/rubrc/verification/memory-lock-ordering/actual-harness/target/debug/build/memory-lock-actual-ordering-ac553ad296008846/out/memory_lock_instrumented.rs:20:18
+   |
+20 | pub(super) trait WaitNotify {
+   |                  ^^^^^^^^^^
+
+warning: struct `MemoryAccessLock` is never constructed
+  --> /home/runner/work/rubrc/rubrc/verification/memory-lock-ordering/actual-harness/target/debug/build/memory-lock-actual-ordering-ac553ad296008846/out/memory_lock_instrumented.rs:32:19
+   |
+32 | pub(super) struct MemoryAccessLock {
+   |                   ^^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `read_acquire`, `read_release`, `write_acquire`, and `write_release` are never used
+   --> /home/runner/work/rubrc/rubrc/verification/memory-lock-ordering/actual-harness/target/debug/build/memory-lock-actual-ordering-ac553ad296008846/out/memory_lock_instrumented.rs:37:19
+    |
+ 36 | impl MemoryAccessLock {
+    | --------------------- associated items in this implementation
+ 37 |     pub(super) fn new() -> Self {
+    |                   ^^^
+...
+ 44 |     pub(super) fn read_acquire(&self, backend: &impl WaitNotify) {
+    |                   ^^^^^^^^^^^^
+...
+ 69 |     pub(super) fn read_release(&self, backend: &impl WaitNotify) {
+    |                   ^^^^^^^^^^^^
+...
+ 76 |     pub(super) fn write_acquire(&self, backend: &impl WaitNotify) {
+    |                   ^^^^^^^^^^^^^
+...
+130 |     pub(super) fn write_release(&self, backend: &impl WaitNotify) {
+    |                   ^^^^^^^^^^^^^
+
+warning: methods `before_writer_register` and `reader_saturated` are never used
+  --> /home/runner/work/rubrc/rubrc/verification/memory-lock-ordering/actual-harness/target/debug/build/memory-lock-actual-ordering-ac553ad296008846/out/memory_lock_instrumented.rs:25:8
+   |
+20 | pub(super) trait WaitNotify {
+   |                  ---------- methods in this trait
+...
+25 |     fn before_writer_register(&self, _state: &AtomicI32, _expected: i32) {}
+   |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+28 |     fn reader_saturated(&self, _state: &AtomicI32) {}
+   |        ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `memory-lock-actual-ordering` (lib) generated 4 warnings
+warning: `memory-lock-actual-ordering` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+  Executable unittests src/lib.rs (target/debug/deps/memory_lock_actual_ordering-e6865d69aea142cb)
+
+RUNNER exit_code=0 timeout=False
