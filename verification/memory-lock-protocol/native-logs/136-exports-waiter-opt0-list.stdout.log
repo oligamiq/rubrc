@@ -1,0 +1,13 @@
+original_lock::memory_lock::tests::last_reader_leaves_before_writer_registration: test
+original_lock::memory_lock::tests::multiple_waiting_writers_complete: test
+original_lock::memory_lock::tests::notification_before_actual_park_is_not_lost: test
+original_lock::memory_lock::tests::overlapping_readers_notify_only_when_the_last_one_leaves: test
+original_lock::memory_lock::tests::parked_writer_is_woken_by_the_last_reader: test
+original_lock::memory_lock::tests::reader_count_aba_still_wakes_the_writer: test
+original_lock::memory_lock::tests::readers_and_writers_preserve_exclusion_and_payload: test
+original_lock::memory_lock::tests::saturated_readers_do_not_overflow_the_marker: test
+original_lock::memory_lock::tests::spurious_wait_return_retries_acquisition: test
+original_lock::memory_lock::tests::writer_release_broadcasts_to_a_reader: test
+uncontended_readers_notify_only_in_baseline: test
+
+11 tests, 0 benchmarks

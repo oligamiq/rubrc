@@ -1,0 +1,577 @@
+{
+  "stage": "4a",
+  "passed": true,
+  "model": "finite SC atomic-word protocol with atomic compare-and-park",
+  "counterBits": 2,
+  "marker": 4,
+  "cases": [
+    {
+      "roles": "R",
+      "operations": [
+        2
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 9,
+      "transitions": 10,
+      "statesWithPathToCompletion": 9,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 0
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 2,
+      "waitMismatchTransitions": 0
+    },
+    {
+      "roles": "W",
+      "operations": [
+        2
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 7,
+      "transitions": 6,
+      "statesWithPathToCompletion": 7,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 0
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 0,
+      "waitMismatchTransitions": 0
+    },
+    {
+      "roles": "RW",
+      "operations": [
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 29,
+      "transitions": 46,
+      "statesWithPathToCompletion": 29,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 4
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 4,
+      "waitMismatchTransitions": 4
+    },
+    {
+      "roles": "RRW",
+      "operations": [
+        1,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 226,
+      "transitions": 549,
+      "statesWithPathToCompletion": 226,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 4,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 41
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 90,
+      "waitMismatchTransitions": 48
+    },
+    {
+      "roles": "RWW",
+      "operations": [
+        1,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 209,
+      "transitions": 458,
+      "statesWithPathToCompletion": 209,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 54
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 25,
+      "waitMismatchTransitions": 62
+    },
+    {
+      "roles": "RRWW",
+      "operations": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 1842,
+      "transitions": 5490,
+      "statesWithPathToCompletion": 1842,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 54,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 542
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 650,
+      "waitMismatchTransitions": 738
+    },
+    {
+      "roles": "RW",
+      "operations": [
+        2,
+        2
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 101,
+      "transitions": 178,
+      "statesWithPathToCompletion": 101,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 18
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 16,
+      "waitMismatchTransitions": 18
+    },
+    {
+      "roles": "RRW",
+      "operations": [
+        2,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 447,
+      "transitions": 1137,
+      "statesWithPathToCompletion": 447,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 8,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 88
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 202,
+      "waitMismatchTransitions": 104
+    },
+    {
+      "roles": "RWW",
+      "operations": [
+        2,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 426,
+      "transitions": 979,
+      "statesWithPathToCompletion": 426,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 124
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 65,
+      "waitMismatchTransitions": 146
+    },
+    {
+      "roles": "RRRRW",
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "waiterAware": false,
+      "passed": true,
+      "states": 16396,
+      "transitions": 67361,
+      "statesWithPathToCompletion": 16396,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 1404,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 3160
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 17816,
+      "waitMismatchTransitions": 5244
+    },
+    {
+      "roles": "R",
+      "operations": [
+        2
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 7,
+      "transitions": 8,
+      "statesWithPathToCompletion": 7,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 0
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 2,
+      "waitMismatchTransitions": 0
+    },
+    {
+      "roles": "W",
+      "operations": [
+        2
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 9,
+      "transitions": 10,
+      "statesWithPathToCompletion": 9,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 0,
+        "waitMismatchAfterRelease": 0
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 2,
+      "waitMismatchTransitions": 0
+    },
+    {
+      "roles": "RW",
+      "operations": [
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 38,
+      "transitions": 67,
+      "statesWithPathToCompletion": 38,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 1,
+        "waitMismatchAfterRelease": 4
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 13,
+      "waitMismatchTransitions": 4
+    },
+    {
+      "roles": "RRW",
+      "operations": [
+        1,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 352,
+      "transitions": 905,
+      "statesWithPathToCompletion": 352,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 4,
+        "releaseWhileMarkPending": 14,
+        "waitMismatchAfterRelease": 49
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 246,
+      "waitMismatchTransitions": 56
+    },
+    {
+      "roles": "RWW",
+      "operations": [
+        1,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 376,
+      "transitions": 932,
+      "statesWithPathToCompletion": 376,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 13,
+        "waitMismatchAfterRelease": 78
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 200,
+      "waitMismatchTransitions": 86
+    },
+    {
+      "roles": "RRWW",
+      "operations": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 4466,
+      "transitions": 14638,
+      "statesWithPathToCompletion": 4466,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 94,
+        "releaseWhileMarkPending": 274,
+        "waitMismatchAfterRelease": 1076
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 4192,
+      "waitMismatchTransitions": 1340
+    },
+    {
+      "roles": "RW",
+      "operations": [
+        2,
+        2
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 158,
+      "transitions": 322,
+      "statesWithPathToCompletion": 158,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 4,
+        "waitMismatchAfterRelease": 20
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 74,
+      "waitMismatchTransitions": 20
+    },
+    {
+      "roles": "RRW",
+      "operations": [
+        2,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 768,
+      "transitions": 2102,
+      "statesWithPathToCompletion": 768,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 8,
+        "releaseWhileMarkPending": 28,
+        "waitMismatchAfterRelease": 112
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 629,
+      "waitMismatchTransitions": 128
+    },
+    {
+      "roles": "RWW",
+      "operations": [
+        2,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 898,
+      "transitions": 2402,
+      "statesWithPathToCompletion": 898,
+      "coverage": {
+        "saturationRetries": 0,
+        "notifyOneReaderChoices": 0,
+        "releaseWhileMarkPending": 30,
+        "waitMismatchAfterRelease": 198
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 612,
+      "waitMismatchTransitions": 224
+    },
+    {
+      "roles": "RRRRW",
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": true,
+      "states": 40421,
+      "transitions": 170708,
+      "statesWithPathToCompletion": 40421,
+      "coverage": {
+        "saturationRetries": 56,
+        "notifyOneReaderChoices": 2268,
+        "releaseWhileMarkPending": 1536,
+        "waitMismatchAfterRelease": 6716
+      },
+      "terminalStates": 1,
+      "weakCasFailureTransitions": 65716,
+      "waitMismatchTransitions": 9444
+    }
+  ],
+  "negativeControls": {
+    "split_wait": {
+      "roles": "RW",
+      "operations": [
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": false,
+      "invariant": "all_remaining_parked_deadlock",
+      "states": 44,
+      "trace": [
+        "1W.load_free",
+        "1W.acquire_success",
+        "0R.load_writer",
+        "0R.broken_wait_compare",
+        "1W.writer_release_store",
+        "1W.notify_all",
+        "0R.broken_wait_register",
+        "all_remaining_parked_deadlock"
+      ]
+    },
+    "mark_store": {
+      "roles": "RW",
+      "operations": [
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": false,
+      "invariant": "reader_count",
+      "states": 28,
+      "trace": [
+        "0R.load_reader_count",
+        "0R.acquire_success",
+        "1W.load_need_mark",
+        "0R.read_release",
+        "1W.broken_mark_store",
+        "reader_count"
+      ]
+    },
+    "omit_reader_notify": {
+      "roles": "RW",
+      "operations": [
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": false,
+      "invariant": "all_remaining_parked_deadlock",
+      "states": 32,
+      "trace": [
+        "0R.load_reader_count",
+        "0R.acquire_success",
+        "1W.load_need_mark",
+        "1W.mark_success",
+        "1W.atomic_compare_and_park",
+        "0R.read_release",
+        "all_remaining_parked_deadlock"
+      ]
+    },
+    "writer_notify_one": {
+      "roles": "RWW",
+      "operations": [
+        1,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": false,
+      "invariant": "all_remaining_parked_deadlock",
+      "states": 385,
+      "trace": [
+        "1W.load_free",
+        "1W.acquire_success",
+        "0R.load_writer",
+        "0R.atomic_compare_and_park",
+        "2W.load_wait",
+        "2W.atomic_compare_and_park",
+        "1W.writer_release_store",
+        "1W.notify_one_0",
+        "0R.load_reader_count",
+        "0R.acquire_success",
+        "0R.read_release",
+        "all_remaining_parked_deadlock"
+      ]
+    },
+    "ignore_acquire_comparison": {
+      "roles": "RW",
+      "operations": [
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": false,
+      "invariant": "exclusion",
+      "states": 24,
+      "trace": [
+        "0R.load_reader_count",
+        "1W.load_free",
+        "0R.acquire_success",
+        "1W.acquire_success",
+        "exclusion"
+      ]
+    },
+    "omit_saturation": {
+      "roles": "RRRRW",
+      "operations": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "waiterAware": true,
+      "passed": false,
+      "invariant": "reader_count",
+      "states": 7057,
+      "trace": [
+        "0R.load_reader_count",
+        "0R.acquire_success",
+        "1R.load_reader_count",
+        "1R.acquire_success",
+        "2R.load_reader_count",
+        "2R.acquire_success",
+        "3R.load_reader_count",
+        "3R.acquire_success",
+        "reader_count"
+      ]
+    }
+  },
+  "checkerSha256": "ad0d11f55f5b1e63ad26ff45597e1780c242c8355b307661b6df1d4459d8c7ab",
+  "python": "3.14.4",
+  "elapsedSeconds": 0.6218569289922016
+}

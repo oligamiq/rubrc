@@ -17,6 +17,8 @@ This package combines finite model checking, exhaustive reduced-domain validatio
 
 In particular, the atomic lock protocol is ASSUMED by stage1. Its CAS/wait/notify, memory ordering, fairness, overflow, cancellation and runtime-trap behavior are not verified. Actual guest OOB traps can leak the existing read lock.64 original operators is not a latency/fairness guarantee. Arbitrary concurrent guest writes and external optimizer correctness remain outside the claim.
 
+Follow-up: [internal lock protocol verification](../memory-lock-protocol/README.md) now checks a finite SC-atomic CAS/wait/notify model and actual-source native regressions. It does not remove stage1's abstraction assumption or prove weak-memory/composition/fairness properties.
+
 Every stage documents its exact domain, oracle, negative controls, commands, environment and source hashes. Original results are never overwritten when a checker changes. Reproduction may produce different timings/platform information, but semantic counts/outcomes and query hashes should agree when source/tool versions agree. Use a new output path for each run.
 
 ## Prepare the pinned source checkout
