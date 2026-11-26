@@ -1,0 +1,183 @@
+{
+  "dateUtc": "2026-11-26T06:23:39.732369+00:00",
+  "platform": "Linux-7.0.0-44-generic-x86_64-with-glibc2.43",
+  "python": "3.14.4",
+  "loom": "0.7.2",
+  "removedLoomEnvironment": {},
+  "commands": [
+    {
+      "name": "build",
+      "command": [
+        "cargo",
+        "build",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "verification/memory-lock-ordering/litmus-harness/Cargo.toml"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "stdout": {
+        "file": "build.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "build.stderr.log",
+        "sha256": "a13905646e2aed93ec6ea9ed6ac91490a4e01f91af0215c3965279a910612149"
+      }
+    },
+    {
+      "name": "direct",
+      "command": [
+        "/home/oligami/projects/rubrc/target/verification-tools/ordering-litmus/debug/wvl-memory-ordering-litmus",
+        "direct"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "stdout": {
+        "file": "direct.stdout.log",
+        "sha256": "e06fe0e2d88849cdc1d76e797318ddf29c1ebaa40ee346476208d99505af084a"
+      },
+      "stderr": {
+        "file": "direct.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": {
+        "expectedOutcomeObserved": true,
+        "maxBranches": 1000,
+        "maxPermutations": null,
+        "modelExecutionsStarted": 63,
+        "mutation": false,
+        "panic": null,
+        "preemptionBound": null,
+        "scenario": "direct",
+        "scope": "finite one-shot handwritten litmus, Loom model only; no wait/notify",
+        "successfulAcquisitionObservations": 42
+      }
+    },
+    {
+      "name": "direct_no_release",
+      "command": [
+        "/home/oligami/projects/rubrc/target/verification-tools/ordering-litmus/debug/wvl-memory-ordering-litmus",
+        "direct_no_release"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "stdout": {
+        "file": "direct_no_release.stdout.log",
+        "sha256": "162b4e8e36916edba094dd01b1cca1b17693e65a391dd06bbc72bcd5500afab7"
+      },
+      "stderr": {
+        "file": "direct_no_release.stderr.log",
+        "sha256": "cacf82ce259663bc4705c56380ef1c718f401efa987a6a4c9941e41aa7dee2cb"
+      },
+      "result": {
+        "expectedOutcomeObserved": true,
+        "maxBranches": 1000,
+        "maxPermutations": null,
+        "modelExecutionsStarted": 1,
+        "mutation": true,
+        "panic": "assertion `left == right` failed: STALE_PAYLOAD\n  left: 0\n right: 42",
+        "preemptionBound": null,
+        "scenario": "direct_no_release",
+        "scope": "finite one-shot handwritten litmus, Loom model only; no wait/notify",
+        "successfulAcquisitionObservations": 1
+      }
+    },
+    {
+      "name": "direct_no_acquire",
+      "command": [
+        "/home/oligami/projects/rubrc/target/verification-tools/ordering-litmus/debug/wvl-memory-ordering-litmus",
+        "direct_no_acquire"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "stdout": {
+        "file": "direct_no_acquire.stdout.log",
+        "sha256": "b2892470f453ce5552837baa7545838b2365cdd8b919acf140724fee39c3a5e8"
+      },
+      "stderr": {
+        "file": "direct_no_acquire.stderr.log",
+        "sha256": "b00ecdcd608e1c2772ee44dcb1dff4728e8d27c254066f5318e989b787b5bf6e"
+      },
+      "result": {
+        "expectedOutcomeObserved": true,
+        "maxBranches": 1000,
+        "maxPermutations": null,
+        "modelExecutionsStarted": 1,
+        "mutation": true,
+        "panic": "assertion `left == right` failed: STALE_PAYLOAD\n  left: 0\n right: 42",
+        "preemptionBound": null,
+        "scenario": "direct_no_acquire",
+        "scope": "finite one-shot handwritten litmus, Loom model only; no wait/notify",
+        "successfulAcquisitionObservations": 1
+      }
+    },
+    {
+      "name": "marker_rmw",
+      "command": [
+        "/home/oligami/projects/rubrc/target/verification-tools/ordering-litmus/debug/wvl-memory-ordering-litmus",
+        "marker_rmw"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "stdout": {
+        "file": "marker_rmw.stdout.log",
+        "sha256": "62d0fd656a143b4ca98f575fe6d99a1b3734f46cef8d37f4f95b5f39fb96dcb4"
+      },
+      "stderr": {
+        "file": "marker_rmw.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": {
+        "expectedOutcomeObserved": true,
+        "maxBranches": 1000,
+        "maxPermutations": null,
+        "modelExecutionsStarted": 24511,
+        "mutation": false,
+        "panic": null,
+        "preemptionBound": null,
+        "scenario": "marker_rmw",
+        "scope": "finite one-shot handwritten litmus, Loom model only; no wait/notify",
+        "successfulAcquisitionObservations": 5057
+      }
+    },
+    {
+      "name": "marker_store",
+      "command": [
+        "/home/oligami/projects/rubrc/target/verification-tools/ordering-litmus/debug/wvl-memory-ordering-litmus",
+        "marker_store"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "stdout": {
+        "file": "marker_store.stdout.log",
+        "sha256": "10dd08ef46aeba77a72793d485a7ca3840fc4e8c81836e46e52172cf091af61c"
+      },
+      "stderr": {
+        "file": "marker_store.stderr.log",
+        "sha256": "f709bda6b0f77a354a0da36d27d2ff2c6ed8b91638f11521b5ec2ad074648d40"
+      },
+      "result": {
+        "expectedOutcomeObserved": true,
+        "maxBranches": 1000,
+        "maxPermutations": null,
+        "modelExecutionsStarted": 19,
+        "mutation": true,
+        "panic": "assertion `left == right` failed: STALE_PAYLOAD\n  left: 0\n right: 42",
+        "preemptionBound": null,
+        "scenario": "marker_store",
+        "scope": "finite one-shot handwritten litmus, Loom model only; no wait/notify",
+        "successfulAcquisitionObservations": 1
+      }
+    }
+  ],
+  "passed": true,
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+  "sourceSha256": {
+    "verification/memory-lock-ordering/litmus-harness/Cargo.toml": "c966d64a151666f7d40bb944e187312a81abfa3207e108b3ca36179a225bba0a",
+    "verification/memory-lock-ordering/litmus-harness/Cargo.lock": "4dff8b5b907a160ba428e4166aa0c75146c0100bb273ffbf6ca5b22846eed563",
+    "verification/memory-lock-ordering/litmus-harness/src/main.rs": "9b686ac9dded4e98981444b8fc316d1f4b974cdebcc19b5f858db7b0e3294769",
+    "verification/memory-lock-ordering/run_litmus.py": "a0f09cdee513c85883a746fce3fdf6357908286ae23fe17aa3fc09671b8f5417"
+  }
+}

@@ -1,0 +1,488 @@
+{
+  "startedAt": "2026-11-26T06:23:11.537663+00:00",
+  "passed": true,
+  "scope": "finite/model-bounded regression gates, not whole-program proof",
+  "partial": false,
+  "commands": [
+    {
+      "name": "source-revision",
+      "argv": [
+        "git",
+        "-C",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+        "rev-parse",
+        "HEAD"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.0017103360005421564,
+      "stdout": {
+        "file": "source-revision.stdout.log",
+        "sha256": "043e60a086744d43f46fb90498e60ff5773c3fa666545c603af533ff5a25e400"
+      },
+      "stderr": {
+        "file": "source-revision.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "source-status",
+      "argv": [
+        "git",
+        "-C",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+        "status",
+        "--porcelain",
+        "--untracked-files=no"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.007873918992117979,
+      "stdout": {
+        "file": "source-status.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "source-status.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "rubrc-revision",
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.001642709001316689,
+      "stdout": {
+        "file": "rubrc-revision.stdout.log",
+        "sha256": "483c30fc197eb9662454eca3e195d28948b440c1cc473ce1742b1a2ab3a48a4c"
+      },
+      "stderr": {
+        "file": "rubrc-revision.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "python-version",
+      "argv": [
+        "/usr/bin/python3",
+        "--version"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.0016381570021621883,
+      "stdout": {
+        "file": "python-version.stdout.log",
+        "sha256": "63990b3ee50c49ab28d70e29c0f967f0c71330e39243ffeb4d3a8d5878c8a978"
+      },
+      "stderr": {
+        "file": "python-version.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "rustc-version",
+      "argv": [
+        "rustc",
+        "-vV"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.0163461469928734,
+      "stdout": {
+        "file": "rustc-version.stdout.log",
+        "sha256": "778fbc643a806f0dd123c056e66201d7e8a56a61928ec0a33171be8d6c2d5a37"
+      },
+      "stderr": {
+        "file": "rustc-version.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "node-version",
+      "argv": [
+        "node",
+        "--version"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.007832785006030463,
+      "stdout": {
+        "file": "node-version.stdout.log",
+        "sha256": "6a0cec2e157365c1a8ac6d1715733b7c3321a7c5565862a701ca71ef00359d04"
+      },
+      "stderr": {
+        "file": "node-version.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "validator-unit-tests",
+      "argv": [
+        "/usr/bin/python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "verification",
+        "-p",
+        "test_run_checks.py",
+        "-v"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.114309187993058,
+      "stdout": {
+        "file": "validator-unit-tests.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "validator-unit-tests.stderr.log",
+        "sha256": "c22bd70cba4d9c58af64a0c089594664509eb98616e72dac789dc19315433e83"
+      }
+    },
+    {
+      "name": "batch-model",
+      "argv": [
+        "/usr/bin/python3",
+        "/home/oligami/projects/rubrc/verification/memory-lock-batching/model_check.py",
+        "--output",
+        "/home/oligami/projects/rubrc/target/verification-ci-local-final/batch-model.json"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.21490557200741023,
+      "stdout": {
+        "file": "batch-model.stdout.log",
+        "sha256": "14907ed948d0239901e9c01660824f1e95b34eda36c5b969482cb1eb73b14f4b"
+      },
+      "stderr": {
+        "file": "batch-model.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "semantic",
+      "argv": [
+        "/usr/bin/python3",
+        "/home/oligami/projects/rubrc/verification/memory-lock-batching/semantic_check.py",
+        "--output",
+        "/home/oligami/projects/rubrc/target/verification-ci-local-final/semantic.json"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 14.15712278499268,
+      "stdout": {
+        "file": "semantic.stdout.log",
+        "sha256": "75c999adcec0a81b4ee05b6cba56dd147634be8994fdd9bed508ef44ac61bb5f"
+      },
+      "stderr": {
+        "file": "semantic.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "smt",
+      "argv": [
+        "/usr/bin/python3",
+        "/home/oligami/projects/rubrc/verification/memory-lock-batching/smt_check.py",
+        "--output-dir",
+        "/home/oligami/projects/rubrc/target/verification-ci-local-final/smt"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 8.416268632994615,
+      "stdout": {
+        "file": "smt.stdout.log",
+        "sha256": "4affbf841017e1d4356a52c297b71166b10c02d7a21a2eba33654abcc20ee8df"
+      },
+      "stderr": {
+        "file": "smt.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "protocol",
+      "argv": [
+        "/usr/bin/python3",
+        "/home/oligami/projects/rubrc/verification/memory-lock-protocol/protocol_check.py",
+        "--output",
+        "/home/oligami/projects/rubrc/target/verification-ci-local-final/protocol.json"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.7157359669945436,
+      "stdout": {
+        "file": "protocol.stdout.log",
+        "sha256": "b4b8b807e9df2c7b29e3daf3e2f68753eec7deb310634347c53e439f9e8e4091"
+      },
+      "stderr": {
+        "file": "protocol.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "native",
+      "argv": [
+        "/usr/bin/python3",
+        "/home/oligami/projects/rubrc/verification/memory-lock-protocol/native_regression.py",
+        "--output-dir",
+        "/home/oligami/projects/rubrc/target/verification-ci-local-final/native",
+        "--repetitions",
+        "2"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 4.044540332994075,
+      "stdout": {
+        "file": "native.stdout.log",
+        "sha256": "e95ef061f93d7c0c258d346e8b87f2e578558cc81f24e3080cf010e59dd8b76b"
+      },
+      "stderr": {
+        "file": "native.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "correspondence-prepare",
+      "argv": [
+        "cargo",
+        "build",
+        "--locked",
+        "--manifest-path",
+        "/home/oligami/projects/rubrc/verification/memory-lock-batching/stage3-harness/Cargo.toml"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 0.06536148900340777,
+      "stdout": {
+        "file": "correspondence-prepare.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "correspondence-prepare.stderr.log",
+        "sha256": "91806e9549df2afe3f13dda40f89637fdea0bc33768272e71d543e93cac77fb9"
+      }
+    },
+    {
+      "name": "litmus-prepare",
+      "argv": [
+        "cargo",
+        "build",
+        "--locked",
+        "--manifest-path",
+        "/home/oligami/projects/rubrc/verification/memory-lock-ordering/litmus-harness/Cargo.toml"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 0.06816604000050575,
+      "stdout": {
+        "file": "litmus-prepare.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "litmus-prepare.stderr.log",
+        "sha256": "a13905646e2aed93ec6ea9ed6ac91490a4e01f91af0215c3965279a910612149"
+      }
+    },
+    {
+      "name": "correspondence",
+      "argv": [
+        "/usr/bin/python3",
+        "/home/oligami/projects/rubrc/verification/memory-lock-batching/run_correspondence.py",
+        "ci-20261126T062339407374"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.2650593709986424,
+      "stdout": {
+        "file": "correspondence.stdout.log",
+        "sha256": "b905c1aaa4982cf8cba736f831e446a931ea60a56876b3a605a001477f3e97a0"
+      },
+      "stderr": {
+        "file": "correspondence.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "litmus",
+      "argv": [
+        "/usr/bin/python3",
+        "/home/oligami/projects/rubrc/verification/memory-lock-ordering/run_litmus.py",
+        "--output-dir",
+        "/home/oligami/projects/rubrc/target/verification-ci-local-final/litmus"
+      ],
+      "timeoutSeconds": 300,
+      "exitCode": 0,
+      "elapsedSeconds": 5.337258369996562,
+      "stdout": {
+        "file": "litmus.stdout.log",
+        "sha256": "ea9818115fce67cdc3f2a5c19f341896b2715bc88914724405401fa24496fb5b"
+      },
+      "stderr": {
+        "file": "litmus.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "actual-legacy-prepare",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--no-run",
+        "--manifest-path",
+        "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness/Cargo.toml"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 0.06542574400373269,
+      "stdout": {
+        "file": "actual-legacy-prepare.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "actual-legacy-prepare.stderr.log",
+        "sha256": "f0612a602bbcb4946c508dcd6338eb1b4c74f3ea50e868d63b0c5bb6e2473465"
+      }
+    },
+    {
+      "name": "actual-waiter-aware-prepare",
+      "argv": [
+        "cargo",
+        "test",
+        "--locked",
+        "--no-run",
+        "--manifest-path",
+        "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness/Cargo.toml",
+        "--features",
+        "waiter-aware-memory-lock"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 0.06615765400056262,
+      "stdout": {
+        "file": "actual-waiter-aware-prepare.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "actual-waiter-aware-prepare.stderr.log",
+        "sha256": "c91fabe4fe2be829062cf0655f51961c07197151d898511a8d4deffd890f79a0"
+      }
+    },
+    {
+      "name": "actual-loom",
+      "argv": [
+        "/usr/bin/python3",
+        "/home/oligami/projects/rubrc/verification/memory-lock-ordering/actual_runner.py",
+        "--max-permutations",
+        "10000",
+        "--max-duration",
+        "30",
+        "--test-timeout",
+        "60"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 1.2706806149944896,
+      "stdout": {
+        "file": "actual-loom.stdout.log",
+        "sha256": "4e241ed136638c00a4916a430b8a679b5b0b25d90b6df608e604e81a306439c2"
+      },
+      "stderr": {
+        "file": "actual-loom.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "wasm",
+      "argv": [
+        "/usr/bin/python3",
+        "/home/oligami/projects/rubrc/verification/memory-lock-wasm/run.py",
+        "--output-dir",
+        "/home/oligami/projects/rubrc/target/verification-ci-local-final/wasm",
+        "--source-root",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching"
+      ],
+      "timeoutSeconds": 600,
+      "exitCode": 0,
+      "elapsedSeconds": 0.46652807500504423,
+      "stdout": {
+        "file": "wasm.stdout.log",
+        "sha256": "e48076ec1f2d414e7ff54013dfe505faec8b9cd838d35917323c30954e8c21c3"
+      },
+      "stderr": {
+        "file": "wasm.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "source-revision-after",
+      "argv": [
+        "git",
+        "-C",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+        "rev-parse",
+        "HEAD"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.001699899003142491,
+      "stdout": {
+        "file": "source-revision-after.stdout.log",
+        "sha256": "043e60a086744d43f46fb90498e60ff5773c3fa666545c603af533ff5a25e400"
+      },
+      "stderr": {
+        "file": "source-revision-after.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "source-status-after",
+      "argv": [
+        "git",
+        "-C",
+        "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+        "status",
+        "--porcelain",
+        "--untracked-files=no"
+      ],
+      "timeoutSeconds": 180,
+      "exitCode": 0,
+      "elapsedSeconds": 0.0036141949967714027,
+      "stdout": {
+        "file": "source-status-after.stdout.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "file": "source-status-after.stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "validations": [
+    "pinned WVL revision",
+    "production checkout clean",
+    "batch model 997 cases and six detected mutants",
+    "semantic full recorded domain",
+    "SMT all24 expected outcomes",
+    "protocol20 scenarios complete reachability six mutants",
+    "native exact inventories and all152 tests successful",
+    "actual emitter66 outputs23 scalars",
+    "Loom five expected nonvacuous cases",
+    "actual Loom exactly one result directory",
+    "actual Loom exact identities test counts hashes and expanded coverage",
+    "actual Wasm lowering and parked-worker witnesses",
+    "production checkout remains pinned and clean"
+  ],
+  "targetRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+  "rubrcRevision": "11320336362f4cb0c4fc2909c958225df1c9e6f2",
+  "correspondenceArtifact": "verification/memory-lock-batching/ci-20261126T062339407374.json",
+  "actualLoomArtifact": "verification/memory-lock-ordering/results/actual-20261126T062345.210927Z",
+  "runnerSha256": "9b4d2ceed184c96ff0e2827eb6661fdf8fedf1e800c8f99b8967846c0cd739ad",
+  "finishedAt": "2026-11-26T06:23:46.914205+00:00"
+}

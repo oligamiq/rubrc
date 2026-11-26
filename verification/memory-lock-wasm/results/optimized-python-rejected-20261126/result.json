@@ -1,0 +1,23 @@
+{
+  "status": "fail",
+  "started_at_utc": "2026-11-26T06:22:26.747701+00:00",
+  "source_root": "/home/oligami/projects/rubrc/.worktrees/wvl-lock-batching",
+  "output_dir": "/home/oligami/projects/rubrc/verification/memory-lock-wasm/results/optimized-python-rejected-20261126",
+  "commands": [],
+  "limits": {
+    "cargo_build_jobs": 2,
+    "rayon_threads": 2,
+    "build_timeout_s": 240,
+    "harness_timeout_s": 20,
+    "node_timeout_s": 30,
+    "subprocess_cpu_s": 240
+  },
+  "environment": {
+    "platform": "Linux-7.0.0-44-generic-x86_64-with-glibc2.43",
+    "python": "3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]",
+    "cargo_home": "/home/oligami/.cargo"
+  },
+  "error": "RuntimeError('Python optimization disables assertions; run without -O/PYTHONOPTIMIZE')",
+  "finished_at_utc": "2026-11-26T06:22:26.750398+00:00",
+  "artifact_sha256": {}
+}

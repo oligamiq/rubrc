@@ -1,0 +1,11 @@
+rustc-version: exit=0, timeout=False, log=/home/oligami/projects/rubrc/verification/memory-lock-ordering/results/actual-20261126T062345.210927Z/rustc-version.log
+cargo-version: exit=0, timeout=False, log=/home/oligami/projects/rubrc/verification/memory-lock-ordering/results/actual-20261126T062345.210927Z/cargo-version.log
+source-commit: exit=0, timeout=False, log=/home/oligami/projects/rubrc/verification/memory-lock-ordering/results/actual-20261126T062345.210927Z/source-commit.log
+source-status: exit=0, timeout=False, log=/home/oligami/projects/rubrc/verification/memory-lock-ordering/results/actual-20261126T062345.210927Z/source-status.log
+legacy-build: exit=0, timeout=False, log=/home/oligami/projects/rubrc/verification/memory-lock-ordering/results/actual-20261126T062345.210927Z/legacy-build.log
+legacy-writer_release_to_reader_payload: exit=0, timeout=False, log=/home/oligami/projects/rubrc/verification/memory-lock-ordering/results/actual-20261126T062345.210927Z/legacy-writer_release_to_reader_payload.log
+legacy-readers_release_to_writer_disjoint_payloads: exit=0, timeout=False, log=/home/oligami/projects/rubrc/verification/memory-lock-ordering/results/actual-20261126T062345.210927Z/legacy-readers_release_to_writer_disjoint_payloads.log
+waiter-aware-build: exit=0, timeout=False, log=/home/oligami/projects/rubrc/verification/memory-lock-ordering/results/actual-20261126T062345.210927Z/waiter-aware-build.log
+waiter-aware-writer_release_to_reader_payload: exit=0, timeout=False, log=/home/oligami/projects/rubrc/verification/memory-lock-ordering/results/actual-20261126T062345.210927Z/waiter-aware-writer_release_to_reader_payload.log
+waiter-aware-readers_release_to_writer_disjoint_payloads: exit=0, timeout=False, log=/home/oligami/projects/rubrc/verification/memory-lock-ordering/results/actual-20261126T062345.210927Z/waiter-aware-readers_release_to_writer_disjoint_payloads.log
+RESULTS /home/oligami/projects/rubrc/verification/memory-lock-ordering/results/actual-20261126T062345.210927Z

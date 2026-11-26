@@ -1,0 +1,11 @@
+(module
+  (import "env" "memory" (memory 1 1 shared))
+  (import "wvl_atomic" "__wvl_atomic_wait32_vfs" (func $wait (param i32 i32 i64) (result i32)))
+  (import "wvl_atomic" "__wvl_atomic_notify_vfs" (func $notify (param i32 i32) (result i32)))
+  (export "wait32" (func $wait))
+  (export "notify" (func $notify))
+  (export "memory" (memory 0))
+  (func (export "wait_via_call") (param i32 i32 i64) (result i32)
+    local.get 0 local.get 1 local.get 2 call $wait)
+  (func (export "notify_via_call") (param i32 i32) (result i32)
+    local.get 0 local.get 1 call $notify))

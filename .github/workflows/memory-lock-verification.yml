@@ -1,0 +1,62 @@
+name: Memory lock verification
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'verification/**'
+      - '.github/workflows/memory-lock-verification.yml'
+  pull_request:
+    paths:
+      - 'verification/**'
+      - '.github/workflows/memory-lock-verification.yml'
+permissions:
+  contents: read
+concurrency:
+  group: memory-lock-verification-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      PYTHONDONTWRITEBYTECODE: '1'
+      WVL_REVISION: 77f45543eb976e4e7843e78fcd67bd837acac6bd
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          persist-credentials: false
+      - name: Checkout pinned production source
+        run: |
+          git init .worktrees/wvl-lock-batching
+          git -C .worktrees/wvl-lock-batching remote add origin https://github.com/oligamiq/wasi_virt_layer.git
+          git -C .worktrees/wvl-lock-batching fetch --no-tags --depth=1 origin "$WVL_REVISION"
+          git -C .worktrees/wvl-lock-batching checkout --detach FETCH_HEAD
+          test "$(git -C .worktrees/wvl-lock-batching rev-parse HEAD)" = "$WVL_REVISION"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.2'
+      - name: Install pinned Rust and solver
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup default 1.98.1
+          python -m pip install z3-solver==4.15.4.0
+      - name: Run scoped verification gates
+        run: python verification/run_checks.py --output-dir target/verification-ci
+      - name: Preserve evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-lock-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/verification-ci/
+            verification/memory-lock-batching/ci-*.json
+            verification/memory-lock-batching/ci-*.log
+            verification/memory-lock-ordering/results/actual-*/
+          if-no-files-found: warn
+          retention-days: 30
