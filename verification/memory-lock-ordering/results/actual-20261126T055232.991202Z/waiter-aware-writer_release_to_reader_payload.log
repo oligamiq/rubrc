@@ -1,0 +1,13 @@
+COMMAND ["cargo", "test", "--locked", "--features", "waiter-aware-memory-lock", "tests::writer_release_to_reader_payload", "--", "--exact", "--nocapture", "--test-threads=1"]
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src/lib.rs (target/debug/deps/memory_lock_actual_ordering-454206ad072d5ddb)
+
+running 1 test
+test tests::writer_release_to_reader_payload ... MODEL case=writer_release_to_reader_payload max_threads=4 max_branches=128 preemption_bound=2 max_permutations=10000 max_duration_s=30 checkpoint_interval=1
+MODEL_RESULT case=writer_release_to_reader_payload executions_started=5 executions_completed=5 payload_assertions_per_execution=1 elapsed_ms=0 status=bounded_model_pass_not_arbitrary_exhaustiveness
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+RUNNER exit_code=0 timeout=False

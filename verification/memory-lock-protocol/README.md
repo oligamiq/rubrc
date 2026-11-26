@@ -24,4 +24,4 @@ python3 verification/memory-lock-protocol/native_regression.py --output-dir targ
 
 The full recorded commands/tool versions are in the individual reports. Native binaries are local untracked artifacts, rebuilt by the runner; source wrapper/logs/hashes are committed. Original results are create-only to preserve history. CI integration is not yet part of this stage.
 
-Next deeper step after review: weak-memory-aware checks of release/acquire payload visibility and release-sequence preservation. This is deliberately not claimed by the SC model.
+Follow-up: [Loom memory-ordering checks](../memory-lock-ordering/README.md) now examine release/acquire payload visibility and release-sequence preservation with handwritten litmus and instrumented actual source. These remain tool/bounds-limited evidence, not a full Rust/C11 proof or a mechanical composition with this SC model.

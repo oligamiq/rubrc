@@ -1,0 +1,28 @@
+COMMAND ["cargo", "test", "--locked", "tests::writer_release_to_reader_payload", "--", "--exact", "--nocapture", "--test-threads=1"]
+warning: methods `before_writer_register` and `reader_saturated` are never used
+  --> /home/oligami/projects/rubrc/verification/memory-lock-ordering/actual-harness/target/debug/build/memory-lock-actual-ordering-8eb426711a3d2493/out/memory_lock_instrumented.rs:25:8
+   |
+20 | pub(super) trait WaitNotify {
+   |                  ---------- methods in this trait
+...
+25 |     fn before_writer_register(&self, _state: &AtomicI32, _expected: i32) {}
+   |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+28 |     fn reader_saturated(&self, _state: &AtomicI32) {}
+   |        ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `memory-lock-actual-ordering` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (target/debug/deps/memory_lock_actual_ordering-5330be0288ec971e)
+
+running 1 test
+test tests::writer_release_to_reader_payload ... MODEL case=writer_release_to_reader_payload max_threads=4 max_branches=128 preemption_bound=2 max_permutations=10000 max_duration_s=30 checkpoint_interval=1
+MODEL_RESULT case=writer_release_to_reader_payload executions_started=5 executions_completed=5 payload_assertions_per_execution=1 elapsed_ms=0 status=bounded_model_pass_not_arbitrary_exhaustiveness
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+RUNNER exit_code=0 timeout=False
