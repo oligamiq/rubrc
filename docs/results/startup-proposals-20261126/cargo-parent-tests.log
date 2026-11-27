@@ -1,0 +1,20 @@
+✔ std-only deterministic checked workloads use different values and unique markers (7.621886ms)
+✔ whole-line output witness excludes source, command echoes, and stale output (1.181337ms)
+✔ idle, marker without prompt, prompt before marker, or wrong generation cannot pass (0.294219ms)
+✔ marker plus returned prompt reports completion but never fabricates exit zero (0.183369ms)
+✔ explicit nonzero shell status fails even after a valid stdout marker (0.202384ms)
+✔ failed compile with no marker still preserves explicit failure status (0.169478ms)
+✔ stale failure status is not attributed to the next run (0.167916ms)
+✔ orchestrates three public clicks on one page, unchanged rerun, edit, restore (8.844862ms)
+✔ source marker plus idle with no terminal stdout times out and preserves failed evidence (16.32367ms)
+✔ unsupported renderer fails closed without a body-text fallback or click (2.480994ms)
+✔ capture is terminal-only, bounded, and detects terminal replacement (0.286911ms)
+✔ helper cannot launch/navigate or shortcut through runtime test run control (10.380663ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 301.015301
