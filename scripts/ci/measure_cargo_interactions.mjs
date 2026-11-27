@@ -42,7 +42,8 @@ export function inspectCargoEvidence({ baseline, snapshots, marker, history, run
     if (countMarker(snapshot.text, marker) <= baselineCount) continue;
     markerAtMs ??= snapshot.atMs;
     const lines = snapshot.text.split('\n').map(line => line.trimEnd());
-    const lastMarker = lines.lastIndexOf(marker);
+    const lastMarker = lines.findLastIndex(line => line.trim() === marker);
+    if (lastMarker < 0) continue;
     const after = lines.slice(lastMarker + 1);
     const failure = after.join('\n').match(/Command exited with status:\s*(-?\d+)/);
     if (failure) {

@@ -35,7 +35,8 @@ try{
     await page.waitForFunction(()=>window.__rubrcLspTest?.runtime?.selectedTarget==='wasm32-wasip1'&&window.__rubrcLspTest.runtime.operation==='idle',{timeout:180000});
     session.cargo=await measureCargoInteractions(page,{outputDirectory:join(out,`${i}-${mode}-cargo`),metadata:{mode,session:i,baseline:'experimental frontend-off; NOT deployed version'}});
     await writeFile(join(out,'progress.json'),JSON.stringify(result,null,2));
-    if(session.cargo.status!=='pass-observed-interactions')throw Error(session.cargo.error??'Cargo interactions failed');
+    // Preserve failed baseline and still measure independent later arms.
+    // Each browser is closed below, so a timed-out guest is never reused.
    }
   }catch(error){
    session.error=String(error);
@@ -43,6 +44,8 @@ try{
    throw error;
   }finally{if(browser)await browser.close();await closeBrowserStaticServer(server);}
  }
- if(result.sessions.some(s=>s.errors.length))throw Error('page errors observed');result.status='complete';result.allVisitsUnder30s=result.sessions.every(s=>s.visits.every(v=>v.under30s));
+ if(result.sessions.some(s=>s.errors.length))throw Error('page errors observed');
+  if(result.sessions.some(s=>s.cargo&&s.cargo.status!=='pass-observed-interactions'))throw Error('one or more Cargo observations failed; all independent arms retained');
+  result.status='complete';result.allVisitsUnder30s=result.sessions.every(s=>s.visits.every(v=>v.under30s));
 }catch(error){result.error=String(error);process.exitCode=1;}
 finally{result.finishedAt=new Date().toISOString();await writeFile(join(out,'result.json'),JSON.stringify(result,null,2)+'\n');}

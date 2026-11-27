@@ -31,6 +31,14 @@ test('whole-line output witness excludes source, command echoes, and stale outpu
   assert.equal(result.interactionPassed, true);
 });
 
+test('whitespace-prefixed marker cannot reuse an earlier prompt', () => {
+  const bad = evidence({ snapshots: [{ atMs: 1, text: `/ $\n  ${marker}` }] });
+  assert.equal(bad.assertions.freshTerminalMarker, true);
+  assert.equal(bad.assertions.shellPromptAfterMarker, false);
+  assert.equal(bad.interactionPassed, false);
+  assert.equal(evidence({ snapshots: [{ atMs: 1, text: `/ $\n  ${marker}\n/ $` }] }).interactionPassed, true);
+});
+
 test('idle, marker without prompt, prompt before marker, or wrong generation cannot pass', () => {
   assert.equal(evidence({ snapshots: [] }).interactionPassed, false);
   assert.equal(evidence({ snapshots: [{ atMs: 1, text: `/ $\n${marker}` }] }).interactionPassed, false);
