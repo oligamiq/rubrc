@@ -1,6 +1,7 @@
 name: Startup host boundary diagnostic
 on:
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
   actions: read
@@ -32,6 +33,7 @@ jobs:
       - name: Install tools and verify retained preview
         run: |
           bun install --frozen-lockfile
+          bun x puppeteer browsers install chrome
           node --test scripts/ci/host_import_profile_test.mjs scripts/ci/host_import_profile_bootstrap_test.mjs
           node --input-type=module <<'JS'
           import {verifyArchive,verifyPreviewArtifacts,verifyBatchingPreview} from './scripts/ci/paired_startup.mjs';

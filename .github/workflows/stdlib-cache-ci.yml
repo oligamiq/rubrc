@@ -8,7 +8,7 @@ on:
       mode:
         description: Validation, preview build, or replay measurements/profiling/optimization
         type: choice
-        options: [validation, mobile-baseline, mobile-replay, startup-profile, optimizer-replay, memory-lock-comparison, cache-startup-diagnostic]
+        options: [validation, mobile-baseline, mobile-replay, startup-profile, optimizer-replay, memory-lock-comparison, cache-startup-diagnostic, host-boundary-diagnostic]
         default: validation
       preview_run:
         description: Existing mobile-baseline run ID for replay/profiling/optimization (first attempt)
@@ -55,6 +55,9 @@ defaults:
     working-directory: rubrc
 
 jobs:
+  host-boundary-diagnostic:
+    if: github.repository == 'oligamiq/rubrc' && inputs.mode == 'host-boundary-diagnostic'
+    uses: ./.github/workflows/startup-host-diagnostic.yml
   cache-startup-diagnostic:
     if: github.repository == 'oligamiq/rubrc' && inputs.mode == 'cache-startup-diagnostic'
     uses: ./.github/workflows/cache-startup-diagnostic.yml
@@ -65,7 +68,7 @@ jobs:
       gate_run: ${{ inputs.memory_lock_gate_run }}
       checkpoint_run: ${{ inputs.memory_lock_checkpoint_run }}
   checks:
-    if: github.repository == 'oligamiq/rubrc' && inputs.mode != 'mobile-replay' && inputs.mode != 'startup-profile' && inputs.mode != 'optimizer-replay' && inputs.mode != 'memory-lock-comparison' && inputs.mode != 'cache-startup-diagnostic'
+    if: github.repository == 'oligamiq/rubrc' && inputs.mode != 'mobile-replay' && inputs.mode != 'startup-profile' && inputs.mode != 'optimizer-replay' && inputs.mode != 'memory-lock-comparison' && inputs.mode != 'cache-startup-diagnostic' && inputs.mode != 'host-boundary-diagnostic'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
