@@ -1,0 +1,14 @@
+   Compiling filetime v0.2.30
+   Compiling cfg-if v1.0.5
+   Compiling tar v0.4.46
+   Compiling sysroot-coalescing-native v0.0.0 (/home/oligami/projects/rubrc/verification/sysroot-coalescing-native)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.10s
+(node:3960005) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+length=0 calls=0 exact-bytes=true
+length=1 calls=1 exact-bytes=true
+length=65535 calls=85 exact-bytes=true
+length=65536 calls=85 exact-bytes=true
+length=65537 calls=85 exact-bytes=true
+length=1048593 calls=1350 exact-bytes=true
+WASM_BOUNDARY_PASS

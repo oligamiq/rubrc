@@ -9,9 +9,16 @@ publish = false
 
 [features]
 sysroot-read-coalescing = []
+boundary-fixture = []
 
 [dependencies]
 tar = { version = "=0.4.46", default-features = false }
 
 [lib]
 path = "lib.rs"
+
+[[bin]]
+name = "wasm-boundary"
+path = "wasm_boundary.rs"
+test = false
+required-features = ["boundary-fixture"]
