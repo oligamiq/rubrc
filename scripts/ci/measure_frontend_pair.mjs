@@ -8,12 +8,13 @@ const root=resolve(pairArg),out=resolve(outArg);await mkdir(out);
 const result={status:'fail',scope:'frontend flag A-B-B-A; not deployed baseline Cargo acceptance',sessions:[],startedAt:new Date().toISOString()};
 try{
  for(const [i,mode] of ['off','on','on','off'].entries()){
-  const session={i,mode,visits:[],errors:[]};result.sessions.push(session);let server,browser;
+  const session={i,mode,visits:[],errors:[],console:[]};result.sessions.push(session);let server,browser,page;
   try{
    server=await startBrowserStaticServer({rootDirectory:join(root,mode),port:0});const url=`http://127.0.0.1:${server.address().port}/`;
    browser=await puppeteer.launch({headless:true,protocolTimeout:330000,args:['--no-sandbox','--disable-setuid-sandbox']});session.browser=await browser.version();
-   const page=await browser.newPage();await page.setViewport({width:1280,height:900});await page.evaluateOnNewDocument(()=>Object.defineProperty(navigator,'hardwareConcurrency',{get:()=>4}));
-   page.on('pageerror',e=>session.errors.push(String(e)));page.on('console',m=>{if(m.text().startsWith('[stdlib-cache]')){session.cacheReports??=[];session.cacheReports.push(m.text());}});
+   page=await browser.newPage();await page.setViewport({width:1280,height:900});await page.evaluateOnNewDocument(()=>Object.defineProperty(navigator,'hardwareConcurrency',{get:()=>4}));
+   page.on('pageerror',e=>session.errors.push(String(e)));page.on('console',m=>{session.console.push({type:m.type(),text:m.text()});if(session.console.length>2000)session.console.shift();});
+   page.on('requestfailed',r=>session.errors.push('requestfailed '+r.url()+' '+r.failure()?.errorText));
    for(const visit of ['cold','reload']){
     const start=performance.now();await page.goto(url,{waitUntil:'domcontentloaded',timeout:60000});
     await page.waitForFunction(()=>['ready','failed'].includes(window.__rubrcLspTest?.startup?.phase),{timeout:300000,polling:250});
@@ -23,6 +24,10 @@ try{
     session.visits.push({visit,readyMs,endToEndMs,under30s:endToEndMs<=30000,state,interaction});console.log(JSON.stringify({i,mode,visit,readyMs,endToEndMs}));
     await writeFile(join(out,'progress.json'),JSON.stringify(result,null,2));
    }
+  }catch(error){
+   session.error=String(error);
+   if(page)try{session.failureState=await page.evaluate(()=>({startup:window.__rubrcLspTest?.startup,body:document.body.innerText.slice(-8000)}));await page.screenshot({path:join(out,`${i}-${mode}-failure.png`)});}catch(e){session.snapshotError=String(e);}
+   throw error;
   }finally{if(browser)await browser.close();await closeBrowserStaticServer(server);}
  }
  if(result.sessions.some(s=>s.errors.length))throw Error('page errors observed');result.status='complete';result.allVisitsUnder30s=result.sessions.every(s=>s.visits.every(v=>v.under30s));

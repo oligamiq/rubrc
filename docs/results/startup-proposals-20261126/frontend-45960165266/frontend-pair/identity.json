@@ -1,0 +1,19 @@
+{
+  "source": "b86ff9fbb699f524cc1603d1e256f56e86daed88",
+  "identity": [
+    {
+      "mode": "off",
+      "coreSha": "1448142480a5d35519f5eb7048e1a4b684cb94ae3bc31ad09ae6bb276a665d25",
+      "rustSrcSha": "e45ae09dbea52aaceb426547dd95f18da94067a4a61be2ded0173e75ea1e9202",
+      "cacheManifestSha": "313075cef5a0aafc3104343cbc8bf3d360675dff4aa31633549db6972fe8e1e3"
+    },
+    {
+      "mode": "on",
+      "coreSha": "1448142480a5d35519f5eb7048e1a4b684cb94ae3bc31ad09ae6bb276a665d25",
+      "rustSrcSha": "e45ae09dbea52aaceb426547dd95f18da94067a4a61be2ded0173e75ea1e9202",
+      "cacheManifestSha": "313075cef5a0aafc3104343cbc8bf3d360675dff4aa31633549db6972fe8e1e3"
+    }
+  ],
+  "flag": "VITE_RUBRC_RA_SINGLE_PROJECT_INIT",
+  "scope": "same source/dependencies/core/cache; frontend-only flag pair"
+}

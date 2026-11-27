@@ -10,6 +10,7 @@ for(const mode of ['off','on']){
  const child=spawnSync('bun',['x','vite','build','--outDir',dist],{cwd:'page',env:{...process.env,NODE_ENV:'production',VITE_RUBRC_LSP_TEST:'1',VITE_RUBRC_RA_SINGLE_PROJECT_INIT:mode==='on'?'1':'0'},stdio:'inherit'});
  if(child.status!==0)throw Error('frontend build failed '+mode);
  const verified=await finalizeVfsAsset({source:core,dist});
+ await cp(join(preview,'v1'),join(dist,'v1'),{recursive:true});
  for(const name of await readdir(preview))if(name==='rust-src.sqfs'||name==='std-cache.json'||/^std-.*\.salsa\.part-\d+$/.test(name))await cp(join(preview,name),join(dist,name));
  for(const name of await readdir(join(preview,'assets')))if(name.includes('.wasm.br'))await cp(join(preview,'assets',name),join(dist,'assets',name));
  identity.push({mode,coreSha:verified.sha256,rustSrcSha:await digest(join(dist,'rust-src.sqfs')),cacheManifestSha:await digest(join(dist,'std-cache.json'))});

@@ -1,0 +1,16 @@
+{
+  "status": "fail",
+  "scope": "frontend flag A-B-B-A; not deployed baseline Cargo acceptance",
+  "sessions": [
+    {
+      "i": 0,
+      "mode": "off",
+      "visits": [],
+      "errors": [],
+      "browser": "Chrome/150.0.7871.24"
+    }
+  ],
+  "startedAt": "2026-11-27T07:42:19.310Z",
+  "error": "TimeoutError: Waiting failed: 300000ms exceeded",
+  "finishedAt": "2026-11-27T07:47:20.456Z"
+}
