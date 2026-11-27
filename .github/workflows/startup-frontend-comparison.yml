@@ -30,6 +30,12 @@ jobs:
           run-id: 45131532216
           github-token: ${{ github.token }}
           path: target/host-diagnostic/artifact
+      - uses: actions/download-artifact@v4
+        with:
+          name: lock-build-batching-on-finish
+          run-id: 45131532216
+          github-token: ${{ github.token }}
+          path: target/host-diagnostic/original-build
       - name: Install tools and verify retained preview
         run: |
           bun install --frozen-lockfile
@@ -53,6 +59,8 @@ jobs:
         env:
           SOURCE_SHA: ${{ github.sha }}
         run: |
+          printf '%s  %s\n' 1c054b321970ade528428adfa23ece00d7bfac46d78820a9b63d80078f18fdf4 target/host-diagnostic/original-build/generated-vfs-bindings.txt | sha256sum --check -
+          cp target/host-diagnostic/original-build/generated-vfs-bindings.txt page/src/worker_process/vfs_bindings/vfs.js
           node scripts/ci/restore_verified_preview_core.mjs target/host-diagnostic/preview target/host-diagnostic/artifact/artifact-sha256.txt page/src/worker_process/vfs_bindings/vfs.core.wasm
           node scripts/ci/prepare_frontend_pair.mjs target/host-diagnostic/preview page/src/worker_process/vfs_bindings/vfs.core.wasm target/frontend-pair
       - name: Measure cold and reload editor behavior A-B-B-A
