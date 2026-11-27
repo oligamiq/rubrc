@@ -24,7 +24,7 @@ const deadline=setTimeout(()=>{console.error('global diagnostic timeout');browse
 try{
  server=await startBrowserStaticServer({rootDirectory:root,port:0});const url=`http://127.0.0.1:${server.address().port}/`;
  report.url=url;console.log(JSON.stringify({kind:'diagnostic-server',url}));
- browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/google-chrome',headless:true,protocolTimeout:210000,args:['--no-sandbox','--disable-setuid-sandbox']});report.browser=await browser.version();
+ browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||puppeteer.executablePath(),headless:true,protocolTimeout:210000,args:['--no-sandbox','--disable-setuid-sandbox']});report.browser=await browser.version();
  browser.process()?.on('exit',(code,signal)=>{report.browserExit={code,signal};});
  const page=await browser.newPage();page.on('error',e=>report.errors.push('page-crash '+String(e)));page.on('close',()=>{report.pageClosed=true;});
  report.actualHardwareConcurrency=await page.evaluate(()=>navigator.hardwareConcurrency);
@@ -38,12 +38,12 @@ try{
  catch(error){
   report.waitError={message:String(error),stack:error.stack,cause:String(error.cause),causeStack:error.cause?.stack};
   try{report.failureState=await page.evaluate(()=>({url:location.href,phase:window.__rubrcLspTest?.startup,body:document.body.innerText.slice(0,3000)}));}catch(e){report.failureStateError=String(e);}
-  for(const target of [page,...page.workers()]){try{report.snapshots.push({url:target.url(),profile:await target.evaluate(()=>globalThis.__rubrcHostImports?.snapshot()??null)});}catch(e){report.errors.push('failure-snapshot '+String(e));}}
+  // Blocking workers cannot service ordinary evaluate; preserve failure promptly.
   throw error;
  }
  report.elapsedMs=performance.now()-start;
  report.startup=await page.evaluate(()=>({startup:window.__rubrcLspTest?.startup,measurements:window.__rubrcLspTest?.measurements}));
- for(const target of browser.targets().filter(t=>t.url().startsWith(url))){
+ for(const target of (enabled ? browser.targets().filter(t=>t.url().startsWith(url)) : [])){
   const session=await target.createCDPSession();let paused=false;
   try{
    await session.send('Debugger.enable');

@@ -1,0 +1,69 @@
+name: Startup host boundary diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact diagnostic harness
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          git init .
+          git remote add origin https://github.com/oligamiq/rubrc.git
+          git fetch --depth=1 origin "$SOURCE_SHA"
+          git checkout --detach FETCH_HEAD
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.2'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/download-artifact@v4
+        with:
+          name: lock-preview-batching-on
+          run-id: 45131532216
+          github-token: ${{ github.token }}
+          path: target/host-diagnostic/artifact
+      - name: Install tools and verify retained preview
+        run: |
+          bun install --frozen-lockfile
+          node --test scripts/ci/host_import_profile_test.mjs scripts/ci/host_import_profile_bootstrap_test.mjs
+          node --input-type=module <<'JS'
+          import {verifyArchive,verifyPreviewArtifacts,verifyBatchingPreview} from './scripts/ci/paired_startup.mjs';
+          import {mkdir,readFile,writeFile} from 'node:fs/promises';
+          import {execFileSync} from 'node:child_process';
+          const p='target/host-diagnostic';
+          const archiveSha=await verifyArchive(p+'/artifact/preview.tar.gz',p+'/artifact/preview-sha256.txt');
+          const entries=execFileSync('tar',['-tzf',p+'/artifact/preview.tar.gz'],{encoding:'utf8'}).split('\n');
+          if(entries.some(x=>x.startsWith('/')||x.split('/').includes('..')))throw Error('unsafe archive');
+          await mkdir(p+'/preview');execFileSync('tar',['-xzf',p+'/artifact/preview.tar.gz','-C',p+'/preview']);
+          const build=JSON.parse(await readFile(p+'/preview/__rubrc_measurement_build.json','utf8'));
+          const artifacts=await verifyPreviewArtifacts(p+'/preview',p+'/artifact/artifact-sha256.txt');
+          await verifyBatchingPreview(p+'/preview',build);
+          await writeFile(p+'/provenance.json',JSON.stringify({archiveSha,build,artifacts},null,2));
+          JS
+      - name: Uninstrumented startup control
+        env:
+          RUBRC_HOST_PROFILE: '0'
+        run: timeout --signal=TERM --kill-after=15s 300s node scripts/ci/profile_preview_host_imports.mjs target/host-diagnostic/preview target/host-diagnostic/control
+      - name: Instrumented host import counts and samples
+        run: |
+          timeout --signal=TERM --kill-after=15s 300s node scripts/ci/profile_preview_host_imports.mjs target/host-diagnostic/preview target/host-diagnostic/instrumented
+          node scripts/ci/summarize_host_import_profile.mjs target/host-diagnostic/instrumented/result.json target/host-diagnostic/summary.json
+      - name: Preserve diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: startup-host-diagnostic-${{ github.run_id }}
+          path: |
+            target/host-diagnostic/provenance.json
+            target/host-diagnostic/summary.json
+            target/host-diagnostic/*/result.json
+            target/host-diagnostic/*/instrumentation.json
+          retention-days: 30
+          if-no-files-found: warn
