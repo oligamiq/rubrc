@@ -1,0 +1,44 @@
+{
+  "status": "fail",
+  "scope": "frontend flag A-B-B-A; not deployed baseline Cargo acceptance",
+  "sessions": [
+    {
+      "i": 0,
+      "mode": "off",
+      "visits": [],
+      "errors": [],
+      "console": [
+        {
+          "type": "log",
+          "text": "loading virtualized vfs component"
+        },
+        {
+          "type": "error",
+          "text": "Staged startup failed: Error: WebAssembly.instantiate(): Import #41 \"env\" \"memory\": memory import has 1028 pages which is smaller than the declared initial of 9203"
+        },
+        {
+          "type": "error",
+          "text": "Runtime startup failed: AggregateError: runtime cleanup failed"
+        }
+      ],
+      "browser": "Chrome/150.0.7871.24",
+      "error": "TimeoutError: Waiting failed: 300000ms exceeded",
+      "failureState": {
+        "startup": {
+          "phase": "vfs-starting",
+          "history": [
+            "editor-visible",
+            "vfs-starting"
+          ],
+          "overlayVisible": true,
+          "crateGraphReady": false,
+          "cargoCallsBeforeProjectActivation": 0
+        },
+        "body": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n// /src/main.rs\nfn main() {\n    let first_time = std::time::SystemTime::now();\n    let count = std::env::args()\n        .nth(1)\n        .map(|arg| arg.parse::<usize>().ok())\n        .flatten()\n        .unwrap_or(10);\n    (0..=count).for_each(|i| println!(\"{i}\"));\n    println!(\"Time: {:?}\", first_time.elapsed().unwrap());\n}\nStarting rust-analyzer\nvfs-starting\nRA main pool (numThreads): 2 · VTP starts 8 (auto-grow) · browser 4\n✓\nEditor\n·\nrust-analyzer\n›\nRust source\n100%\n›\nTarget sysroot\n100%\n·\nProject\nSession 0\n+\n◫\n[VFS] Downloading: 102.65MB/102.65MB (100%)\n[VFS] Finalizing compilation...\n[VFS] Wasm ready and cached.\n \nCompile and Run\nSelect target...\nDownload"
+      }
+    }
+  ],
+  "startedAt": "2026-11-27T07:54:06.718Z",
+  "error": "TimeoutError: Waiting failed: 300000ms exceeded",
+  "finishedAt": "2026-11-27T07:59:09.915Z"
+}

@@ -1,0 +1,8 @@
+{
+  "command": "cargo build --locked --target wasm32-wasip1-threads -p vfs-shell --features sysroot-read-coalescing --release",
+  "status": "pass",
+  "sha256": "4c7d16f2405da9095387ebd45121ad0d932598876cf091277716b3ac003c24e5",
+  "bytes": 2522909,
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "scope": "actual shell entrypoint and feature compile/link; NOT merged WVL/browser execution; baseline pinned nightly build differs"
+}
