@@ -611,7 +611,10 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                         sysroot_read_archive_chunk(buffer.as_mut_ptr() as i32, chunk_len);
                     }
                     archive_bytes_read += buffer.len();
+                    // Keep feature-off sampling unchanged for matched combined A/B builds.
+                    #[cfg(not(feature = "sysroot-read-coalescing"))]
                     let elapsed = start_time.elapsed().as_secs_f64();
+                    #[cfg(not(feature = "sysroot-read-coalescing"))]
                     let speed = if elapsed > 0.0 {
                         archive_bytes_read as f64 / elapsed
                     } else {
@@ -622,6 +625,14 @@ fn create_session_registry(session_id: u32) -> Arc<CommandRegistry> {
                             || archive_bytes_read.saturating_sub(last_progress_bytes)
                                 >= 1024 * 1024)
                     {
+                        #[cfg(feature = "sysroot-read-coalescing")]
+                        let elapsed = start_time.elapsed().as_secs_f64();
+                        #[cfg(feature = "sysroot-read-coalescing")]
+                        let speed = if elapsed > 0.0 {
+                            archive_bytes_read as f64 / elapsed
+                        } else {
+                            0.0
+                        };
                         let progress = (archive_bytes_read as f64 / archive_len as f64) * 100.0;
                         write!(
                             io.stdout,

@@ -1,0 +1,37 @@
+   Compiling sysroot-coalescing-native v0.0.0 (/home/oligami/projects/rubrc/verification/sysroot-coalescing-native)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.81s
+     Running unittests lib.rs (verification/sysroot-coalescing-native/target/x86_64-unknown-linux-gnu/debug/deps/sysroot_coalescing_native-761771482d9a6654)
+
+running 23 tests
+test sysroot_extraction::tests::accepts_archive_root_directory_marker ... ok
+test sysroot_extraction::tests::archive_reader_streams_only_the_reported_bytes ... ok
+test sysroot_extraction::tests::accepts_maximum_sysroot_entry_name_length ... ok
+test sysroot_extraction::tests::archive_reader_stops_before_archive_eof_when_chunk_callback_cancels ... ok
+test sysroot_extraction::tests::failed_host_archive_status_fails_the_extraction ... ok
+test sysroot_extraction::tests::propagates_directory_creation_failure ... ok
+test sysroot_extraction::tests::rejects_absolute_parent_and_nested_escape_paths ... ok
+test sysroot_extraction::tests::propagates_file_write_failure ... ok
+test sysroot_extraction::tests::rejects_invalid_utf8_file_names ... ok
+test sysroot_extraction::tests::rejects_oversized_sysroot_entry_name_length ... ok
+test sysroot_extraction::tests::extracts_safe_tar_entries_into_the_sysroot_base ... ok
+test tests::callback_failure_preserves_error_and_copy_does_not_retry ... ok
+test sysroot_extraction::tests::rejects_unsafe_tar_entry_paths ... ok
+test tests::cancellation_before_last_refill_does_not_fetch_it ... ok
+test tests::cancellation_before_first_fetch_empty_and_eof_do_not_probe ... ok
+test tests::cancellation_during_callback_is_seen_at_next_logical_read_not_in_flight ... ok
+test tests::cancellation_with_unfetched_or_final_cached_tail_never_delivers_more ... ok
+test tests::extraction_rejects_unsupported_type_and_file_creation_failure ... ok
+test tests::extraction_propagates_first_and_later_callback_failure_without_retry ... ok
+test tests::full_extraction_drains_same_reader_including_prefetched_and_unfetched_trailing_bytes ... ok
+test tests::truncated_tar_payload_or_short_host_stream_cannot_succeed ... ok
+test sysroot_extraction::tests::serializes_complete_sysroot_transactions ... ok
+test tests::exact_bytes_counts_and_order_for_small_large_and_variable_reads ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+   Doc-tests sysroot_coalescing_native
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,9 @@
+# Cargo non-regression measurement still outstanding
+
+2026-11-27. Current frontend comparison45960165266 (b86ff9fb) measures cold/reload editor usability only; do not claim Cargo acceptance from it. Timed readiness alone is not the user's page→working-editor criterion; measurement explicitly drives suggestions and mismatch diagnostics before finishing.
+
+Proposed next Cargo workload (predeclare before run): stock Cargo.toml, tiny std-only program printing a unique marker after checked deterministic arithmetic; no dependencies. Actual Compile and Run button invokes cargo run via runtime_command_service and compile_and_run.cargoRunArgs. Same-session initial compile, unchanged rerun, then small edit/recompile. Same host, versions, target and binary/cache assets; A-B-B-A independent browsers. Start timer before click, finish after observed terminal marker and completed command, preserve output/errors. Button runtime idle is not alone an exit-status assertion; need reliable terminal/command completion capture and exit status. Do not use source text found in Monaco as output witness; collect only terminal writes or terminal DOM. Capture fresh marker or output occurrence count per run to prevent stale-output passes. Keep analyzer alive, include its contention normally.
+
+Public deployed baseline identity remains unknown, therefore an experimental off/on result alone can rule out local patch regression but cannot certify published-version non-regression. No threshold/tolerance/statistical policy agreed beyond no slowdown; show all repetitions rather than manufacture tolerance. Acceptance pending reproducible raw results.
+
+Current progress: frontend pair hosted build passed; measure job running watch bash-7e1333645ee44025. Bounded transfer coalescing native parent rerun OFF23/ON24 pass, not yet Wasm integration/performance. Save next report and integration gate before enabling default.

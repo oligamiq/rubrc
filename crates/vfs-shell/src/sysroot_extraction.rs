@@ -6,9 +6,20 @@ static SYSROOT_LOAD_LOCK: Mutex<()> = Mutex::new(());
 // Rust archive paths are far shorter than 4 KiB; cap host-controlled allocation accordingly.
 const MAX_SYSROOT_ENTRY_NAME_LEN: usize = 4096;
 const MAX_SYSROOT_ARCHIVE_READ_LEN: usize = 512 * 1024;
+#[cfg(feature = "sysroot-read-coalescing")]
+const SYSROOT_PREFETCH_LEN: usize = 64 * 1024;
 
 pub(crate) struct SysrootArchiveReader<C, F> {
+    // Bytes not yet delivered, including any prefetched cache tail.
     remaining: usize,
+    // Unfetched bytes are remaining - (cache_end - cache_start). At refill the
+    // cache is empty, so remaining is exactly the amount still safe to fetch.
+    #[cfg(feature = "sysroot-read-coalescing")]
+    cache: Box<[u8]>,
+    #[cfg(feature = "sysroot-read-coalescing")]
+    cache_start: usize,
+    #[cfg(feature = "sysroot-read-coalescing")]
+    cache_end: usize,
     is_cancelled: C,
     read_chunk: F,
 }
@@ -17,6 +28,12 @@ impl<C, F> SysrootArchiveReader<C, F> {
     pub(crate) fn new(archive_len: usize, is_cancelled: C, read_chunk: F) -> Self {
         Self {
             remaining: archive_len,
+            #[cfg(feature = "sysroot-read-coalescing")]
+            cache: vec![0; SYSROOT_PREFETCH_LEN].into_boxed_slice(),
+            #[cfg(feature = "sysroot-read-coalescing")]
+            cache_start: 0,
+            #[cfg(feature = "sysroot-read-coalescing")]
+            cache_end: 0,
             is_cancelled,
             read_chunk,
         }
@@ -41,9 +58,32 @@ where
                 "additional sysroot request cancelled",
             ));
         }
-        (self.read_chunk)(&mut buffer[..to_read])?;
-        self.remaining -= to_read;
-        Ok(to_read)
+        #[cfg(feature = "sysroot-read-coalescing")]
+        {
+            // Check cancellation above even when the complete remaining tail is cached.
+            // Only refill an empty cache, once per logical read. The callback retains
+            // all host cursor/mount append side effects; cached delivery never repeats it.
+            if self.cache_start == self.cache_end {
+                let fetch_len = self.remaining.min(SYSROOT_PREFETCH_LEN);
+                (self.read_chunk)(&mut self.cache[..fetch_len])?;
+                // Publish only a successful refill. Errors do not advance reader state;
+                // callers must stop, not retry a possibly already-advanced host stream.
+                self.cache_start = 0;
+                self.cache_end = fetch_len;
+            }
+            let delivered = to_read.min(self.cache_end - self.cache_start);
+            buffer[..delivered]
+                .copy_from_slice(&self.cache[self.cache_start..self.cache_start + delivered]);
+            self.cache_start += delivered;
+            self.remaining -= delivered;
+            Ok(delivered)
+        }
+        #[cfg(not(feature = "sysroot-read-coalescing"))]
+        {
+            (self.read_chunk)(&mut buffer[..to_read])?;
+            self.remaining -= to_read;
+            Ok(to_read)
+        }
     }
 }
 

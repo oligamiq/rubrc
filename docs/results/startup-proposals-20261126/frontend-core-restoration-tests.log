@@ -1,0 +1,12 @@
+✔ restores byte-identical checked core and refuses overwrite (357.869795ms)
+✔ rejects source hash mismatch before output (141.411751ms)
+✔ rejects decoded-size overflow (94.304809ms)
+✔ rejects traversal in part name (142.150094ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 955.238044

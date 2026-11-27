@@ -1,0 +1,17 @@
+[package]
+name = "sysroot-coalescing-native"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Isolate from the application workspace and its heavyweight Wasm dependencies.
+[workspace]
+
+[features]
+sysroot-read-coalescing = []
+
+[dependencies]
+tar = { version = "=0.4.46", default-features = false }
+
+[lib]
+path = "lib.rs"
