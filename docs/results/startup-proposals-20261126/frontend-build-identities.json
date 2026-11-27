@@ -1,0 +1,21 @@
+{
+  "outcomes": [
+    {
+      "mode": "off",
+      "output": "target/startup-js-boundary-20261126/clean-source/page/dist",
+      "coreSha": "1448142480a5d35519f5eb7048e1a4b684cb94ae3bc31ad09ae6bb276a665d25",
+      "rustSrcSha": "e45ae09dbea52aaceb426547dd95f18da94067a4a61be2ded0173e75ea1e9202",
+      "cacheManifestSha": "313075cef5a0aafc3104343cbc8bf3d360675dff4aa31633549db6972fe8e1e3"
+    },
+    {
+      "mode": "on",
+      "output": "target/startup-js-boundary-20261126/clean-source/page/dist-single-init",
+      "coreSha": "1448142480a5d35519f5eb7048e1a4b684cb94ae3bc31ad09ae6bb276a665d25",
+      "rustSrcSha": "e45ae09dbea52aaceb426547dd95f18da94067a4a61be2ded0173e75ea1e9202",
+      "cacheManifestSha": "313075cef5a0aafc3104343cbc8bf3d360675dff4aa31633549db6972fe8e1e3"
+    }
+  ],
+  "source": "2635f7fee35a6139ca4d4188d00a7222bb926c9f",
+  "onlyFlagDifference": "VITE_RUBRC_RA_SINGLE_PROJECT_INIT",
+  "note": "local preparation; browser behavior not yet validated"
+}

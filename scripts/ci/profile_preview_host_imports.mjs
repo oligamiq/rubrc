@@ -55,7 +55,8 @@ try{
   finally{if(paused)await session.send('Debugger.resume').catch(()=>{});await session.detach();}
  }
  const calls=report.snapshots.flatMap(x=>x.profile?.instances??[]).flatMap(x=>x.functions).reduce((sum,x)=>sum+x.calls,0);
- if(report.startup.startup.phase!=='ready'||(enabled&&!calls))throw Error('startup or import coverage failed');report.calls=calls;report.status='diagnostic-complete';
+ if(report.startup.startup.phase!=='ready'||(enabled&&!calls))throw Error('startup or import coverage failed');report.calls=calls;report.status=report.errors.length?'diagnostic-partial':'diagnostic-complete';
+ if(report.errors.length)process.exitCode=1;
 }catch(error){report.error=String(error);process.exitCode=1;}
 finally{
  if(browser){try{await browser.close();}catch{browser.process()?.kill('SIGKILL');}}

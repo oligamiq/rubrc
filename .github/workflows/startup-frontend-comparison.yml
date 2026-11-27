@@ -1,0 +1,70 @@
+name: Single initialization frontend comparison
+on:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact diagnostic harness
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          git init .
+          git remote add origin https://github.com/oligamiq/rubrc.git
+          git fetch --depth=1 origin "$SOURCE_SHA"
+          git checkout --detach FETCH_HEAD
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.2'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/download-artifact@v4
+        with:
+          name: lock-preview-batching-on
+          run-id: 45131532216
+          github-token: ${{ github.token }}
+          path: target/host-diagnostic/artifact
+      - name: Install tools and verify retained preview
+        run: |
+          bun install --frozen-lockfile
+          bun x puppeteer browsers install chrome
+          node --test scripts/ci/host_import_profile_test.mjs scripts/ci/host_import_profile_bootstrap_test.mjs
+          node --input-type=module <<'JS'
+          import {verifyArchive,verifyPreviewArtifacts,verifyBatchingPreview} from './scripts/ci/paired_startup.mjs';
+          import {mkdir,readFile,writeFile} from 'node:fs/promises';
+          import {execFileSync} from 'node:child_process';
+          const p='target/host-diagnostic';
+          const archiveSha=await verifyArchive(p+'/artifact/preview.tar.gz',p+'/artifact/preview-sha256.txt');
+          const entries=execFileSync('tar',['-tzf',p+'/artifact/preview.tar.gz'],{encoding:'utf8'}).split('\n');
+          if(entries.some(x=>x.startsWith('/')||x.split('/').includes('..')))throw Error('unsafe archive');
+          await mkdir(p+'/preview');execFileSync('tar',['-xzf',p+'/artifact/preview.tar.gz','-C',p+'/preview']);
+          const build=JSON.parse(await readFile(p+'/preview/__rubrc_measurement_build.json','utf8'));
+          const artifacts=await verifyPreviewArtifacts(p+'/preview',p+'/artifact/artifact-sha256.txt');
+          await verifyBatchingPreview(p+'/preview',build);
+          await writeFile(p+'/provenance.json',JSON.stringify({archiveSha,build,artifacts},null,2));
+          JS
+      - name: Restore exact core and build frontend pair
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          node scripts/ci/restore_verified_preview_core.mjs target/host-diagnostic/preview target/host-diagnostic/artifact/artifact-sha256.txt page/src/worker_process/vfs_bindings/vfs.core.wasm
+          node scripts/ci/prepare_frontend_pair.mjs target/host-diagnostic/preview page/src/worker_process/vfs_bindings/vfs.core.wasm target/frontend-pair
+      - name: Measure cold and reload editor behavior A-B-B-A
+        run: timeout --signal=TERM --kill-after=15s 1500s node scripts/ci/measure_frontend_pair.mjs target/frontend-pair target/frontend-measurements
+      - name: Preserve results even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-init-comparison-${{ github.run_id }}
+          path: |
+            target/host-diagnostic/provenance.json
+            target/frontend-pair/identity.json
+            target/frontend-measurements/
+          retention-days: 30
+          if-no-files-found: warn

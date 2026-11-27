@@ -1,0 +1,566 @@
+{
+  "status": "diagnostic-complete",
+  "browser": "Chrome/157.0.8103.78",
+  "elapsedMs": 45152.152643,
+  "realmsWithProfiler": 19,
+  "realmsObserved": 19,
+  "functions": [
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.clock-time-get-import",
+      "calls": 11029,
+      "throws": 0,
+      "timedCalls": 9,
+      "sampledInclusiveMs": 0.1449999999604188,
+      "maxSampleMs": 0.024999999994179234,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]downloader.sysroot-read-archive-chunk",
+      "calls": 9595,
+      "throws": 0,
+      "timedCalls": 9,
+      "sampledInclusiveMs": 6.244999999995343,
+      "maxSampleMs": 0.7900000000081491,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]terminal.terminal-write",
+      "calls": 1038,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.sched-yield-import",
+      "calls": 224,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.fd-write-import",
+      "calls": 65,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.random-get-import",
+      "calls": 32,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-threads-import",
+      "name": "[static]wasip1-threads.thread-spawn-import",
+      "calls": 17,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.fd-close-import",
+      "calls": 8,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.fd-fdstat-get-import",
+      "calls": 8,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.path-open-import",
+      "calls": 8,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.fd-read-import",
+      "calls": 7,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.path-filestat-get-import",
+      "calls": 5,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.fd-readdir-import",
+      "calls": 4,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]downloader.sysroot-get-archive-meta",
+      "calls": 2,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]downloader.sysroot-start-fetch",
+      "calls": 2,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.fd-prestat-get-import",
+      "calls": 2,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]child-process.request-recover",
+      "calls": 1,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.environ-get-import",
+      "calls": 1,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.environ-sizes-get-import",
+      "calls": 1,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.fd-prestat-dir-name-import",
+      "calls": 1,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "env",
+      "name": "emscripten_get_now",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "env",
+      "name": "emscripten_memcpy_big",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "env",
+      "name": "emscripten_resize_heap",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "env",
+      "name": "fd_write",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "emscripten_get_now",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "emscripten_memcpy_big",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "emscripten_resize_heap",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_write",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wbg",
+      "name": "__wbindgen_error_new",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wbg",
+      "name": "__wbindgen_object_drop_ref",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wbg",
+      "name": "__wbg_new_abda76e883ba8a5f",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wbg",
+      "name": "__wbg_stack_658279fe44541cf6",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wbg",
+      "name": "__wbg_error_f851667af71bcfc6",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wbg",
+      "name": "__wbindgen_throw",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]child-process.request-end",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]child-process.request-read-error",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]child-process.request-run",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]child-process.request-start",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]child-process.request-write",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]downloader.download-file-chunk",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]downloader.download-file-end",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]downloader.download-file-start",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]http.request-start",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]http.response-end",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]http.response-read-body",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]http.response-read-error",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "vfs:host/bridge",
+      "name": "[static]http.response-read-headers",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.clock-res-get-import",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.fd-filestat-get-import",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.fd-seek-import",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.fd-sync-import",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.path-create-directory-import",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.path-remove-directory-import",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.path-unlink-file-import",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    },
+    {
+      "module": "wasip1-vfs:host/virtual-file-system-wasip1-core",
+      "name": "[static]wasip1.proc-exit-import",
+      "calls": 0,
+      "throws": 0,
+      "timedCalls": 0,
+      "sampledInclusiveMs": 0,
+      "maxSampleMs": 0,
+      "clockErrors": 0
+    }
+  ],
+  "limitations": [
+    "Live realms at final snapshot only; terminated workers may be absent.",
+    "Counts include startup and snapshot interval, not phase isolation.",
+    "Periodic samples may be biased; durations are synchronous inclusive, may include waits/nesting.",
+    "No extrapolated sum is claimed to equal page startup wall time.",
+    "Instrumented timings are not acceptance benchmark."
+  ]
+}
