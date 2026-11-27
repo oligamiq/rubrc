@@ -40,7 +40,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun x puppeteer browsers install chrome
-          node --test scripts/ci/host_import_profile_test.mjs scripts/ci/host_import_profile_bootstrap_test.mjs
+          node --test scripts/ci/host_import_profile_test.mjs scripts/ci/host_import_profile_bootstrap_test.mjs scripts/ci/restore_verified_preview_core_test.mjs scripts/ci/restore_cache_diagnostic_test.mjs scripts/ci/measure_cargo_interactions_test.mjs
           node --input-type=module <<'JS'
           import {verifyArchive,verifyPreviewArtifacts,verifyBatchingPreview} from './scripts/ci/paired_startup.mjs';
           import {mkdir,readFile,writeFile} from 'node:fs/promises';

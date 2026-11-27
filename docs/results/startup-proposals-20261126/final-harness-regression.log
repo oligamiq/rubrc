@@ -1,0 +1,33 @@
+✔ captures constructor, module instantiate and bytes instantiate without duplicate counts (5.848895ms)
+✔ captures streaming instantiate and preserves exceptions (366.462942ms)
+✔ serialized bootstrap works in separate realm without module imports (3.496778ms)
+✔ preserves return, receiver, BigInt arguments, memory and input namespace (1.323715ms)
+✔ preserves thrown identity and does not time every call (0.541568ms)
+✔ profiling clock failures cannot change host result or exception (0.192393ms)
+✔ duplicate import descriptors share one counter and async returns are not awaited (1.362234ms)
+✔ rejects invalid sample interval and missing function (0.199725ms)
+✔ std-only deterministic checked workloads use different values and unique markers (3.817718ms)
+✔ whole-line output witness excludes source, command echoes, and stale output (0.756363ms)
+✔ whitespace-prefixed marker cannot reuse an earlier prompt (0.266432ms)
+✔ idle, marker without prompt, prompt before marker, or wrong generation cannot pass (0.384369ms)
+✔ marker plus returned prompt reports completion but never fabricates exit zero (0.163946ms)
+✔ explicit nonzero shell status fails even after a valid stdout marker (0.206727ms)
+✔ failed compile with no marker still preserves explicit failure status (0.147526ms)
+✔ stale failure status is not attributed to the next run (0.304781ms)
+✔ orchestrates three public clicks on one page, unchanged rerun, edit, restore (6.978962ms)
+✔ source marker plus idle with no terminal stdout times out and preserves failed evidence (17.500334ms)
+✔ unsupported renderer fails closed without a body-text fallback or click (0.633104ms)
+✔ capture is terminal-only, bounded, and detects terminal replacement (0.30647ms)
+✔ helper cannot launch/navigate or shortcut through runtime test run control (5.129105ms)
+✔ restores byte-identical checked core and refuses overwrite (430.179229ms)
+✔ rejects source hash mismatch before output (43.755893ms)
+✔ rejects decoded-size overflow (51.441947ms)
+✔ rejects traversal in part name (42.976932ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 708.77295
