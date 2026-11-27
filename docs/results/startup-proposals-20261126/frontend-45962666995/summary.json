@@ -1,0 +1,127 @@
+{
+  "runStatus": "complete",
+  "rows": [
+    {
+      "session": 0,
+      "mode": "off",
+      "visit": "cold",
+      "readyMs": 49907.013467,
+      "endToEndMs": 52688.894145,
+      "under30s": false,
+      "completionMs": 1955.4942450000017,
+      "diagnosticMs": 295.70389299999806
+    },
+    {
+      "session": 0,
+      "mode": "off",
+      "visit": "reload",
+      "readyMs": 44806.811709,
+      "endToEndMs": 47156.567947,
+      "under30s": false,
+      "completionMs": 1361.8491070000018,
+      "diagnosticMs": 742.2545850000024
+    },
+    {
+      "session": 1,
+      "mode": "on",
+      "visit": "cold",
+      "readyMs": 43887.379828000005,
+      "endToEndMs": 46197.185042,
+      "under30s": false,
+      "completionMs": 999.9452599999786,
+      "diagnosticMs": 854.4953269999824
+    },
+    {
+      "session": 1,
+      "mode": "on",
+      "visit": "reload",
+      "readyMs": 43036.712478,
+      "endToEndMs": 44971.235701,
+      "under30s": false,
+      "completionMs": 1206.8998340000107,
+      "diagnosticMs": 426.19439600000624
+    },
+    {
+      "session": 2,
+      "mode": "on",
+      "visit": "cold",
+      "readyMs": 46428.87325799998,
+      "endToEndMs": 48467.866775,
+      "under30s": false,
+      "completionMs": 1278.9658110000018,
+      "diagnosticMs": 259.5459620000038
+    },
+    {
+      "session": 2,
+      "mode": "on",
+      "visit": "reload",
+      "readyMs": 52282.20545299997,
+      "endToEndMs": 54571.56274999998,
+      "under30s": false,
+      "completionMs": 1563.739660000021,
+      "diagnosticMs": 290.2952579999692
+    },
+    {
+      "session": 3,
+      "mode": "off",
+      "visit": "cold",
+      "readyMs": 45147.83957499999,
+      "endToEndMs": 48892.64299799997,
+      "under30s": false,
+      "completionMs": 2529.456577999983,
+      "diagnosticMs": 818.0359820000012
+    },
+    {
+      "session": 3,
+      "mode": "off",
+      "visit": "reload",
+      "readyMs": 44995.90645000001,
+      "endToEndMs": 49692.196200000006,
+      "under30s": false,
+      "completionMs": 3610.233626000001,
+      "diagnosticMs": 682.3745179999969
+    }
+  ],
+  "summaries": [
+    {
+      "mode": "off",
+      "visit": "cold",
+      "count": 2,
+      "minMs": 48892.64299799997,
+      "maxMs": 52688.894145,
+      "meanMs": 50790.76857149998
+    },
+    {
+      "mode": "off",
+      "visit": "reload",
+      "count": 2,
+      "minMs": 47156.567947,
+      "maxMs": 49692.196200000006,
+      "meanMs": 48424.382073500004
+    },
+    {
+      "mode": "on",
+      "visit": "cold",
+      "count": 2,
+      "minMs": 46197.185042,
+      "maxMs": 48467.866775,
+      "meanMs": 47332.5259085
+    },
+    {
+      "mode": "on",
+      "visit": "reload",
+      "count": 2,
+      "minMs": 44971.235701,
+      "maxMs": 54571.56274999998,
+      "meanMs": 49771.39922549999
+    }
+  ],
+  "complete": true,
+  "releaseAccepted": false,
+  "limits": [
+    "Local hosted static server, no network shaping; not deployed public baseline.",
+    "All editor interactions verified sequentially; end-to-end includes probe screenshot and cleanup overhead.",
+    "Two independent sessions per arm, cold and reload are not independent replicates.",
+    "Cargo non-regression and exact successful exit code not established by editor timings."
+  ]
+}

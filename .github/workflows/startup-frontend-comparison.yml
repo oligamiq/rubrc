@@ -63,8 +63,10 @@ jobs:
           cp target/host-diagnostic/original-build/generated-vfs-bindings.txt page/src/worker_process/vfs_bindings/vfs.js
           node scripts/ci/restore_verified_preview_core.mjs target/host-diagnostic/preview target/host-diagnostic/artifact/artifact-sha256.txt page/src/worker_process/vfs_bindings/vfs.core.wasm
           node scripts/ci/prepare_frontend_pair.mjs target/host-diagnostic/preview page/src/worker_process/vfs_bindings/vfs.core.wasm target/frontend-pair
-      - name: Measure cold and reload editor behavior A-B-B-A
-        run: timeout --signal=TERM --kill-after=15s 1500s node scripts/ci/measure_frontend_pair.mjs target/frontend-pair target/frontend-measurements
+      - name: Measure editor and Cargo behavior A-B-B-A
+        env:
+          RUBRC_MEASURE_CARGO: '1'
+        run: timeout --signal=TERM --kill-after=15s 1800s node scripts/ci/measure_frontend_pair.mjs target/frontend-pair target/frontend-measurements
       - name: Preserve results even on failure
         if: always()
         uses: actions/upload-artifact@v4
