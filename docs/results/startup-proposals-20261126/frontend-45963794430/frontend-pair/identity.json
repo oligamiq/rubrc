@@ -1,0 +1,55 @@
+{
+  "source": "deb39f40136863ebc98a9ddd3ede4380ba8ad45f",
+  "identity": [
+    {
+      "mode": "off",
+      "memory": {
+        "module": "env",
+        "name": "memory",
+        "initial": 9203,
+        "maximum": 65536,
+        "shared": true
+      },
+      "adapterSha": "1c054b321970ade528428adfa23ece00d7bfac46d78820a9b63d80078f18fdf4",
+      "coreSha": "1448142480a5d35519f5eb7048e1a4b684cb94ae3bc31ad09ae6bb276a665d25",
+      "rustSrcSha": "e45ae09dbea52aaceb426547dd95f18da94067a4a61be2ded0173e75ea1e9202",
+      "cacheManifestSha": "313075cef5a0aafc3104343cbc8bf3d360675dff4aa31633549db6972fe8e1e3",
+      "cacheParts": [
+        {
+          "file": "std-1fa993ba2e8257e688e5c1f3f9b2d7b97e9daa2d33304007885d37f20a0ccba3.salsa.part-000",
+          "sha256": "c5666833389ec71d806d35172420286b5f3497619b654fef5d5913346026804e"
+        },
+        {
+          "file": "std-1fa993ba2e8257e688e5c1f3f9b2d7b97e9daa2d33304007885d37f20a0ccba3.salsa.part-001",
+          "sha256": "952c77b898ef33b7f161b91ad01359fe5a73a9051cb399577536140ab4a655f4"
+        }
+      ]
+    },
+    {
+      "mode": "on",
+      "memory": {
+        "module": "env",
+        "name": "memory",
+        "initial": 9203,
+        "maximum": 65536,
+        "shared": true
+      },
+      "adapterSha": "1c054b321970ade528428adfa23ece00d7bfac46d78820a9b63d80078f18fdf4",
+      "coreSha": "1448142480a5d35519f5eb7048e1a4b684cb94ae3bc31ad09ae6bb276a665d25",
+      "rustSrcSha": "e45ae09dbea52aaceb426547dd95f18da94067a4a61be2ded0173e75ea1e9202",
+      "cacheManifestSha": "313075cef5a0aafc3104343cbc8bf3d360675dff4aa31633549db6972fe8e1e3",
+      "cacheParts": [
+        {
+          "file": "std-1fa993ba2e8257e688e5c1f3f9b2d7b97e9daa2d33304007885d37f20a0ccba3.salsa.part-000",
+          "sha256": "c5666833389ec71d806d35172420286b5f3497619b654fef5d5913346026804e"
+        },
+        {
+          "file": "std-1fa993ba2e8257e688e5c1f3f9b2d7b97e9daa2d33304007885d37f20a0ccba3.salsa.part-001",
+          "sha256": "952c77b898ef33b7f161b91ad01359fe5a73a9051cb399577536140ab4a655f4"
+        }
+      ]
+    }
+  ],
+  "flag": "VITE_RUBRC_RA_SINGLE_PROJECT_INIT",
+  "scope": "same source/dependencies/core/cache; frontend-only flag pair"
+}

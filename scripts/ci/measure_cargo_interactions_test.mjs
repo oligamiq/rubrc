@@ -89,7 +89,7 @@ function fakePage({ emitOutput = true, domRenderer = true } = {}) {
   } };
   const globals = {
     window: { __rubrcLspTest: api },
-    document: { querySelectorAll: selector => {
+    document: { querySelector: selector => { assert.equal(selector, '.xterm .xterm-rows'); return domRenderer ? rows : null; }, querySelectorAll: selector => {
       if (selector === '.xterm') return [terminal];
       if (selector === 'button') return [button, { textContent: 'Session 0' }];
       throw new Error(`unexpected selector ${selector}`);
@@ -101,6 +101,9 @@ function fakePage({ emitOutput = true, domRenderer = true } = {}) {
   return {
     page: {
       on() {}, off() {},
+      async focus(selector) { assert.equal(selector, '.xterm-helper-textarea'); },
+      keyboard: { async press(key) { assert.equal(key, 'Enter'); } },
+      async waitForFunction(fn) { if(!domRenderer) throw Error('DOM renderer unavailable'); assert.equal(fn(), true); },
       async evaluate(fn, arg) { return fn(arg); },
       async evaluateHandle(fn) { const element = fn(); return { asElement: () => element, async dispose() {} }; },
     }, api, rows, setTerminal, get clicks() { return clicks; },

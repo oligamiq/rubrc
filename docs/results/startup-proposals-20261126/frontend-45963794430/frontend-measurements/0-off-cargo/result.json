@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "status": "fail",
+  "startedAt": "2026-11-27T08:14:38.106Z",
+  "metadata": {
+    "mode": "off",
+    "session": 0,
+    "baseline": "experimental frontend-off; NOT deployed version"
+  },
+  "configuration": {
+    "token": "e86b3028e0a5",
+    "timeoutMs": 180000,
+    "setupTimeoutMs": 15000,
+    "pollMs": 100,
+    "target": "wasm32-wasip1",
+    "stockManifest": "[package]\nname = \"main\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
+  },
+  "scope": "Same-loaded-page public Compile and Run; terminal DOM + shell prompt; NOT an exit-status or release gate",
+  "work": {
+    "base": {
+      "source": "fn main() {\n    let mut total = 0_u64;\n    for value in 1_u64..=100 {\n        total = total.checked_add(value.checked_mul(value).unwrap()).unwrap();\n    }\n    assert_eq!(total, 338350);\n    println!(\"CARGO_e86b3028e0a5_BASE_338350\");\n}\n",
+      "marker": "CARGO_e86b3028e0a5_BASE_338350",
+      "expected": 338350,
+      "limit": 100,
+      "sha256": "5120477c8bfd8a9018a2cd9df1e4374a51049d169a807e53aa2750ae4bba74a9"
+    },
+    "edit": {
+      "source": "fn main() {\n    let mut total = 0_u64;\n    for value in 1_u64..=101 {\n        total = total.checked_add(value.checked_mul(value).unwrap()).unwrap();\n    }\n    assert_eq!(total, 348551);\n    println!(\"CARGO_e86b3028e0a5_EDIT_348551\");\n}\n",
+      "marker": "CARGO_e86b3028e0a5_EDIT_348551",
+      "expected": 348551,
+      "limit": 101,
+      "sha256": "0a5378b9166f7648c9d95db666e4693b32c53b55102a9bb33099014725c5fff8"
+    }
+  },
+  "runs": [
+    {
+      "index": 0,
+      "name": "initial-compile",
+      "marker": "CARGO_e86b3028e0a5_BASE_338350",
+      "sourceSha256": "5120477c8bfd8a9018a2cd9df1e4374a51049d169a807e53aa2750ae4bba74a9",
+      "status": "fail",
+      "exitCode": null,
+      "modelVersion": 74,
+      "historyOffset": 8,
+      "baseline": "tree\n.\n├── Cargo.toml\n├── rust-project.json\n├── src\n│   └── main.rs\n└── sysroot\n\n2 directories, 3 files\nseq | grep 2 | head -n5\n2\n12\n20\n21\n22\n/ $ Loading Rust source...\nLoaded 1684 files (37.3 MB total) - Speed: 41.5 MB/s\nRust source loaded successfully (1684 files, 37.3 MB total) in 0.9s.\nLoading sysroot: wasm32-wasip1 ...\nLoaded 30 files (70.6 MB total) - Speed: 9.6 MB/s\nSysroot 'wasm32-wasip1' loaded successfully (30 files, 70.6 MB total) in 7.4s.\n2026-11-27T08:14:08.398000Z ERROR `cargo metadata` failed on `/sysroot/lib/rustlib/src/rust/library/Cargo.toml` : Failed to run `cd \"/sysroo\nt/lib/rustlib/src/rust/library\" && RUSTUP_AUTO_INSTALL=\"0\" RUSTUP_TOOLCHAIN=\"/sysroot\" __CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS=\"nightl\ny\" \"/cargo\" \"metadata\" \"--format-version\" \"1\" \"--manifest-path\" \"/sysroot/lib/rustlib/src/rust/library/Cargo.toml\" \"--filter-platform\" \"wasm\n32-wasip1-threads\" \"--locked\"`\n2026-11-27T08:14:10.180000Z ERROR `cargo metadata` failed on `/sysroot/lib/rustlib/src/rust/library/Cargo.toml` : Failed to run `cd \"/sysroo\nt/lib/rustlib/src/rust/library\" && RUSTUP_AUTO_INSTALL=\"0\" RUSTUP_TOOLCHAIN=\"/sysroot\" __CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS=\"nightl\ny\" \"/cargo\" \"metadata\" \"--format-version\" \"1\" \"--manifest-path\" \"/sysroot/lib/rustlib/src/rust/library/Cargo.toml\" \"--filter-platform\" \"wasm\n32-wasip1-threads\" \"--locked\"`\n",
+      "error": "Error: terminal must end at an empty absolute-directory shell prompt",
+      "snapshots": [],
+      "captureError": null
+    }
+  ],
+  "errors": [],
+  "releaseGatePassed": false,
+  "limitations": [
+    "No supported terminal/exit-status hook exists in __rubrcLspTest; successful command exitCode remains null.",
+    "DOM snapshots cover rendered viewport, not a lossless stdout/stderr stream; output channels are merged.",
+    "Freshness requires a larger whole-line marker count than pre-click; viewport rollover fails closed.",
+    "Stock manifest must be ensured by caller; existing hook cannot read the VFS manifest.",
+    "No published baseline identity or statistical non-regression conclusion is established."
+  ],
+  "environment": {
+    "url": "http://127.0.0.1:36311/",
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36",
+    "hardwareConcurrency": 4,
+    "crossOriginIsolated": true,
+    "timeOrigin": 1795767228904.68,
+    "runtime": {
+      "generation": "e25de1fe-45a0-49c1-b2be-66c587fea304",
+      "phase": "ready",
+      "operation": "idle",
+      "queuedTargets": [],
+      "selectedTarget": "wasm32-wasip1",
+      "completedTargets": [
+        "wasm32-wasip1"
+      ],
+      "reloadRequired": false,
+      "utilityWorkers": 1,
+      "lifecycleWorkers": 1,
+      "farmCallbacks": 1
+    }
+  },
+  "error": "Error: terminal must end at an empty absolute-directory shell prompt",
+  "finishedAt": "2026-11-27T08:14:38.126Z"
+}

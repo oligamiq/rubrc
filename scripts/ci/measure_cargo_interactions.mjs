@@ -175,6 +175,16 @@ export async function measureCargoInteractions(page, options = {}) {
         } else api.model.setValue(source);
       }, { source: workload.source, unchanged: index === 1, generation }), 'set Monaco workload');
       run.modelVersion = await bounded(page.evaluate(() => window.__rubrcLspTest.model.getVersionId()), 'read model version');
+      // Startup diagnostics may print after the original prompt. Submit only an
+      // empty shell line to obtain a fresh prompt before the timed Cargo click.
+      await bounded(page.focus('.xterm-helper-textarea'), 'focus terminal for empty prompt');
+      await bounded(page.keyboard.press('Enter'), 'empty shell line');
+      await bounded(page.waitForFunction(() => {
+        const rows = document.querySelector('.xterm .xterm-rows');
+        if (!rows) return false;
+        const last = [...rows.children].map(row => (row.textContent ?? '').replace(/\u00a0/g, ' ').trimEnd()).filter(s => s.trim()).at(-1);
+        return /^\/[^\r\n]* \$$/.test(last ?? '');
+      }, {timeout: setupTimeoutMs}), 'fresh shell prompt');
       const buttonHandle = await bounded(page.evaluateHandle(() => {
         const matches = [...document.querySelectorAll('button')].filter(button => button.textContent.trim() === 'Compile and Run');
         if (matches.length !== 1 || matches[0].disabled || !matches[0].getClientRects().length) throw new Error('public Compile and Run button unavailable');
