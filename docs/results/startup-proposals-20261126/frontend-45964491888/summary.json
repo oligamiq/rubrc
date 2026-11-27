@@ -1,0 +1,54 @@
+{
+  "status": "fail",
+  "sessions": [
+    {
+      "session": 0,
+      "mode": "off",
+      "browser": "Chrome/150.0.7871.24",
+      "editorVisits": [
+        {
+          "visit": "cold",
+          "endToEndMs": 51250.683536000004,
+          "under30s": false
+        },
+        {
+          "visit": "reload",
+          "endToEndMs": 46038.13707099999,
+          "under30s": false
+        }
+      ],
+      "cargoStatus": "fail",
+      "cargoError": "Error: initial-compile timed out waiting for fresh terminal marker + returned prompt + runtime run/idle",
+      "runs": [
+        {
+          "name": "initial-compile",
+          "status": "fail",
+          "elapsedMs": 180001.047032,
+          "exitCode": null,
+          "markerAtMs": null,
+          "commandDoneAtMs": null,
+          "assertions": {
+            "freshTerminalMarker": false,
+            "shellPromptAfterMarker": false,
+            "runtimeRunThenIdle": true,
+            "runtimeReadyAndIdle": true,
+            "sameGeneration": true,
+            "noObservedNonzeroExit": true,
+            "exitCodeObserved": false,
+            "exitCodeZero": false
+          },
+          "error": "Error: initial-compile timed out waiting for fresh terminal marker + returned prompt + runtime run/idle"
+        }
+      ]
+    }
+  ],
+  "allArmsObserved": false,
+  "allWorkloadsObserved": false,
+  "releaseAccepted": false,
+  "limits": [
+    "Failure elapsedMs is timeout/observation bound, not completed Cargo duration.",
+    "Runtime idle acknowledges dispatch, not guest completion.",
+    "No public deployed baseline match or explicit successful exit-status witness.",
+    "No statistical non-regression conclusion from these observations alone."
+  ]
+}

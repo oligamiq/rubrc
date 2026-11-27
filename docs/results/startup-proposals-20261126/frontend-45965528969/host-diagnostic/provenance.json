@@ -1,0 +1,42 @@
+{
+  "archiveSha": "73f6e129a06a25c3e818ac51a84100816c4fcec39b46a59e087a678927e17e64",
+  "build": {
+    "sourceSha": "ff3e160d74cf2be990d0b0b39d764b306833e6bd",
+    "analyzerSha": "07e8d30e340e504655ebace245a8df17f7f91fbf",
+    "wvlRevision": "77f45543eb976e4e7843e78fcd67bd837acac6bd",
+    "memoryLockMode": "waiter-aware",
+    "coreOptimizationRequested": "O3",
+    "coreOptimization": "O3",
+    "vfsMemoryTelemetry": 1,
+    "vfsInitialHeapBytes": 536870912,
+    "optimizationProfile": {
+      "name": "strong-compatible-v1",
+      "rust": {
+        "optLevel": 3,
+        "lto": "fat",
+        "codegenUnits": 1
+      },
+      "analyzerWasm": "O3",
+      "wvlStages": "O4-with-O3-for-try-table",
+      "finalCore": "O3",
+      "exceptionCeiling": "Binaryen-131-Flatten-does-not-support-TryTable",
+      "wvlSizeRollback": false,
+      "shellDebugLog": false,
+      "prebuiltGuests": "fixed-inputs-reoptimized-at-compatible-ceiling",
+      "unsafeOptimizationAssumptions": false
+    },
+    "optimizationEvidenceSha256": "17765696db0e9a37d2e3c4dc94024a1a5b515217c7a3a3bc8eb019982be0b359",
+    "memoryLockBatching": "on",
+    "memoryLockBatchingEvidenceSha256": "95afa2bde2b4feaab9979f6fc82c309faeb65ada9a0a363262008533321c6b4a"
+  },
+  "artifacts": {
+    "coreSha": "1448142480a5d35519f5eb7048e1a4b684cb94ae3bc31ad09ae6bb276a665d25",
+    "lspSha": "32e175b2b5ded343a87c6300345a7c04148637c4f950cf2f92f3e55d765a5e0e",
+    "cacheSha": "1fa993ba2e8257e688e5c1f3f9b2d7b97e9daa2d33304007885d37f20a0ccba3",
+    "guestInputs": {
+      "llvm": "49646790bd63caa399c7f0a3bb92a2b946e3c6a8d174ae4cedd063f27a84fc40",
+      "rustc": "c6dccf3e5f01631b942a0a008b9f2f5312987e7d8590f8c61024cd00687a5791",
+      "cargo": "6c2041141d23732e76b6241d53be379eb5c356837de775ca8d296c38fadccf4c"
+    }
+  }
+}

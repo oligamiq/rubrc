@@ -1,0 +1,6 @@
+import {readFile,writeFile} from 'node:fs/promises';
+const [input,output]=process.argv.slice(2);if(!output)throw Error('usage: summarize_cargo_pair result.json summary.json');
+const result=JSON.parse(await readFile(input,'utf8'));
+const sessions=result.sessions.map(s=>({session:s.i,mode:s.mode,browser:s.browser,editorVisits:s.visits.map(v=>({visit:v.visit,endToEndMs:v.endToEndMs,under30s:v.under30s})),cargoStatus:s.cargo?.status??'not-run',cargoError:s.cargo?.error,runs:(s.cargo?.runs??[]).map(r=>({name:r.name,status:r.status,elapsedMs:r.elapsedMs,exitCode:r.exitCode,markerAtMs:r.markerAtMs,commandDoneAtMs:r.commandDoneAtMs,assertions:r.assertions,error:r.error}))}));
+const summary={status:result.status,sessions,allArmsObserved:sessions.length===4&&sessions.every(s=>s.cargoStatus!=='not-run'),allWorkloadsObserved:sessions.length===4&&sessions.every(s=>s.runs.length===3&&s.runs.every(r=>r.status==='pass-observed-interaction')),releaseAccepted:false,limits:['Failure elapsedMs is timeout/observation bound, not completed Cargo duration.','Runtime idle acknowledges dispatch, not guest completion.','No public deployed baseline match or explicit successful exit-status witness.','No statistical non-regression conclusion from these observations alone.']};
+await writeFile(output,JSON.stringify(summary,null,2)+'\n');console.log(JSON.stringify(summary,null,2));

@@ -1,0 +1,30 @@
+[
+  {
+    "session": 0,
+    "mode": "off",
+    "lastGuestSnapshot": "[vfs-stall-trace] \r\n[vfs-debug] snapshot cargo=27 rustc=31 stdout_id=31 stdout_bytes=0 stdout_eof=false stderr_id=31 stderr_bytes=117 stderr_eof=false wait=cargo-main dropped_events=0 ra_boundary_dropped=0 lsp_pages=3919 thread_pool=trace-disabled\r\n",
+    "cargoError": "Error: initial-compile terminal observation timed out",
+    "terminalSnapshots": 1
+  },
+  {
+    "session": 1,
+    "mode": "on",
+    "lastGuestSnapshot": "[vfs-stall-trace] \r\n[vfs-debug] snapshot cargo=27 rustc=31 stdout_id=31 stdout_bytes=0 stdout_eof=false stderr_id=31 stderr_bytes=117 stderr_eof=false wait=cargo-main dropped_events=0 ra_boundary_dropped=0 lsp_pages=3916 thread_pool=trace-disabled\r\n",
+    "cargoError": "Error: initial-compile terminal observation timed out",
+    "terminalSnapshots": 1
+  },
+  {
+    "session": 2,
+    "mode": "on",
+    "lastGuestSnapshot": "[vfs-stall-trace] \r\n[vfs-debug] snapshot cargo=27 rustc=31 stdout_id=31 stdout_bytes=0 stdout_eof=false stderr_id=31 stderr_bytes=117 stderr_eof=false wait=cargo-main dropped_events=0 ra_boundary_dropped=0 lsp_pages=3917 thread_pool=trace-disabled\r\n",
+    "cargoError": "Error: initial-compile timed out waiting for fresh terminal marker + returned prompt + runtime run/idle",
+    "terminalSnapshots": 1
+  },
+  {
+    "session": 3,
+    "mode": "off",
+    "lastGuestSnapshot": "[vfs-stall-trace] \r\n[vfs-debug] snapshot cargo=27 rustc=31 stdout_id=31 stdout_bytes=0 stdout_eof=false stderr_id=31 stderr_bytes=117 stderr_eof=false wait=cargo-main dropped_events=0 ra_boundary_dropped=0 lsp_pages=3919 thread_pool=trace-disabled\r\n",
+    "cargoError": "Error: initial-compile terminal observation timed out",
+    "terminalSnapshots": 1
+  }
+]

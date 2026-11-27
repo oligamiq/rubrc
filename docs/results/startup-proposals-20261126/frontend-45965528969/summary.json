@@ -1,0 +1,174 @@
+{
+  "status": "fail",
+  "sessions": [
+    {
+      "session": 0,
+      "mode": "off",
+      "browser": "Chrome/150.0.7871.24",
+      "editorVisits": [
+        {
+          "visit": "cold",
+          "endToEndMs": 53923.041020000004,
+          "under30s": false
+        },
+        {
+          "visit": "reload",
+          "endToEndMs": 46213.51176,
+          "under30s": false
+        }
+      ],
+      "cargoStatus": "fail",
+      "cargoError": "Error: initial-compile terminal observation timed out",
+      "runs": [
+        {
+          "name": "initial-compile",
+          "status": "fail",
+          "elapsedMs": 179918.364193,
+          "exitCode": null,
+          "markerAtMs": null,
+          "commandDoneAtMs": null,
+          "assertions": {
+            "freshTerminalMarker": false,
+            "shellPromptAfterMarker": false,
+            "runtimeRunThenIdle": true,
+            "runtimeReadyAndIdle": true,
+            "sameGeneration": true,
+            "noObservedNonzeroExit": true,
+            "exitCodeObserved": false,
+            "exitCodeZero": false
+          },
+          "error": "Error: initial-compile terminal observation timed out"
+        }
+      ]
+    },
+    {
+      "session": 1,
+      "mode": "on",
+      "browser": "Chrome/150.0.7871.24",
+      "editorVisits": [
+        {
+          "visit": "cold",
+          "endToEndMs": 45833.64266199997,
+          "under30s": false
+        },
+        {
+          "visit": "reload",
+          "endToEndMs": 45884.22910200001,
+          "under30s": false
+        }
+      ],
+      "cargoStatus": "fail",
+      "cargoError": "Error: initial-compile terminal observation timed out",
+      "runs": [
+        {
+          "name": "initial-compile",
+          "status": "fail",
+          "elapsedMs": 179959.883194,
+          "exitCode": null,
+          "markerAtMs": null,
+          "commandDoneAtMs": null,
+          "assertions": {
+            "freshTerminalMarker": false,
+            "shellPromptAfterMarker": false,
+            "runtimeRunThenIdle": true,
+            "runtimeReadyAndIdle": true,
+            "sameGeneration": true,
+            "noObservedNonzeroExit": true,
+            "exitCodeObserved": false,
+            "exitCodeZero": false
+          },
+          "error": "Error: initial-compile terminal observation timed out"
+        }
+      ]
+    },
+    {
+      "session": 2,
+      "mode": "on",
+      "browser": "Chrome/150.0.7871.24",
+      "editorVisits": [
+        {
+          "visit": "cold",
+          "endToEndMs": 45095.73502000002,
+          "under30s": false
+        },
+        {
+          "visit": "reload",
+          "endToEndMs": 48038.96659800003,
+          "under30s": false
+        }
+      ],
+      "cargoStatus": "fail",
+      "cargoError": "Error: initial-compile timed out waiting for fresh terminal marker + returned prompt + runtime run/idle",
+      "runs": [
+        {
+          "name": "initial-compile",
+          "status": "fail",
+          "elapsedMs": 180000.71108100004,
+          "exitCode": null,
+          "markerAtMs": null,
+          "commandDoneAtMs": null,
+          "assertions": {
+            "freshTerminalMarker": false,
+            "shellPromptAfterMarker": false,
+            "runtimeRunThenIdle": true,
+            "runtimeReadyAndIdle": true,
+            "sameGeneration": true,
+            "noObservedNonzeroExit": true,
+            "exitCodeObserved": false,
+            "exitCodeZero": false
+          },
+          "error": "Error: initial-compile timed out waiting for fresh terminal marker + returned prompt + runtime run/idle"
+        }
+      ]
+    },
+    {
+      "session": 3,
+      "mode": "off",
+      "browser": "Chrome/150.0.7871.24",
+      "editorVisits": [
+        {
+          "visit": "cold",
+          "endToEndMs": 47017.84297800006,
+          "under30s": false
+        },
+        {
+          "visit": "reload",
+          "endToEndMs": 46352.02223900007,
+          "under30s": false
+        }
+      ],
+      "cargoStatus": "fail",
+      "cargoError": "Error: initial-compile terminal observation timed out",
+      "runs": [
+        {
+          "name": "initial-compile",
+          "status": "fail",
+          "elapsedMs": 179969.14908300003,
+          "exitCode": null,
+          "markerAtMs": null,
+          "commandDoneAtMs": null,
+          "assertions": {
+            "freshTerminalMarker": false,
+            "shellPromptAfterMarker": false,
+            "runtimeRunThenIdle": true,
+            "runtimeReadyAndIdle": true,
+            "sameGeneration": true,
+            "noObservedNonzeroExit": true,
+            "exitCodeObserved": false,
+            "exitCodeZero": false
+          },
+          "error": "Error: initial-compile terminal observation timed out"
+        }
+      ]
+    }
+  ],
+  "allArmsObserved": true,
+  "allWorkloadsObserved": false,
+  "releaseAccepted": false,
+  "limits": [
+    "Failure elapsedMs is timeout/observation bound, not completed Cargo duration.",
+    "Runtime idle acknowledges dispatch, not guest completion.",
+    "No public deployed baseline match or explicit successful exit-status witness.",
+    "No statistical non-regression conclusion from these observations alone."
+  ]
+}

@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "status": "fail",
+  "startedAt": "2026-11-27T08:37:19.052Z",
+  "metadata": {
+    "mode": "on",
+    "session": 2,
+    "baseline": "experimental frontend-off; NOT deployed version"
+  },
+  "configuration": {
+    "token": "5ec81c0b0b5a",
+    "timeoutMs": 180000,
+    "setupTimeoutMs": 15000,
+    "pollMs": 100,
+    "target": "wasm32-wasip1",
+    "stockManifest": "[package]\nname = \"main\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
+  },
+  "scope": "Same-loaded-page public Compile and Run; terminal DOM + shell prompt; NOT an exit-status or release gate",
+  "work": {
+    "base": {
+      "source": "fn main() {\n    let mut total = 0_u64;\n    for value in 1_u64..=100 {\n        total = total.checked_add(value.checked_mul(value).unwrap()).unwrap();\n    }\n    assert_eq!(total, 338350);\n    println!(\"CARGO_5ec81c0b0b5a_BASE_338350\");\n}\n",
+      "marker": "CARGO_5ec81c0b0b5a_BASE_338350",
+      "expected": 338350,
+      "limit": 100,
+      "sha256": "ea318039fbeecc52c2c21752d19c9505661eb8dca1d5b8fa15da67cd8f5e09d9"
+    },
+    "edit": {
+      "source": "fn main() {\n    let mut total = 0_u64;\n    for value in 1_u64..=101 {\n        total = total.checked_add(value.checked_mul(value).unwrap()).unwrap();\n    }\n    assert_eq!(total, 348551);\n    println!(\"CARGO_5ec81c0b0b5a_EDIT_348551\");\n}\n",
+      "marker": "CARGO_5ec81c0b0b5a_EDIT_348551",
+      "expected": 348551,
+      "limit": 101,
+      "sha256": "0d3b1d23c32d6ec89580da3be94e13df33e389c11e286e387f539a25587b0f2c"
+    }
+  },
+  "runs": [
+    {
+      "index": 0,
+      "name": "initial-compile",
+      "marker": "CARGO_5ec81c0b0b5a_BASE_338350",
+      "sourceSha256": "ea318039fbeecc52c2c21752d19c9505661eb8dca1d5b8fa15da67cd8f5e09d9",
+      "status": "fail",
+      "exitCode": null,
+      "modelVersion": 74,
+      "historyOffset": 8,
+      "baseline": ".\n├── Cargo.toml\n├── rust-project.json\n├── src\n│   └── main.rs\n└── sysroot\n\n2 directories, 3 files\nseq | grep 2 | head -n5\n2\n12\n20\n21\n22\n/ $ Loading Rust source...\nLoaded 1684 files (37.3 MB total) - Speed: 66.9 MB/s\nRust source loaded successfully (1684 files, 37.3 MB total) in 0.6s.\nLoading sysroot: wasm32-wasip1 ...\nLoaded 30 files (70.6 MB total) - Speed: 8.4 MB/s\nSysroot 'wasm32-wasip1' loaded successfully (30 files, 70.6 MB total) in 8.4s.\n2026-11-27T08:36:50.319000Z ERROR `cargo metadata` failed on `/sysroot/lib/rustlib/src/rust/library/Cargo.toml` : Failed to run `cd \"/sysroo\nt/lib/rustlib/src/rust/library\" && RUSTUP_AUTO_INSTALL=\"0\" RUSTUP_TOOLCHAIN=\"/sysroot\" __CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS=\"nightl\ny\" \"/cargo\" \"metadata\" \"--format-version\" \"1\" \"--manifest-path\" \"/sysroot/lib/rustlib/src/rust/library/Cargo.toml\" \"--filter-platform\" \"wasm\n32-wasip1-threads\" \"--locked\"`\n2026-11-27T08:36:51.979000Z ERROR `cargo metadata` failed on `/sysroot/lib/rustlib/src/rust/library/Cargo.toml` : Failed to run `cd \"/sysroo\nt/lib/rustlib/src/rust/library\" && RUSTUP_AUTO_INSTALL=\"0\" RUSTUP_TOOLCHAIN=\"/sysroot\" __CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS=\"nightl\ny\" \"/cargo\" \"metadata\" \"--format-version\" \"1\" \"--manifest-path\" \"/sysroot/lib/rustlib/src/rust/library/Cargo.toml\" \"--filter-platform\" \"wasm\n32-wasip1-threads\" \"--locked\"`\n\n/ $",
+      "prompt": "/ $",
+      "domTimestampOrigin": "observer installation before public button click",
+      "snapshots": [
+        {
+          "atMs": 41.68000000005122,
+          "text": "├── Cargo.toml\n├── rust-project.json\n├── src\n│   └── main.rs\n└── sysroot\n\n2 directories, 3 files\nseq | grep 2 | head -n5\n2\n12\n20\n21\n22\n/ $ Loading Rust source...\nLoaded 1684 files (37.3 MB total) - Speed: 66.9 MB/s\nRust source loaded successfully (1684 files, 37.3 MB total) in 0.6s.\nLoading sysroot: wasm32-wasip1 ...\nLoaded 30 files (70.6 MB total) - Speed: 8.4 MB/s\nSysroot 'wasm32-wasip1' loaded successfully (30 files, 70.6 MB total) in 8.4s.\n2026-11-27T08:36:50.319000Z ERROR `cargo metadata` failed on `/sysroot/lib/rustlib/src/rust/library/Cargo.toml` : Failed to run `cd \"/sysroo\nt/lib/rustlib/src/rust/library\" && RUSTUP_AUTO_INSTALL=\"0\" RUSTUP_TOOLCHAIN=\"/sysroot\" __CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS=\"nightl\ny\" \"/cargo\" \"metadata\" \"--format-version\" \"1\" \"--manifest-path\" \"/sysroot/lib/rustlib/src/rust/library/Cargo.toml\" \"--filter-platform\" \"wasm\n32-wasip1-threads\" \"--locked\"`\n2026-11-27T08:36:51.979000Z ERROR `cargo metadata` failed on `/sysroot/lib/rustlib/src/rust/library/Cargo.toml` : Failed to run `cd \"/sysroo\nt/lib/rustlib/src/rust/library\" && RUSTUP_AUTO_INSTALL=\"0\" RUSTUP_TOOLCHAIN=\"/sysroot\" __CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS=\"nightl\ny\" \"/cargo\" \"metadata\" \"--format-version\" \"1\" \"--manifest-path\" \"/sysroot/lib/rustlib/src/rust/library/Cargo.toml\" \"--filter-platform\" \"wasm\n32-wasip1-threads\" \"--locked\"`\n\n/ $ cargo run --target wasm32-wasip1\n"
+        }
+      ],
+      "captureError": null,
+      "runtime": {
+        "generation": "176b0966-d213-444b-b8b8-0e75c144c169",
+        "phase": "ready",
+        "operation": "idle",
+        "queuedTargets": [],
+        "selectedTarget": "wasm32-wasip1",
+        "completedTargets": [
+          "wasm32-wasip1"
+        ],
+        "reloadRequired": false,
+        "utilityWorkers": 1,
+        "lifecycleWorkers": 1,
+        "farmCallbacks": 1
+      },
+      "history": [
+        {
+          "generation": "176b0966-d213-444b-b8b8-0e75c144c169",
+          "phase": "ready",
+          "operation": "run",
+          "queuedTargets": [],
+          "selectedTarget": "wasm32-wasip1",
+          "completedTargets": [
+            "wasm32-wasip1"
+          ],
+          "reloadRequired": false,
+          "utilityWorkers": 1,
+          "lifecycleWorkers": 1,
+          "farmCallbacks": 1
+        },
+        {
+          "generation": "176b0966-d213-444b-b8b8-0e75c144c169",
+          "phase": "ready",
+          "operation": "idle",
+          "queuedTargets": [],
+          "selectedTarget": "wasm32-wasip1",
+          "completedTargets": [
+            "wasm32-wasip1"
+          ],
+          "reloadRequired": false,
+          "utilityWorkers": 1,
+          "lifecycleWorkers": 1,
+          "farmCallbacks": 1
+        }
+      ],
+      "sourceUnchanged": true,
+      "samePage": true,
+      "sameTarget": true,
+      "baselineCount": 0,
+      "markerAtMs": null,
+      "commandDoneAtMs": null,
+      "terminalFailure": null,
+      "assertions": {
+        "freshTerminalMarker": false,
+        "shellPromptAfterMarker": false,
+        "runtimeRunThenIdle": true,
+        "runtimeReadyAndIdle": true,
+        "sameGeneration": true,
+        "noObservedNonzeroExit": true,
+        "exitCodeObserved": false,
+        "exitCodeZero": false
+      },
+      "interactionPassed": false,
+      "releaseGatePassed": false,
+      "elapsedMs": 180000.71108100004,
+      "error": "Error: initial-compile timed out waiting for fresh terminal marker + returned prompt + runtime run/idle"
+    }
+  ],
+  "errors": [],
+  "releaseGatePassed": false,
+  "limitations": [
+    "No supported terminal/exit-status hook exists in __rubrcLspTest; successful command exitCode remains null.",
+    "DOM snapshots cover rendered viewport, not a lossless stdout/stderr stream; output channels are merged.",
+    "Freshness requires a larger whole-line marker count than pre-click; viewport rollover fails closed.",
+    "Stock manifest must be ensured by caller; existing hook cannot read the VFS manifest.",
+    "No published baseline identity or statistical non-regression conclusion is established."
+  ],
+  "environment": {
+    "url": "http://127.0.0.1:39695/",
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36",
+    "hardwareConcurrency": 4,
+    "crossOriginIsolated": true,
+    "timeOrigin": 1795768590937.13,
+    "runtime": {
+      "generation": "176b0966-d213-444b-b8b8-0e75c144c169",
+      "phase": "ready",
+      "operation": "idle",
+      "queuedTargets": [],
+      "selectedTarget": "wasm32-wasip1",
+      "completedTargets": [
+        "wasm32-wasip1"
+      ],
+      "reloadRequired": false,
+      "utilityWorkers": 1,
+      "lifecycleWorkers": 1,
+      "farmCallbacks": 1
+    }
+  },
+  "error": "Error: initial-compile timed out waiting for fresh terminal marker + returned prompt + runtime run/idle",
+  "finishedAt": "2026-11-27T08:40:19.141Z"
+}
